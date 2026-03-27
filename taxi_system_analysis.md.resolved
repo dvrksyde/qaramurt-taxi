@@ -1,0 +1,507 @@
+# Taxomet Taxi Management System — Comprehensive Analysis
+*Based on live demo at `https://demo.taxomet.ru/` — verified step-by-step from real screenshots*
+
+---
+
+## 1. System Architecture & Modules
+
+The system is a server-rendered SPA dispatcher dashboard. It consists of two navigation layers:
+
+### Top Navigation Bar (always visible)
+| Label | Description |
+|---|---|
+| **Монитор** | Real-time order dispatch console — the main work area |
+| **Операторы (1)** | Operator/admin user management. Number = active count |
+| **Водители (0)** | Driver registry with live status. Number = online count |
+| **Автомобили** | Full vehicle fleet catalog |
+| **Допуски (0)** | Document verification queue for drivers/vehicles |
+| **Журнал заказов** | Full historical order database with advanced filtering |
+| **Звонки** | Telephony log with call recordings/SIP integration |
+
+### Sidebar (≡ hamburger icon, top-left) — Two Sections
+
+**Справочники (Directories/Configuration):**
+| Item | Purpose |
+|---|---|
+| Классы автомобилей | Vehicle class groups (Economy, Business, Minivan, etc.) |
+| Опции автомобилей | Extra options (child seat, pet, cargo) |
+| Тарифы для водителей | Commission/fixed tariff rules per driver |
+| Безлимиты для водителей | Unlimited shift packages for drivers |
+| Услуги для водителей | Additional driver services |
+| Службы такси и тарифы | Core taxi service config with client-facing tariffs |
+| Геозоны / Границы | Polygon geographic zone editor |
+| Трансферы (сетки тариф.) | Fixed-price transfer grids |
+| Цены в геозонах | Price overrides per geozone |
+| Очереди (стоянки) | Driver queue/parking spot management |
+
+**Настройки (Settings):**
+| Item | Purpose |
+|---|---|
+| Общие настройки | Global system settings (timezone, IPs, distribution logic) |
+| Настройки телефонии | SIP/PBX configuration |
+| Настройки допусков | Document review settings |
+| Загрузка карт (старые) | Legacy map tile importer |
+| Редактор карт | Interactive custom map editor |
+| Платежные системы | Payment gateway integrations |
+| Он-лайн кассы (54-ФЗ) | Russian online fiscal cash register compliance |
+| Настройки обменника | Order exchange/partner network settings |
+| Настройки рейтингов | Driver/client rating algorithm settings |
+| Регистрация водителей | Driver self-registration portal settings |
+| Шаблоны договоров | Contract templates for drivers |
+| Обновление ПО | Software/firmware update manager |
+
+**Финансы (Financial — also in sidebar):**
+| Item | Purpose |
+|---|---|
+| Клиенты | Client CRM: phone, order history, bonuses |
+| Черные списки | Blacklist management (phone-based bans) |
+| Цены на топливо | Fuel cost tracking for expense reporting |
+| Журнал смен | Driver shift journal |
+| Касса | Operator cash flow: balances, payouts, deposits |
+| Отчет по эквайрингу | Online payment acquiring report |
+| Безналичные расчеты | Corporate/cashless settlement reports |
+| Контроль | Operational control dashboard |
+
+---
+
+## 2. Monitor Module — Deep Dive
+
+The Monitor is the primary real-time workspace.
+
+![Monitor Map Tab](file:///C:/Users/user/.gemini/antigravity/brain/b15b8215-d5af-4543-a47f-a9a943008a8c/artifacts/monitor_map.png)
+
+### Monitor Sub-tabs (verified from live UI):
+| Tab | Label | Description |
+|---|---|---|
+| 1 | **Текущие заказы (0)** | Live table of active orders. Count shown. |
+| 2 | **Предварительные (0)** | Scheduled/future orders. Count shown. |
+| 3 | **Обменник (0)** | Order exchange marketplace with partner services. |
+| 4 | **Карта** | Full-screen OpenStreetMap with live driver pins. |
+| 5 | **Чат (0)** | Dispatcher-to-driver messaging. Count = unread. |
+| 6 | **Системное (0)** | System/event log feed. |
+| 7 | **Тревоги (0)** | Emergency alerts / panic button events from drivers. |
+
+### Map Controls (Карта sub-tab):
+- **+/−** zoom buttons (top-left of map)
+- **☑ Группировать водителей** — checkbox to cluster driver markers
+- **Имена** — button to toggle name labels on driver markers
+- **OpenStreetMap** tiles (© OpenStreetMap contributors)
+- Status bar: "Входящая линия: ошибка (Offline)" — SIP line status
+- **Очередь:** field showing dispatcher queue status
+
+### Status Bar (always visible, top of page):
+- **Общ. касса: 0 руб.** — Total cash balance
+- **ПО: 100 руб.** — Advance payment
+- **ONLINE** (green) — System connection status
+
+### New Order Button:
+- `+ Новый заказ (Alt+F1)` — primary action button (yellow/orange)
+
+---
+
+## 3. Order Creation — Full Field Inventory
+
+![New Order Form](file:///C:/Users/user/.gemini/antigravity/brain/b15b8215-d5af-4543-a47f-a9a943008a8c/artifacts/new_order_form.png)
+
+Window title: **"Новый заказ"**
+
+| Field | Label | Notes |
+|---|---|---|
+| Phone | **Звонок с:** | Pre-filled with `+7`. Inbound call auto-fills this. |
+| Service | **на:** | Dropdown: e.g., `QaramurtTaxi` |
+| Name | **Имя:** | Client name (yellow highlight = required) |
+| Timing | **Когда:** | Radio: `● сейчас` (now) / `○ отложенный` (later/scheduled) |
+| Pickup | **Откуда:** | Free text with map pin integration |
+| Dropoff | **Куда:** | Free text with map pin |
+| Extra stop | **+ добавить заезд** | Add intermediate stop |
+| Comment | **Комментарий:** | Free text area |
+| Distance | **Расстояние:** | Auto-calculated, shows `?` until addresses entered |
+| Class | **Класс:** | Dropdown: `Любой` (any) or specific class |
+| Tariff | **Тариф:** | Dropdown — linked to selected class |
+| Cashless | **Безнал (?):** | Dropdown: `<< Не задан >>` or org account |
+| Bonuses | **Бонусы (?):** | Checkbox: `доступно ?` |
+| Price | **Стоимость (?):** | Manual field; **Предварительно:** pre-calculated estimate |
+| Lock price | **<< зафиксировать** | Locks the displayed price |
+| Receipt | **Печатать чек** | Checkbox for fiscal receipt printing |
+| Options panel | **Опции:** | Right side — vehicle option checkboxes |
+| Availability | **Доступно автомобилей:** | Shows Всего / На линии / Свободные counts |
+
+### Distribution Methods (Метод распределения заказа):
+| Label | Behavior |
+|---|---|
+| `автоматически` | System picks optimally (disabled in demo = grayed) |
+| `показать всем водителям сразу` | Broadcast to all free drivers simultaneously |
+| `показать всем водителям по очереди` | Sequential offering by distance/priority |
+| `выбрать водителя по карте` | Dispatcher manually picks from live map |
+| `выбрать водителя по списку` | Dispatcher picks from a sorted table |
+
+**Action buttons:** `Создать заявку (Ctrl+Enter)` | `Закрыть (Esc)`
+
+---
+
+## 4. Order Lifecycle Workflow
+
+```
+[Входящий звонок / Новый заказ]
+         ↓
+[Ввод адреса + класса + тарифа]
+         ↓
+[Выбор метода распределения]
+         ↓
+[Ожидание принятия водителем] → Статус: Ожидает
+         ↓
+[Водитель принял] → Статус: Назначен
+         ↓
+[Водитель прибыл на место] → Статус: На месте
+         ↓
+[Поездка начата] → Статус: Везёт
+         ↓
+[Поездка завершена] → Статус: Завершён
+         ↓
+[Оплата] → Наличные / Безнал / Бонусы
+         ↓
+[Запись в Журнал заказов + расчёт с водителем в Кассе]
+```
+
+| Status | Description |
+|---|---|
+| Ожидает | Order created, awaiting driver |
+| Назначен | Driver accepted |
+| На месте / Едет | Driver arrived at pickup |
+| Везёт | Trip in progress |
+| Завершён | Trip completed |
+| Отменён | Canceled (by operator, driver, or client) |
+
+---
+
+## 5. Driver Management Module
+
+![Add Driver Form](file:///C:/Users/user/.gemini/antigravity/brain/b15b8215-d5af-4543-a47f-a9a943008a8c/artifacts/add_driver_form.png)
+
+### Водители page — list columns:
+`ID | Очередь | Логин | [Name] | [Car] | [Color] | Действия`
+
+Status legend (shown above the table):
+- 🟢 `свободен` — Free, GPS active
+- 🟡 `свободен (GPS не...)` — Free, GPS issue
+- 🔴 `отключен или нет интернета` — Offline/no internet
+
+Additional controls:
+- `+ Добавить группу` — Driver group management
+- `Программа водителя (Android)` — Link to download driver app
+- `Экспорт в CSV` — Export driver list
+- Search field (top right)
+
+### "New Driver" form — tabs and fields:
+**Tabs:** `Основное :: Документы :: Рейтинг :: Лог раздачи заказов`
+
+**Основное (Main) tab fields:**
+| Field | Description |
+|---|---|
+| Группа | Driver group dropdown |
+| Позывной | Call sign / short ID |
+| Фамилия / Имя / Отчество | Last / First / Middle name |
+| Моб. телефон | Mobile phone `+7...` |
+| Сгенерировать логин и пароль | Checkbox — auto-generate credentials |
+| Логин | Login for driver app |
+| Задайте пароль / Еще раз пароль | Password fields |
+| App invite | Buttons: Viber / WhatsApp / SMS — send app download link |
+| Автомобили | Table: Сейчас / г/н / Марка / Модель / Цвет |
+
+**Тарифы (right column):**
+| Field | Description |
+|---|---|
+| Группа сдельных тарифов | Commission tariff group assignment |
+| Группа безлимитных тарифов / покупки выхода на смену | Unlimited tariff group |
+| Доп. услуги | Additional services group |
+| Макс. кредит | Max credit limit (0 руб.) |
+| Комментарий | Notes field |
+
+---
+
+## 6. Vehicle Management Module
+
+### Автомобили table columns:
+`[г/н (plate)] | Марка | Модель | Цвет | Собственность | Водитель | Службы такси | Классы | Опции | [Actions]`
+
+Example record visible: driver = `Демо Демобек`, class = `Легковые / Бизнес`, color = `серый`
+Action icons: ✏️ Edit | ✕ Delete
+
+---
+
+## 7. Settings & Directories — Deep Dive
+
+![Sidebar Full Menu](file:///C:/Users/user/.gemini/antigravity/brain/b15b8215-d5af-4543-a47f-a9a943008a8c/artifacts/sidebar_full.png)
+![Vehicle Classes](file:///C:/Users/user/.gemini/antigravity/brain/b15b8215-d5af-4543-a47f-a9a943008a8c/artifacts/vehicle_classes.png)
+
+### Классы автомобилей
+Groups class hierarchy:
+- **Легковые** group: Эконом, Комфорт, Бизнес, VIP, Минивэн
+- **Грузовые** group: до 300 кг, Газель, Грузовик
+- Action: `+ добавить группу классов`
+
+### Службы такси и тарифы
+![Sidebar showing Службы highlighted](file:///C:/Users/user/.gemini/antigravity/brain/b15b8215-d5af-4543-a47f-a9a943008a8c/artifacts/taxi_tariffs_sidebar.png)
+Each "Taxi Service" defines: Name, Driver Groups, Settlement area (Нас. пункт), Priority, Auto-selection type, and client pricing rules.
+
+### Касса (Billing)
+![Billing Module](file:///C:/Users/user/.gemini/antigravity/brain/b15b8215-d5af-4543-a47f-a9a943008a8c/artifacts/billing_cash.png)
+
+Filters: **Период с/по** | **Оператор** dropdown | Checkbox "отображать только строки имеющие не нулевые значения"
+
+Table columns:
+| Column | Sub-columns |
+|---|---|
+| **Оператор-кассир** | Name of operator |
+| **Начальный остаток** | Долг такси / Долг оператора (касса оператора) |
+| **Оборот** | Выплаты / Пополнения |
+| **Конечный остаток** | Долг такси / Долг оператора |
+
+### Телефонные звонки (Telephony)
+![Telephony Module](file:///C:/Users/user/.gemini/antigravity/brain/b15b8215-d5af-4543-a47f-a9a943008a8c/artifacts/telephony.png)
+
+Filters: Период с/по | Телефон | **Тип звонка** (Любой) | **Ответил** (Любой) | **Статус** (Любой) | **Оператор** (любой оператор) | **Служба**
+
+---
+
+## 8. UX/UI Evaluation
+
+| Aspect | Details |
+|---|---|
+| **Layout** | Three-zone: Top nav bar / Sub-tab row / Content area |
+| **Real-time display** | Live counters in all Monitor tabs (e.g., `Текущие заказы (0)`) |
+| **Color coding** | 🟢 Free · 🟡 On order · 🔴 Offline driver status icons |
+| **Keyboard-first** | Alt+F1 (new order), Ctrl+Enter (submit), Esc (close) |
+| **Map** | OpenStreetMap, full-tab view, driver clustering toggle, name labels |
+| **In-form map** | New Order form embeds a live mini-map for address validation |
+| **Status bar** | Persistent header shows: logged-in user, cash balance, SIP status, ONLINE indicator |
+| **Density** | High-density ERP style — no whitespace wasted, max information per screen |
+| **Responsiveness** | Designed for 1:1 desktop; not mobile-optimized |
+
+---
+
+## 9. Primary Data Entities
+
+| Entity | Key Fields |
+|---|---|
+| **Order** (Заказ) | `id`, `phone`, `service_id`, `driver_id`, `operator_id`, `pickup_address`, `dropoff_address`, `stops[]`, `distance`, `class_id`, `tariff_id`, `cashless_account_id`, `use_bonuses`, `price`, `status`, `created_at`, `scheduled_at`, `completed_at`, `comment`, `printed_receipt` |
+| **Driver** (Водитель) | `id`, `group_id`, `callsign`, `last_name`, `first_name`, `middle_name`, `phone`, `login`, `password_hash`, `tariff_group_id`, `unlimited_tariff_group_id`, `max_credit`, `comment`, `status` (free/busy/offline), `current_coords`, `device_id` |
+| **Vehicle** (Автомобиль) | `id`, `plate`, `make`, `model`, `color`, `ownership_type` (driver/company), `driver_id`, `taxi_service_ids[]`, `class_ids[]`, `option_ids[]` |
+| **VehicleClass** | `id`, `group_id`, `name` (Эконом/Комфорт/Бизнес/VIP/Минивэн...) |
+| **VehicleOption** | `id`, `name` (детское кресло, перевозка животных, etc.), `price_modifier` |
+| **TaxiService** | `id`, `name`, `driver_group_ids[]`, `settlement`, `priority`, `auto_selection_type`, `client_tariff_config` |
+| **DriverTariff** | `id`, `name`, `type` (commission/fixed), `value`, `schedule`, `priority`, `active` |
+| **Tariff** (client-facing) | `id`, `service_id`, `class_id`, `base_price`, `price_per_km`, `price_per_min`, `min_price`, `free_wait_min`, `extra_wait_price` |
+| **Geozone** | `id`, `name`, `polygon_coords[]`, `type` (city boundary / service zone) |
+| **GeozonePricing** | `geozone_from_id`, `geozone_to_id`, `tariff_id`, `price_override` |
+| **Queue** | `id`, `name`, `location_point`, `radius`, `driver_ids[]` |
+| **Operator** | `id`, `login`, `name`, `role`, `cash_balance`, `advance_balance`, `active` |
+| **Client** | `id`, `phone`, `name`, `bonus_balance`, `order_history[]`, `blacklisted` |
+| **CallLog** | `id`, `timestamp`, `phone_from`, `phone_to`, `type` (inbound/outbound), `operator_id`, `service_id`, `duration_total`, `duration_wait`, `duration_talk`, `status` |
+| **CashTransaction** | `id`, `operator_id`, `type` (payout/deposit), `amount`, `timestamp`, `linked_order_id` |
+
+---
+
+## 10. Technical Recommendations
+
+### Database Schema (PostgreSQL + PostGIS)
+
+```sql
+-- Core tables
+CREATE TABLE taxi_services (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  priority INT DEFAULT 0,
+  settlement VARCHAR(100),
+  auto_selection_type VARCHAR(50) -- 'nearest', 'priority', 'queue'
+);
+
+CREATE TABLE vehicle_class_groups (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(100) -- 'Легковые', 'Грузовые', or '' for hidden
+);
+
+CREATE TABLE vehicle_classes (
+  id SERIAL PRIMARY KEY,
+  group_id INT REFERENCES vehicle_class_groups(id),
+  name VARCHAR(100) NOT NULL -- 'Эконом', 'Комфорт', 'VIP'...
+);
+
+CREATE TABLE tariffs (
+  id SERIAL PRIMARY KEY,
+  service_id INT REFERENCES taxi_services(id),
+  class_id INT REFERENCES vehicle_classes(id),
+  base_price NUMERIC(10,2) NOT NULL,
+  price_per_km NUMERIC(10,4),
+  price_per_min NUMERIC(10,4),
+  min_price NUMERIC(10,2),
+  free_wait_minutes INT DEFAULT 5,
+  extra_wait_price NUMERIC(10,4)
+);
+
+CREATE EXTENSION IF NOT EXISTS postgis;
+
+CREATE TABLE geozones (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(100),
+  type VARCHAR(50), -- 'boundary', 'zone'
+  polygon GEOMETRY(POLYGON, 4326) NOT NULL
+);
+CREATE INDEX geozones_geo_idx ON geozones USING GIST(polygon);
+
+CREATE TABLE geozone_prices (
+  id SERIAL PRIMARY KEY,
+  tariff_id INT REFERENCES tariffs(id),
+  geozone_from_id INT REFERENCES geozones(id),
+  geozone_to_id INT REFERENCES geozones(id),
+  price_override NUMERIC(10,2)
+);
+
+CREATE TABLE drivers (
+  id SERIAL PRIMARY KEY,
+  group_id INT,
+  callsign VARCHAR(20),
+  last_name VARCHAR(100),
+  first_name VARCHAR(100),
+  middle_name VARCHAR(100),
+  phone VARCHAR(20) UNIQUE,
+  login VARCHAR(50) UNIQUE,
+  password_hash VARCHAR(255),
+  tariff_group_id INT,
+  max_credit NUMERIC(10,2) DEFAULT 0,
+  status VARCHAR(20) DEFAULT 'offline', -- 'free', 'busy', 'offline'
+  current_location GEOMETRY(POINT, 4326),
+  device_id VARCHAR(100)
+);
+CREATE INDEX drivers_location_idx ON drivers USING GIST(current_location);
+
+CREATE TABLE vehicles (
+  id SERIAL PRIMARY KEY,
+  plate VARCHAR(20) UNIQUE,
+  make VARCHAR(100),
+  model VARCHAR(100),
+  color VARCHAR(50),
+  ownership_type VARCHAR(20), -- 'driver', 'company'
+  driver_id INT REFERENCES drivers(id)
+);
+
+CREATE TABLE orders (
+  id SERIAL PRIMARY KEY,
+  phone VARCHAR(20),
+  client_id INT,
+  service_id INT REFERENCES taxi_services(id),
+  driver_id INT REFERENCES drivers(id),
+  operator_id INT,
+  vehicle_id INT,
+  tariff_id INT REFERENCES tariffs(id),
+  pickup_address TEXT,
+  pickup_point GEOMETRY(POINT, 4326),
+  dropoff_address TEXT,
+  dropoff_point GEOMETRY(POINT, 4326),
+  stops JSONB DEFAULT '[]',
+  distance_km NUMERIC(10,3),
+  class_id INT REFERENCES vehicle_classes(id),
+  price NUMERIC(10,2),
+  cashless_account_id INT,
+  use_bonuses BOOLEAN DEFAULT FALSE,
+  distribution_method VARCHAR(50), -- 'auto', 'broadcast', 'sequential', 'map', 'list'
+  status VARCHAR(30) DEFAULT 'pending', -- 'pending','assigned','arrived','in_progress','completed','canceled'
+  comment TEXT,
+  print_receipt BOOLEAN DEFAULT FALSE,
+  scheduled_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  assigned_at TIMESTAMPTZ,
+  arrived_at TIMESTAMPTZ,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ
+);
+
+CREATE TABLE call_logs (
+  id SERIAL PRIMARY KEY,
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  phone_from VARCHAR(20),
+  phone_to VARCHAR(20),
+  call_type VARCHAR(20), -- 'inbound', 'outbound'
+  operator_id INT,
+  service_id INT REFERENCES taxi_services(id),
+  duration_total_sec INT,
+  duration_wait_sec INT,
+  duration_talk_sec INT,
+  status VARCHAR(30) -- 'answered', 'missed', 'busy'
+);
+
+CREATE TABLE cash_transactions (
+  id SERIAL PRIMARY KEY,
+  operator_id INT NOT NULL,
+  transaction_type VARCHAR(20), -- 'payout', 'deposit'
+  amount NUMERIC(10,2),
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  linked_order_id INT REFERENCES orders(id)
+);
+```
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/auth/login` | Login for operators |
+| `POST` | `/api/auth/driver/login` | Login for drivers (mobile app) |
+| `POST` | `/api/orders` | Create a new order |
+| `GET` | `/api/orders` | List orders (with filters: status, date, driver, service) |
+| `GET` | `/api/orders/:id` | Get single order details |
+| `PATCH` | `/api/orders/:id/status` | Update order status |
+| `GET` | `/api/orders/:id/price-estimate` | Calculate price from coords + tariff |
+| `GET` | `/api/drivers` | List all drivers with status |
+| `GET` | `/api/drivers/nearby?lat=&lng=&radius=` | PostGIS spatial query for nearest free drivers |
+| `POST` | `/api/drivers` | Create driver |
+| `PATCH` | `/api/drivers/:id` | Update driver profile |
+| `PATCH` | `/api/drivers/:id/location` | Update GPS coordinates (from driver app) |
+| `PATCH` | `/api/drivers/:id/status` | Set driver online/offline/busy |
+| `GET` | `/api/vehicles` | List vehicles |
+| `POST` | `/api/vehicles` | Add vehicle |
+| `GET` | `/api/tariffs` | List tariffs (filtered by service/class) |
+| `GET` | `/api/geozones` | List all geozones with polygons |
+| `POST` | `/api/geozones` | Create geozone |
+| `GET` | `/api/calls` | Telephony log (with filters) |
+| `GET` | `/api/billing/cash` | Kasssa report by operator/period |
+| `GET` | `/api/clients` | Client CRM list |
+| `GET` | `/api/clients/:phone` | Look up client by phone |
+| `WS` | `/ws/monitor` | Real-time dispatch feed: orders, driver locations, status changes |
+| `WS` | `/ws/driver/:id` | Driver app feed: incoming order offers, status updates |
+
+### Real-time Architecture
+- **WebSockets** (Django Channels / Socket.io / Spring WebSocket) for:
+  - Monitor: live order list updates
+  - Map: driver GPS position stream
+  - Chat: dispatcher ↔ driver messaging
+  - Alarms: emergency alerts
+- **Redis** as channel layer / pub-sub broker
+- **PostGIS** for all spatial queries (`ST_DWithin`, `ST_Contains` for geozone detection)
+- **Celery / Cron** for scheduled order triggering (Предварительные)
+
+### Frontend Stack (Next.js)
+```
+State:        Zustand (multi-tab Monitor state)
+Map:          React-Leaflet (OpenStreetMap) or Mapbox GL JS
+Real-time:    socket.io-client
+Forms:        React Hook Form + Zod
+Table:        TanStack Table (Order Journal with 20+ filters)
+Auth:         JWT + httpOnly cookies
+```
+
+---
+
+## 11. Operational Workflow Summary Table
+
+| Step | Actor | Action | System Result |
+|---|---|---|---|
+| 1 | Dispatcher | Opens "Новый заказ" (Alt+F1) | Order form opens with embedded map |
+| 2 | Dispatcher | Enters phone, name, addresses, class | Distance + price auto-calculated |
+| 3 | Dispatcher | Selects distribution method, clicks Ctrl+Enter | Order persists, broadcast to drivers |
+| 4 | Driver App | Driver accepts order | Status → Назначен; shown in Текущие заказы |
+| 5 | Driver App | Driver arrives at pickup | Status → На месте |
+| 6 | Driver App | Trip starts | Status → Везёт; shown on map in real-time |
+| 7 | Driver App | Trip ends | Status → Завершён; price finalized |
+| 8 | System | Payment processed | Касса updated, driver balance adjusted |
+| 9 | Admin | Reviews Журнал заказов | Historical record with all metadata |
+| 10 | Admin | Reviews Касса | Net cash flows per operator for period |
