@@ -1,0 +1,493 @@
+// This is your Prisma schema file
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── ENUMS ───────────────────────────────────────────────────────────────────
+
+enum DriverStatus {
+  free
+  busy
+  offline
+}
+
+enum OrderStatus {
+  pending
+  assigned
+  arrived
+  in_progress
+  completed
+  canceled
+}
+
+enum OwnershipType {
+  driver
+  company
+}
+
+enum DistributionMethod {
+  automatic
+  broadcast
+  sequential
+  map_pick
+  list_pick
+}
+
+enum CallType {
+  inbound
+  outbound
+}
+
+enum CallStatus {
+  answered
+  missed
+  busy
+  failed
+}
+
+enum TransactionType {
+  payout
+  deposit
+  penalty
+  bonus
+}
+
+enum TariffType {
+  commission
+  fixed
+  unlimited
+}
+
+// ─── TAXI SERVICES ───────────────────────────────────────────────────────────
+
+model TaxiService {
+  id                  Int      @id @default(autoincrement())
+  name                String   @db.VarChar(100)
+  priority            Int      @default(0)
+  settlement          String?  @db.VarChar(100)
+  autoSelectionType   String   @default("nearest") @db.VarChar(50)
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+
+  tariffs      Tariff[]
+  orders       Order[]
+  callLogs     CallLog[]
+  vehicles     VehicleService[]
+
+  @@map("taxi_services")
+}
+
+// ─── VEHICLE CLASSES ─────────────────────────────────────────────────────────
+
+model VehicleClassGroup {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(100)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  classes VehicleClass[]
+
+  @@map("vehicle_class_groups")
+}
+
+model VehicleClass {
+  id        Int      @id @default(autoincrement())
+  groupId   Int
+  name      String   @db.VarChar(100)
+  icon      String?  @db.VarChar(50)
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  group    VehicleClassGroup   @relation(fields: [groupId], references: [id])
+  tariffs  Tariff[]
+  orders   Order[]
+  vehicles VehicleClassLink[]
+
+  @@map("vehicle_classes")
+}
+
+// ─── VEHICLE OPTIONS ─────────────────────────────────────────────────────────
+
+model VehicleOption {
+  id            Int      @id @default(autoincrement())
+  name          String   @db.VarChar(100)
+  description   String?
+  priceModifier Decimal  @default(0) @db.Decimal(10, 2)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  vehicles VehicleOptionLink[]
+  orders   OrderOption[]
+
+  @@map("vehicle_options")
+}
+
+// ─── GEOZONES ─────────────────────────────────────────────────────────────────
+
+model Geozone {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(100)
+  type      String   @default("zone") @db.VarChar(50)
+  /// PostGIS POLYGON stored as WKT - use raw SQL for spatial ops
+  polygon   String   @db.Text
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  pricesFrom GeozonePrice[] @relation("GeozoneFrom")
+  pricesTo   GeozonePrice[] @relation("GeozoneTo")
+
+  @@map("geozones")
+}
+
+model GeozonePrice {
+  id            Int      @id @default(autoincrement())
+  tariffId      Int
+  geozoneFromId Int
+  geozoneToId   Int
+  priceOverride Decimal  @db.Decimal(10, 2)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  tariff       Tariff   @relation(fields: [tariffId], references: [id])
+  geozoneFrom  Geozone  @relation("GeozoneFrom", fields: [geozoneFromId], references: [id])
+  geozoneTo    Geozone  @relation("GeozoneTo", fields: [geozoneToId], references: [id])
+
+  @@unique([tariffId, geozoneFromId, geozoneToId])
+  @@map("geozone_prices")
+}
+
+// ─── TARIFFS ─────────────────────────────────────────────────────────────────
+
+model Tariff {
+  id              Int      @id @default(autoincrement())
+  serviceId       Int
+  classId         Int
+  name            String   @db.VarChar(100)
+  basePrice       Decimal  @db.Decimal(10, 2)
+  pricePerKm      Decimal  @default(0) @db.Decimal(10, 4)
+  pricePerMin     Decimal  @default(0) @db.Decimal(10, 4)
+  minPrice        Decimal  @default(0) @db.Decimal(10, 2)
+  freeWaitMinutes Int      @default(5)
+  extraWaitPrice  Decimal  @default(0) @db.Decimal(10, 4)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  service       TaxiService    @relation(fields: [serviceId], references: [id])
+  class         VehicleClass   @relation(fields: [classId], references: [id])
+  geozonePrices GeozonePrice[]
+  orders        Order[]
+
+  @@map("tariffs")
+}
+
+// ─── DRIVER TARIFF GROUPS ─────────────────────────────────────────────────────
+
+model DriverTariffGroup {
+  id          Int        @id @default(autoincrement())
+  name        String     @db.VarChar(100)
+  type        TariffType @default(commission)
+  value       Decimal    @db.Decimal(10, 2)
+  description String?
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+
+  drivers Driver[]
+
+  @@map("driver_tariff_groups")
+}
+
+// ─── DRIVERS ─────────────────────────────────────────────────────────────────
+
+model Driver {
+  id              Int          @id @default(autoincrement())
+  callsign        String?      @db.VarChar(20)
+  lastName        String       @db.VarChar(100)
+  firstName       String       @db.VarChar(100)
+  middleName      String?      @db.VarChar(100)
+  phone           String       @unique @db.VarChar(20)
+  login           String       @unique @db.VarChar(50)
+  passwordHash    String       @db.VarChar(255)
+  tariffGroupId   Int?
+  maxCredit       Decimal      @default(0) @db.Decimal(10, 2)
+  balance         Decimal      @default(0) @db.Decimal(10, 2)
+  rating          Decimal      @default(5.0) @db.Decimal(3, 2)
+  status          DriverStatus @default(offline)
+  /// Stored as "POINT(lng lat)" WKT string; use raw SQL for ST_DWithin
+  currentLocation String?      @db.Text
+  deviceId        String?      @db.VarChar(100)
+  comment         String?
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  tariffGroup   DriverTariffGroup? @relation(fields: [tariffGroupId], references: [id])
+  vehicles      Vehicle[]
+  orders        Order[]
+  documents     DriverDocument[]
+  transactions  CashTransaction[]
+  orderLogs     OrderStatusLog[]
+
+  @@map("drivers")
+}
+
+// ─── VEHICLES ─────────────────────────────────────────────────────────────────
+
+model Vehicle {
+  id            Int           @id @default(autoincrement())
+  plate         String        @unique @db.VarChar(20)
+  make          String        @db.VarChar(100)
+  model         String        @db.VarChar(100)
+  color         String        @db.VarChar(50)
+  year          Int?
+  ownershipType OwnershipType @default(driver)
+  driverId      Int?
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+
+  driver   Driver?            @relation(fields: [driverId], references: [id])
+  classes  VehicleClassLink[]
+  options  VehicleOptionLink[]
+  services VehicleService[]
+  orders   Order[]
+
+  @@map("vehicles")
+}
+
+model VehicleClassLink {
+  vehicleId Int
+  classId   Int
+
+  vehicle Vehicle      @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  class   VehicleClass @relation(fields: [classId], references: [id])
+
+  @@id([vehicleId, classId])
+  @@map("vehicle_class_links")
+}
+
+model VehicleOptionLink {
+  vehicleId Int
+  optionId  Int
+
+  vehicle Vehicle       @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  option  VehicleOption @relation(fields: [optionId], references: [id])
+
+  @@id([vehicleId, optionId])
+  @@map("vehicle_option_links")
+}
+
+model VehicleService {
+  vehicleId Int
+  serviceId Int
+
+  vehicle Vehicle     @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  service TaxiService @relation(fields: [serviceId], references: [id])
+
+  @@id([vehicleId, serviceId])
+  @@map("vehicle_services")
+}
+
+// ─── OPERATORS ───────────────────────────────────────────────────────────────
+
+model Operator {
+  id           Int      @id @default(autoincrement())
+  login        String   @unique @db.VarChar(50)
+  name         String   @db.VarChar(100)
+  passwordHash String   @db.VarChar(255)
+  role         String   @default("operator") @db.VarChar(20)
+  cashBalance  Decimal  @default(0) @db.Decimal(10, 2)
+  advanceBalance Decimal @default(100) @db.Decimal(10, 2)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  orders           Order[]
+  cashTransactions CashTransaction[]
+  callLogs         CallLog[]
+
+  @@map("operators")
+}
+
+// ─── CLIENTS ─────────────────────────────────────────────────────────────────
+
+model Client {
+  id           Int      @id @default(autoincrement())
+  phone        String   @unique @db.VarChar(20)
+  name         String?  @db.VarChar(100)
+  bonusBalance Decimal  @default(0) @db.Decimal(10, 2)
+  isBlacklisted Boolean @default(false)
+  blacklistReason String? @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  orders Order[]
+
+  @@map("clients")
+}
+
+// ─── ORDERS ──────────────────────────────────────────────────────────────────
+
+model Order {
+  id                 Int                @id @default(autoincrement())
+  phone              String             @db.VarChar(20)
+  clientId           Int?
+  serviceId          Int?
+  driverId           Int?
+  vehicleId          Int?
+  operatorId         Int?
+  tariffId           Int?
+  classId            Int?
+  pickupAddress      String?            @db.Text
+  pickupPoint        String?            @db.Text  // WKT POINT
+  dropoffAddress     String?            @db.Text
+  dropoffPoint       String?            @db.Text  // WKT POINT
+  /// Array of {address, point, order} objects
+  stops              Json               @default("[]")
+  distanceKm         Decimal?           @db.Decimal(10, 3)
+  estimatedPrice     Decimal?           @db.Decimal(10, 2)
+  finalPrice         Decimal?           @db.Decimal(10, 2)
+  cashlessAccountId  Int?
+  useBonuses         Boolean            @default(false)
+  bonusesUsed        Decimal            @default(0) @db.Decimal(10, 2)
+  distributionMethod DistributionMethod @default(automatic)
+  status             OrderStatus        @default(pending)
+  comment            String?            @db.Text
+  printReceipt       Boolean            @default(false)
+  isScheduled        Boolean            @default(false)
+  scheduledAt        DateTime?
+  isUrgent           Boolean            @default(false)
+  isExchange         Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  assignedAt         DateTime?
+  arrivedAt          DateTime?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  canceledAt         DateTime?
+  cancelReason       String?            @db.Text
+
+  client     Client?      @relation(fields: [clientId], references: [id])
+  service    TaxiService? @relation(fields: [serviceId], references: [id])
+  driver     Driver?      @relation(fields: [driverId], references: [id])
+  vehicle    Vehicle?     @relation(fields: [vehicleId], references: [id])
+  operator   Operator?    @relation(fields: [operatorId], references: [id])
+  tariff     Tariff?      @relation(fields: [tariffId], references: [id])
+  class      VehicleClass? @relation(fields: [classId], references: [id])
+  statusLogs OrderStatusLog[]
+  options    OrderOption[]
+  transactions CashTransaction[]
+
+  @@index([status])
+  @@index([driverId])
+  @@index([operatorId])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderStatusLog {
+  id        Int         @id @default(autoincrement())
+  orderId   Int
+  driverId  Int?
+  status    OrderStatus
+  note      String?
+  createdAt DateTime    @default(now())
+
+  order  Order   @relation(fields: [orderId], references: [id])
+  driver Driver? @relation(fields: [driverId], references: [id])
+
+  @@map("order_status_logs")
+}
+
+model OrderOption {
+  orderId  Int
+  optionId Int
+
+  order  Order         @relation(fields: [orderId], references: [id])
+  option VehicleOption @relation(fields: [optionId], references: [id])
+
+  @@id([orderId, optionId])
+  @@map("order_options")
+}
+
+// ─── FINANCIAL ────────────────────────────────────────────────────────────────
+
+model CashTransaction {
+  id              Int             @id @default(autoincrement())
+  operatorId      Int
+  driverId        Int?
+  orderId         Int?
+  type            TransactionType
+  amount          Decimal         @db.Decimal(10, 2)
+  description     String?         @db.Text
+  createdAt       DateTime        @default(now())
+
+  operator Operator @relation(fields: [operatorId], references: [id])
+  driver   Driver?  @relation(fields: [driverId], references: [id])
+  order    Order?   @relation(fields: [orderId], references: [id])
+
+  @@index([operatorId])
+  @@index([createdAt])
+  @@map("cash_transactions")
+}
+
+// ─── TELEPHONY ────────────────────────────────────────────────────────────────
+
+model CallLog {
+  id               Int        @id @default(autoincrement())
+  timestamp        DateTime   @default(now())
+  phoneFrom        String     @db.VarChar(20)
+  phoneTo          String     @db.VarChar(20)
+  callType         CallType   @default(inbound)
+  operatorId       Int?
+  serviceId        Int?
+  durationTotalSec Int        @default(0)
+  durationWaitSec  Int        @default(0)
+  durationTalkSec  Int        @default(0)
+  status           CallStatus @default(missed)
+  recordingUrl     String?    @db.Text
+  createdAt        DateTime   @default(now())
+
+  operator Operator?   @relation(fields: [operatorId], references: [id])
+  service  TaxiService? @relation(fields: [serviceId], references: [id])
+
+  @@index([timestamp])
+  @@map("call_logs")
+}
+
+// ─── DOCUMENT VERIFICATION (Допуски) ─────────────────────────────────────────
+
+model DriverDocument {
+  id          Int      @id @default(autoincrement())
+  driverId    Int
+  docType     String   @db.VarChar(100)
+  fileUrl     String   @db.Text
+  status      String   @default("pending") @db.VarChar(20) // pending, approved, rejected
+  reviewedAt  DateTime?
+  reviewNote  String?  @db.Text
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  driver Driver @relation(fields: [driverId], references: [id])
+
+  @@map("driver_documents")
+}
+
+// ─── QUEUES / PARKING SPOTS ───────────────────────────────────────────────────
+
+model Queue {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(100)
+  address     String?  @db.Text
+  /// WKT POINT for center of queue zone
+  centerPoint String?  @db.Text
+  radiusM     Int      @default(200)
+  maxDrivers  Int?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@map("queues")
+}
