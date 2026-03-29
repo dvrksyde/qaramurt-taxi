@@ -1,36 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Qaramurt Taxi Dispatch System 🚕
 
-## Getting Started
+Modern, ERP-grade Taxi Fleet and Dispatch Management SaaS Platform. Built with Next.js 16, Prisma 7, PostgreSQL (PostGIS), Redis, and Socket.io.
 
-First, run the development server:
+## 👥 Local Developer Setup (Jamoa bo'lib ishlash uchun qo'llanma)
 
+Har bir dasturchi o'zining mustaqil ma'lumotlar bazasida (local database) ishlashi kerak. Shunday qilsak qilingan o'zgarishlar va test xatoliklari boshqalarning muhitiga ta'sir qilmaydi.
+
+### Dastlabki talablar (Prerequisites)
+Sizning kompyuteringizda quyidagilar o'rnatilgan bo'lishi shart:
+- [Git](https://git-scm.com/)
+- [Node.js](https://nodejs.org/en/) (v20+)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop)
+
+### 1-Qadam: Kodni olish va kutubxonalarni o'rnatish
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/dvrksyde/qaramurt-taxi.git
+cd qaramurt-taxi
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2-Qadam: Muhit (Environment) o'zgaruvchilarini sozlash
+Loyiha papkasida `.env` fayl yarating (u GitHubda yo'q). 
+Shu faylning ichiga maxsus parollarni kiriting:
+```ini
+# Asosiy Baza Linki:
+DATABASE_URL="postgresql://qaramurt:qaramurt_pass@localhost:5432/qaramurt_taxi?schema=public"
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+# Xavfsizlik kaliti (o'zingiz xohlagan matn yozing):
+NEXTAUTH_SECRET="mening-maxfiy-kalitim-123"
+NEXTAUTH_URL="http://localhost:3000"
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# Redis (Socket.io uzatishlari uchun)
+REDIS_URL="redis://localhost:6379"
+```
 
-## Learn More
+### 3-Qadam: Docker orqali Local Baza va Redisni yoqish
+Docker dasturi yoniqligiga ishonch hosil qilib, terminalda quyidagi kodni yozing:
+```bash
+docker compose up -d db redis
+```
+*(Bu komanda PostGIS bazasini va Redisni fonda ishga tushirib beradi)*
 
-To learn more about Next.js, take a look at the following resources:
+### 4-Qadam: Jadvallarni yaratish va Demo ma'lumotlarni yozish
+Ma'lumotlar bazasi toza bo'lganligi uchun unga dizaynni (schema) yozib yuklaymiz:
+```bash
+npm run db:push
+```
+Undan so'ng ilk Admin akkaunti va tariflarni kiritish uchun Seed scriptni yoqamiz:
+```bash
+npx tsx prisma/seed.ts
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 5-Qadam: Loyihani ishga tushirish (Run Start)
+Hammasi tayyor! Loyihangizni sinov (development) rejimida yoqish uchun:
+```bash
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Endi dastur turg'iziladi va brauzer orqali **http://localhost:3000** ga kiring.
+> Login: **admin**
+> Parol: **admin123**
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Yordamchi komandalar 🛠
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Agar Bazani tozalamoqchi bo'lsangiz yoki muammo chiqsa (reset):
+```bash
+npx prisma db push --force-reset
+npx tsx prisma/seed.ts
+```
+
+Schema bazani ko'z bilan (UI orqali) ko'rish uchun:
+```bash
+npm run db:studio
+```
