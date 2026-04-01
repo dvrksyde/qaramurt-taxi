@@ -1,12 +1,21 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import type { Operator } from "@/types";
+import { OperatorModal } from "@/components/operators/OperatorModal";
 
 export default function OperatorsPage() {
+  const { data: session } = useSession();
   const [operators, setOperators] = useState<Operator[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedOperator, setSelectedOperator] = useState<Operator | null>(null);
 
-  useEffect(() => {
+  const user = session?.user as any;
+  const isAdmin = user?.role === "admin";
+
+  const fetchOperators = useCallback(() => {
+    setLoading(true);
     fetch("/api/operators")
       .then((r) => r.json())
       .then((d) => d.data && setOperators(d.data))
@@ -14,13 +23,65 @@ export default function OperatorsPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    fetchOperators();
+    // Start heartbeat to keep current user online
+    const heartbeat = () => fetch("/api/operators/heartbeat", { method: "POST" }).catch(() => {});
+    heartbeat();
+    const interval = setInterval(heartbeat, 60_000); // every 60 seconds
+    return () => clearInterval(interval);
+  }, [fetchOperators]);
+
+  // Re-fetch every 30s to refresh online statuses
+  useEffect(() => {
+    const interval = setInterval(fetchOperators, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchOperators]);
+
+  const handleToggle = async (id: number, isActive: boolean) => {
+    if (!confirm(`Вы уверены, что хотите ${isActive ? "включить" : "заблокировать"} этого оператора?`)) return;
+    try {
+      const res = await fetch(`/api/operators/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive })
+      });
+      if (res.ok) fetchOperators();
+      else alert("Ошибка изменения статуса");
+    } catch {
+      alert("Ошибка сети");
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm("Вы уверены, что хотите НАВСЕГДА удалить этого оператора из базы данных?")) return;
+    try {
+      const res = await fetch(`/api/operators/${id}`, { method: "DELETE" });
+      if (res.ok) fetchOperators();
+      else {
+        const d = await res.json();
+        alert(d.error || "Ошибка удаления");
+      }
+    } catch {
+      alert("Ошибка сети");
+    }
+  };
+
   return (
     <div className="page-content">
       <div className="action-bar">
         <h2 style={{ fontSize: 15, fontWeight: 700 }}>Операторы</h2>
-        <div style={{ marginLeft: "auto" }}>
-          <button className="btn btn-primary" id="btn-add-operator">+ Добавить оператора</button>
-        </div>
+        {isAdmin && (
+          <div style={{ marginLeft: "auto" }}>
+            <button
+              className="btn btn-primary"
+              id="btn-add-operator"
+              onClick={() => { setSelectedOperator(null); setIsModalOpen(true); }}
+            >
+              + Добавить оператора
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="data-table-wrap">
@@ -30,39 +91,57 @@ export default function OperatorsPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Логин</th>
-                <th>ФИО</th>
-                <th>Роль</th>
-                <th>Касса</th>
-                <th>Аванс (ПО)</th>
-                <th>Статус</th>
-                <th>Действия</th>
+                <th style={{ width: 30, textAlign: "center" }}></th>
+                 <th style={{ width: 220 }}>Логин</th>
+                 <th style={{ width: "100%", paddingLeft: 30 }}>Имя</th>
+                 <th style={{ paddingLeft: 40, whiteSpace: "nowrap" }}>Действия</th>
               </tr>
             </thead>
             <tbody>
               {operators.map((op) => (
                 <tr key={op.id}>
-                  <td className="text-muted text-sm">{op.id}</td>
-                  <td className="text-mono">{op.login}</td>
-                  <td style={{ fontWeight: 600 }}>{op.name}</td>
-                  <td>
-                    <span className={`status-badge ${op.role === "admin" ? "assigned" : "completed"}`}>
-                      {op.role === "admin" ? "Администратор" : "Оператор"}
-                    </span>
+                  <td style={{ textAlign: "center" }}>
+                    <span
+                      className={`status-dot ${op.isOnline ? "free" : "offline"}`}
+                      title={op.isOnline ? "В сети" : "Не в сети"}
+                    />
                   </td>
-                  <td className="text-mono">{Number(op.cashBalance).toFixed(2)} ₽</td>
-                  <td className="text-mono">{Number(op.advanceBalance).toFixed(2)} ₽</td>
-                  <td>
-                    <span className={`status-badge ${op.isActive ? "in_progress" : "canceled"}`}>
-                      {op.isActive ? "Активен" : "Отключён"}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="flex-row">
-                      <button className="btn btn-ghost btn-sm">✏️</button>
-                      <button className="btn btn-ghost btn-sm" style={{ color: "var(--status-offline)" }}>✕</button>
-                    </div>
+                   <td className="text-mono">{op.login}</td>
+                  <td style={{ fontWeight: 500, paddingLeft: 30 }}>{op.name}</td>
+                  <td style={{ paddingLeft: 40, whiteSpace: "nowrap" }}>
+                    {isAdmin ? (
+                      <span className="op-actions">
+                        <button
+                          className="op-action-link"
+                          onClick={() => { /* TODO: расчёты */ }}
+                        >
+                          Расчёты
+                        </button>
+                        <span className="op-action-sep">·</span>
+                        <button
+                          className="op-action-link"
+                          onClick={() => { setSelectedOperator(op); setIsModalOpen(true); }}
+                        >
+                          Редактировать
+                        </button>
+                        <span className="op-action-sep">·</span>
+                        <button
+                          className="op-action-link"
+                          onClick={() => handleToggle(op.id, !op.isActive)}
+                        >
+                          {op.isActive ? "Заблокировать" : "Разблокировать"}
+                        </button>
+                        <span className="op-action-sep">·</span>
+                        <button
+                          className="op-action-link op-action-danger"
+                          onClick={() => handleDelete(op.id)}
+                        >
+                          Удалить
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="text-muted text-sm">—</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -70,6 +149,14 @@ export default function OperatorsPage() {
           </table>
         )}
       </div>
+
+      {isModalOpen && isAdmin && (
+        <OperatorModal
+          operator={selectedOperator}
+          onClose={() => setIsModalOpen(false)}
+          onSuccess={fetchOperators}
+        />
+      )}
     </div>
   );
 }

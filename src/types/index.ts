@@ -26,6 +26,8 @@ export interface Driver {
   tariffGroupId: number | null;
   isActive: boolean;
   createdAt: string;
+  deviceId?: string | null;
+  vehicles?: { id: number; plate: string; make: string; model: string; color: string; classes?: any[] }[];
 }
 
 export interface DriverLocation {
@@ -135,9 +137,12 @@ export interface Operator {
   login: string;
   name: string;
   role: string;
+  permissions: string[];
   cashBalance: number;
   advanceBalance: number;
   isActive: boolean;
+  isOnline?: boolean;
+  lastSeenAt?: string | null;
 }
 
 export interface Client {
@@ -196,6 +201,7 @@ export interface NewOrderFormData {
   distributionMethod: DistributionMethod;
   optionIds: number[];
   printReceipt: boolean;
+  pricePerKm: string;
 }
 
 // ─── SOCKET EVENTS ────────────────────────────────────────────────────────────

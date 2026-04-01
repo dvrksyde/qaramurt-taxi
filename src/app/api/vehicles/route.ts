@@ -1,13 +1,12 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { checkPermission } from "@/lib/permissions";
 
 export async function GET(_req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { allowed, response } = await checkPermission(["vehicle_admissions"]);
+  if (!allowed) return response!;
 
   const vehicles = await prisma.vehicle.findMany({
     where: { isActive: true },
@@ -24,8 +23,8 @@ export async function GET(_req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { allowed, response } = await checkPermission(["vehicle_admissions"]);
+  if (!allowed) return response!;
 
   const body = await req.json();
   const { plate, make, model, color, year, ownershipType, driverId, classIds, optionIds, serviceIds } = body;

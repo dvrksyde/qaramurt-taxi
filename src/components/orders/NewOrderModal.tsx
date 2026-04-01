@@ -39,6 +39,7 @@ export function NewOrderModal({ onClose }: Props) {
       tariffId: null,
       cashlessAccountId: null,
       optionIds: [],
+      pricePerKm: "80",
     },
   });
 
@@ -218,106 +219,28 @@ export function NewOrderModal({ onClose }: Props) {
                 </div>
               </div>
 
-              {/* Dropoff */}
+              {/* Class */}
               <div className="form-row">
-                <span className="form-label">Куда:</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0 }}>
-                  <span style={{ color: "#e84646", fontSize: 16 }}>🏁</span>
-                  <input
-                    {...register("dropoffAddress")}
-                    className="form-input"
-                    placeholder="Адрес назначения"
-                    id="order-dropoff"
-                  />
-                </div>
+                <span className="form-label">Класс:</span>
+                <select {...register("classId")} className="form-select" id="order-class">
+                  <option value="">Любой</option>
+                  {allClasses.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
               </div>
 
-              {/* Extra stops */}
-              {stopFields.map((field, i) => (
-                <div key={field.id} className="form-row">
-                  <span className="form-label">Заезд {i + 1}:</span>
-                  <input
-                    {...register(`stops.${i}.address`)}
-                    className="form-input"
-                    placeholder="Промежуточный адрес"
-                  />
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeStop(i)}>✕</button>
-                </div>
-              ))}
-
-              <div style={{ marginBottom: 8 }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => addStop({ address: "", order: stopFields.length + 1 })}
-                >
-                  + добавить заезд
-                </button>
-              </div>
-
-              {/* Comment */}
-              <div className="form-row" style={{ alignItems: "flex-start" }}>
-                <span className="form-label" style={{ paddingTop: 4 }}>Комментарий:</span>
-                <textarea {...register("comment")} className="form-textarea" rows={2} id="order-comment" />
-              </div>
-
-              {/* Pricing section */}
-              <div style={{ background: "var(--color-surface-2)", border: "1px solid var(--color-border)", borderRadius: 3, padding: "8px 10px", marginBottom: 8 }}>
-                <div className="form-row">
-                  <span className="form-label">Расстояние:</span>
-                  <span className="text-muted">?</span>
-                </div>
-                <div className="form-row">
-                  <span className="form-label">Класс:</span>
-                  <select {...register("classId")} className="form-select" id="order-class">
-                    <option value="">Любой</option>
-                    {allClasses.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-row">
-                  <span className="form-label">Тариф:</span>
-                  <select {...register("tariffId")} className="form-select" id="order-tariff">
-                    <option value="">--------------------</option>
-                    {tariffs.map((t) => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-row">
-                  <span className="form-label">Безнал (?):</span>
-                  <select {...register("cashlessAccountId")} className="form-select" id="order-cashless">
-                    <option value="">&lt;&lt; Не задан &gt;&gt;</option>
-                  </select>
-                </div>
-                <div className="form-row">
-                  <span className="form-label">Бонусы (?):</span>
-                  <input type="checkbox" {...register("useBonuses")} className="form-checkbox" id="order-bonuses" />
-                  <span className="text-muted text-sm">доступно ?</span>
-                </div>
-                <div className="form-row">
-                  <span className="form-label">Стоимость (?):</span>
-                  <input
-                    {...register("estimatedPrice", { valueAsNumber: true })}
-                    type="number"
-                    className="form-input"
-                    style={{ maxWidth: 70 }}
-                    step="0.01"
-                    id="order-price"
-                  />
-                  {estimating && <span className="text-muted text-sm pulse">расчёт...</span>}
-                  <span className="form-label" style={{ marginLeft: "auto" }}>Предварительно:</span>
-                  <input type="number" className="form-input" style={{ maxWidth: 70 }} readOnly
-                    value={watch("estimatedPrice") ?? ""} />
-                </div>
-                <div style={{ marginLeft: 88 }}>
-                  <button type="button" className="btn btn-ghost btn-sm">&lt;&lt; зафиксировать</button>
-                </div>
-                <div className="form-row">
-                  <span className="form-label">Печатать чек</span>
-                  <input type="checkbox" {...register("printReceipt")} className="form-checkbox" id="order-receipt" />
-                </div>
+              {/* Tariff rate per km */}
+              <div className="form-row">
+                <span className="form-label">Тариф:</span>
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer" }}>
+                  <input type="radio" value="80" {...register("pricePerKm")} />
+                  80 ₸/км (город)
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer", marginLeft: 12 }}>
+                  <input type="radio" value="110" {...register("pricePerKm")} />
+                  110 ₸/км (за город)
+                </label>
               </div>
 
               {/* Distribution method */}

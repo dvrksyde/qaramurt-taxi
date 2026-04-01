@@ -1,14 +1,25 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { requireAuth, checkPermission } from "@/lib/permissions";
+import { hashPassword } from "@/lib/passwords";
+
+function serializeDriver(driver: any) {
+  const { passwordHash: _passwordHash, ...safeDriver } = driver;
+  return {
+    ...safeDriver,
+    balance: Number(driver.balance),
+    maxCredit: Number(driver.maxCredit),
+    rating: Number(driver.rating),
+    currentLocation: null,
+  };
+}
 
 // GET /api/drivers
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { allowed, response } = await requireAuth();
+  if (!allowed) return response!;
 
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
@@ -29,30 +40,37 @@ export async function GET(req: NextRequest) {
     where,
     include: {
       tariffGroup: { select: { name: true, type: true } },
-      vehicles: { select: { id: true, plate: true, make: true, model: true, color: true } },
+      vehicles: { select: { id: true, plate: true, make: true, model: true, color: true, classes: true } },
     },
     orderBy: [{ status: "asc" }, { lastName: "asc" }],
   });
 
-  // Serialize: strip binary location field, convert to {lat, lng}
-  const serialized = drivers.map((d) => ({
-    ...d,
-    balance: Number(d.balance),
-    maxCredit: Number(d.maxCredit),
-    rating: Number(d.rating),
-    currentLocation: null, // PostGIS geometry not JSON-serializable; use dedicated endpoint
-  }));
+  const serialized = drivers.map(serializeDriver);
 
   return NextResponse.json({ data: serialized });
 }
 
 // POST /api/drivers — create driver
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { allowed, response } = await checkPermission(["add_drivers"]);
+  if (!allowed) return response!;
 
   const body = await req.json();
-  const { lastName, firstName, middleName, phone, login, password, callsign, tariffGroupId, maxCredit, comment } = body;
+  let { lastName, firstName, middleName, phone, login, password, callsign, comment, carPlate, carMake, carModel, carColor, carClassIds, autoGenCreds } = body;
+
+  let generatedPassword = null;
+
+  if (autoGenCreds) {
+    if (!login) {
+      // Use phone digits or fallback to random
+      login = phone.replace(/\D/g, '').slice(-10);
+      if (!login) login = 'dr' + Math.floor(1000 + Math.random() * 9000);
+    }
+    if (!password) {
+      password = Math.random().toString(36).substring(2, 8).toUpperCase();
+      generatedPassword = password;
+    }
+  }
 
   if (!lastName || !firstName || !phone || !login || !password) {
     return NextResponse.json({ error: "Заполните обязательные поля" }, { status: 400 });
@@ -66,8 +84,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Телефон или логин уже используется" }, { status: 409 });
   }
 
-  // In production, use bcrypt. For demo, store plain hash marker.
-  const passwordHash = password; // TODO: await bcrypt.hash(password, 10)
+  const passwordHash = await hashPassword(password);
 
   const driver = await prisma.driver.create({
     data: {
@@ -78,12 +95,30 @@ export async function POST(req: NextRequest) {
       login,
       passwordHash,
       callsign: callsign || null,
-      tariffGroupId: tariffGroupId ? parseInt(tariffGroupId) : null,
-      maxCredit: maxCredit ? parseFloat(maxCredit) : 0,
       comment: comment || null,
       status: "offline",
+      ...(carPlate ? {
+        vehicles: {
+          create: {
+            plate: carPlate,
+            make: carMake || "Неизвестно",
+            model: carModel || "",
+            color: carColor || "Неизвестно",
+            ownershipType: "driver",
+            isActive: true,
+            ...(carClassIds && carClassIds.length > 0 ? {
+              classes: {
+                create: carClassIds.map((cId: any) => ({ classId: Number(cId) }))
+              }
+            } : {})
+          }
+        }
+      } : {})
     },
+    include: {
+      vehicles: true
+    }
   });
 
-  return NextResponse.json({ data: driver }, { status: 201 });
+  return NextResponse.json({ data: serializeDriver(driver), generatedPassword }, { status: 201 });
 }

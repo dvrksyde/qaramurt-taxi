@@ -295,16 +295,18 @@ model VehicleService {
 // ─── OPERATORS ───────────────────────────────────────────────────────────────
 
 model Operator {
-  id           Int      @id @default(autoincrement())
-  login        String   @unique @db.VarChar(50)
-  name         String   @db.VarChar(100)
-  passwordHash String   @db.VarChar(255)
-  role         String   @default("operator") @db.VarChar(20)
-  cashBalance  Decimal  @default(0) @db.Decimal(10, 2)
-  advanceBalance Decimal @default(100) @db.Decimal(10, 2)
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id             Int      @id @default(autoincrement())
+  login          String   @unique @db.VarChar(50)
+  name           String   @db.VarChar(100)
+  passwordHash   String   @db.VarChar(255)
+  role           String   @default("operator") @db.VarChar(20)
+  permissions    Json     @default("[]")
+  cashBalance    Decimal  @default(0) @db.Decimal(10, 2)
+  advanceBalance Decimal  @default(100) @db.Decimal(10, 2)
+  isActive       Boolean  @default(true)
+  lastSeenAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   orders           Order[]
   cashTransactions CashTransaction[]
@@ -349,6 +351,7 @@ model Order {
   /// Array of {address, point, order} objects
   stops              Json               @default("[]")
   distanceKm         Decimal?           @db.Decimal(10, 3)
+  pricePerKm         Decimal            @default(80) @db.Decimal(10, 2)
   estimatedPrice     Decimal?           @db.Decimal(10, 2)
   finalPrice         Decimal?           @db.Decimal(10, 2)
   cashlessAccountId  Int?

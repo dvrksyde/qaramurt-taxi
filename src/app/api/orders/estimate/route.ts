@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { calculatePrice, haversineKm, estimateMinutes } from "@/lib/pricing";
 import { getGeozoneOverride } from "@/lib/geo";
+import { checkPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
 // POST /api/orders/estimate
 // Body: { pickupAddress, dropoffAddress, tariffId, pickupLat?, pickupLng?, dropoffLat?, dropoffLng? }
 export async function POST(req: NextRequest) {
+  const { allowed, response } = await checkPermission(["current_orders"]);
+  if (!allowed) return response!;
+
   const body = await req.json();
   const { tariffId, pickupLat, pickupLng, dropoffLat, dropoffLng } = body;
 

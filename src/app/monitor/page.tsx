@@ -4,12 +4,9 @@ import { useSocket } from "@/stores/socketStore";
 import { NewOrderModal } from "@/components/orders/NewOrderModal";
 import { MonitorTabs } from "@/components/monitor/MonitorTabs";
 import { CurrentOrdersTab } from "@/components/monitor/CurrentOrdersTab";
-import { ScheduledTab } from "@/components/monitor/ScheduledTab";
-import { ExchangeTab } from "@/components/monitor/ExchangeTab";
 import { MapTab } from "@/components/monitor/MapTab";
 import { ChatTab } from "@/components/monitor/ChatTab";
 import { SystemTab } from "@/components/monitor/SystemTab";
-import { AlarmsTab } from "@/components/monitor/AlarmsTab";
 import { useEffect } from "react";
 
 export default function MonitorPage() {
@@ -57,12 +54,9 @@ export default function MonitorPage() {
       {/* Tab content */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {activeTab === "current"   && <CurrentOrdersTab />}
-        {activeTab === "scheduled" && <ScheduledTab />}
-        {activeTab === "exchange"  && <ExchangeTab />}
         {activeTab === "map"       && <MapTab />}
         {activeTab === "chat"      && <ChatTab />}
         {activeTab === "system"    && <SystemTab />}
-        {activeTab === "alarms"    && <AlarmsTab />}
       </div>
 
       {/* New Order Modal */}

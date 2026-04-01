@@ -6,9 +6,10 @@
     "dev": "ts-node --project tsconfig.server.json server.ts",
     "build": "next build && tsc -p tsconfig.server.json",
     "start": "node server.js",
-    "start:prod": "prisma db push --accept-data-loss && node server.js",
+    "start:prod": "node server.js",
     "start:next": "next start",
     "db:push": "prisma db push",
+    "db:push:force": "prisma db push --accept-data-loss",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
     "postinstall": "prisma generate"

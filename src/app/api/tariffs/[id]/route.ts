@@ -1,16 +1,15 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { getPrisma } from "@/lib/prisma";
+import { checkPermission } from "@/lib/permissions";
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { allowed, response } = await checkPermission(["admin"]);
+  if (!allowed) return response!;
 
   try {
     const id = parseInt((await params).id, 10);

@@ -1,16 +1,7 @@
 import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "./prisma";
-
-// Simple password check — in production use bcrypt
-async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  // For demo: hash is "password" for all demo accounts
-  // In production: const bcrypt = await import('bcrypt'); return bcrypt.compare(password, hash);
-  if (hash === "$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi") {
-    return password === "password";
-  }
-  return password === hash;
-}
+import { hashPassword, verifyPassword } from "./passwords";
 
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
@@ -34,14 +25,33 @@ export const authOptions: NextAuthOptions = {
 
         if (!operator || !operator.isActive) return null;
 
-        const valid = await verifyPassword(credentials.password, operator.passwordHash);
-        if (!valid) return null;
+        const passwordCheck = await verifyPassword(credentials.password, operator.passwordHash);
+        if (!passwordCheck.valid) return null;
+
+        if (passwordCheck.needsRehash) {
+          await prisma.operator.update({
+            where: { id: operator.id },
+            data: { passwordHash: await hashPassword(credentials.password) },
+          });
+        }
+
+        // Track last login time for online status
+        await prisma.operator.update({
+          where: { id: operator.id },
+          data: { lastSeenAt: new Date() },
+        });
+
+        // Parse permissions from DB
+        const perms = Array.isArray(operator.permissions)
+          ? operator.permissions as string[]
+          : [];
 
         return {
           id: String(operator.id),
           name: operator.name,
           email: operator.login,
           role: operator.role,
+          permissions: perms,
         };
       },
     }),
@@ -49,15 +59,17 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.role = (user as { role?: string }).role;
+        token.role = (user as any).role;
         token.operatorId = user.id;
+        token.permissions = (user as any).permissions || [];
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
-        (session.user as { role?: string; operatorId?: string }).role = token.role as string;
-        (session.user as { role?: string; operatorId?: string }).operatorId = token.operatorId as string;
+        (session.user as any).role = token.role as string;
+        (session.user as any).operatorId = token.operatorId as string;
+        (session.user as any).permissions = token.permissions || [];
       }
       return session;
     },

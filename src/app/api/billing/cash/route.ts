@@ -1,28 +1,35 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { checkPermission } from "@/lib/permissions";
 
 // GET /api/billing/cash?fromDate=&toDate=&operatorId=
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { allowed, response, permissions, role, operatorId: currentOperatorId } =
+    await checkPermission(["kassa_report_all", "kassa_operations"]);
+  if (!allowed) return response!;
+
+  const canSeeAll = role === "admin" || (permissions || []).includes("kassa_report_all");
 
   const { searchParams } = new URL(req.url);
   const fromDate = searchParams.get("fromDate") || new Date(Date.now() - 3 * 86400000).toISOString();
   const toDate   = searchParams.get("toDate")   || new Date().toISOString();
-  const operatorId = searchParams.get("operatorId");
+  const requestedOperatorId = searchParams.get("operatorId");
+  const resolvedOperatorId = canSeeAll
+    ? requestedOperatorId
+    : currentOperatorId
+      ? String(currentOperatorId)
+      : null;
 
   const where: Record<string, unknown> = {
     createdAt: { gte: new Date(fromDate), lte: new Date(toDate) },
   };
-  if (operatorId) where.operatorId = parseInt(operatorId);
+  if (resolvedOperatorId) where.operatorId = parseInt(resolvedOperatorId);
 
   // Get all operators
   const operators = await prisma.operator.findMany({
-    where: operatorId ? { id: parseInt(operatorId) } : { isActive: true },
+    where: resolvedOperatorId ? { id: parseInt(resolvedOperatorId) } : { isActive: true },
     select: { id: true, name: true, cashBalance: true },
   });
 

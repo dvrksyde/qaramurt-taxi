@@ -5,12 +5,9 @@ type Tab = "current" | "scheduled" | "exchange" | "map" | "chat" | "system" | "a
 
 const TABS: { key: Tab; label: string; countKey?: keyof ReturnType<typeof useMonitorStore.getState>["counts"] }[] = [
   { key: "current",   label: "Текущие заказы",  countKey: "current" },
-  { key: "scheduled", label: "Предварительные", countKey: "scheduled" },
-  { key: "exchange",  label: "Обменник",         countKey: "exchange" },
   { key: "map",       label: "Карта" },
   { key: "chat",      label: "Чат",              countKey: "chat" },
   { key: "system",    label: "Системное",        countKey: "system" },
-  { key: "alarms",    label: "Тревоги",          countKey: "alarms" },
 ];
 
 export function MonitorTabs() {

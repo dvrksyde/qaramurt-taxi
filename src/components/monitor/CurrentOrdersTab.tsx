@@ -28,16 +28,12 @@ export function CurrentOrdersTab() {
       <table className="data-table">
         <thead>
           <tr>
-            <th>ID</th>
             <th>Время</th>
             <th>Статус</th>
-            <th>Служба</th>
             <th>Телефон</th>
             <th>Откуда</th>
-            <th>Куда</th>
             <th>Водитель</th>
             <th>Класс</th>
-            <th>Стоимость</th>
             <th>Действия</th>
           </tr>
         </thead>
@@ -63,7 +59,6 @@ function OrderRow({ order }: { order: Order }) {
 
   return (
     <tr>
-      <td className="text-mono">#{order.id}</td>
       <td className="text-muted">
         {new Date(order.createdAt).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })}
       </td>
@@ -72,13 +67,9 @@ function OrderRow({ order }: { order: Order }) {
           {statusLabels[order.status] || order.status}
         </span>
       </td>
-      <td>{order.service?.name ?? "—"}</td>
       <td className="text-mono">{order.phone}</td>
       <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {order.pickupAddress || "—"}
-      </td>
-      <td style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {order.dropoffAddress || "—"}
       </td>
       <td>
         {order.driver
@@ -86,13 +77,6 @@ function OrderRow({ order }: { order: Order }) {
           : <span className="text-muted">—</span>}
       </td>
       <td>{order.class ? (order.class as { name: string }).name : "—"}</td>
-      <td className="text-mono">
-        {order.finalPrice != null
-          ? `${order.finalPrice} ₽`
-          : order.estimatedPrice != null
-          ? `~${order.estimatedPrice} ₽`
-          : "—"}
-      </td>
       <td>
         <div className="flex-row">
           <button className="btn btn-ghost btn-sm" title="Открыть">✏️</button>
