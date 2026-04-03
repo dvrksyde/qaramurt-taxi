@@ -12,6 +12,7 @@ function serializeDriver(driver: any) {
     balance: Number(driver.balance),
     maxCredit: Number(driver.maxCredit),
     rating: Number(driver.rating),
+    ordersCount: driver._count?.orders || 0,
     currentLocation: null,
   };
 }
@@ -41,6 +42,7 @@ export async function GET(req: NextRequest) {
     include: {
       tariffGroup: { select: { name: true, type: true } },
       vehicles: { select: { id: true, plate: true, make: true, model: true, color: true, classes: true } },
+      _count: { select: { orders: { where: { status: "completed" } } } }
     },
     orderBy: [{ status: "asc" }, { lastName: "asc" }],
   });

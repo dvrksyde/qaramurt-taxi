@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
   const { login, password } = await req.json();
 
   if (!login || !password) {
-    return NextResponse.json({ error: "Р›РѕРіРёРЅ Рё РїР°СЂРѕР»СЊ РѕР±СЏР·Р°С‚РµР»СЊРЅС‹" }, { status: 400 });
+    return NextResponse.json({ error: "Логин и пароль обязательны" }, { status: 400 });
   }
 
   const driver = await prisma.driver.findUnique({
@@ -24,12 +24,12 @@ export async function POST(req: NextRequest) {
   });
 
   if (!driver || !driver.isActive) {
-    return NextResponse.json({ error: "РќРµРІРµСЂРЅС‹Р№ Р»РѕРіРёРЅ РёР»Рё РїР°СЂРѕР»СЊ" }, { status: 401 });
+    return NextResponse.json({ error: "Неверный логин или пароль" }, { status: 401 });
   }
 
   const passwordCheck = await verifyPassword(password, driver.passwordHash);
   if (!passwordCheck.valid) {
-    return NextResponse.json({ error: "РќРµРІРµСЂРЅС‹Р№ Р»РѕРіРёРЅ РёР»Рё РїР°СЂРѕР»СЊ" }, { status: 401 });
+    return NextResponse.json({ error: "Неверный логин или пароль" }, { status: 401 });
   }
 
   if (passwordCheck.needsRehash) {

@@ -57,6 +57,17 @@ function OrderRow({ order }: { order: Order }) {
     canceled: "Отменён",
   };
 
+  const handleCancel = async () => {
+    if (window.confirm("Вы уверены, что хотите отменить этот заказ?")) {
+      try {
+        await fetch(`/api/orders/${order.id}`, { method: "DELETE" });
+        // The socket 'order_status_change' event should broadcast the update and remove/update it from the list.
+      } catch (err) {
+        console.error("Failed to cancel order", err);
+      }
+    }
+  };
+
   return (
     <tr>
       <td className="text-muted">
@@ -76,11 +87,10 @@ function OrderRow({ order }: { order: Order }) {
           ? `${order.driver.lastName} ${order.driver.firstName[0]}.`
           : <span className="text-muted">—</span>}
       </td>
-      <td>{order.class ? (order.class as { name: string }).name : "—"}</td>
+      <td>{order.class ? (order.class as { name: string }).name : "Любой"}</td>
       <td>
         <div className="flex-row">
-          <button className="btn btn-ghost btn-sm" title="Открыть">✏️</button>
-          <button className="btn btn-ghost btn-sm" title="Отменить" style={{ color: "var(--status-offline)" }}>✕</button>
+          <button onClick={handleCancel} className="btn btn-ghost btn-sm" title="Отменить" style={{ color: "var(--status-offline)" }}>✕</button>
         </div>
       </td>
     </tr>

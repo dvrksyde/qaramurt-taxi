@@ -232,6 +232,7 @@ model Driver {
   documents     DriverDocument[]
   transactions  CashTransaction[]
   orderLogs     OrderStatusLog[]
+  chatMessages  ChatMessage[]
 
   @@map("drivers")
 }
@@ -493,4 +494,21 @@ model Queue {
   createdAt   DateTime @default(now())
 
   @@map("queues")
+}
+
+// ─── CHAT MESSAGES ────────────────────────────────────────────────────────────
+
+model ChatMessage {
+  id        Int      @id @default(autoincrement())
+  from      String   @db.VarChar(100)
+  driverId  Int?
+  text      String   @db.Text
+  direction String   @default("inbound") @db.VarChar(20)
+  createdAt DateTime @default(now())
+
+  driver Driver? @relation(fields: [driverId], references: [id])
+
+  @@index([driverId])
+  @@index([createdAt])
+  @@map("chat_messages")
 }

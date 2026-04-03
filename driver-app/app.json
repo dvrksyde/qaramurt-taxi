@@ -6,7 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
     "scheme": "qaramurt-driver",
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -43,17 +42,10 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Разрешите доступ к GPS для работы на линии",
-          "isAndroidBackgroundLocationEnabled": true,
-          "isAndroidForegroundServiceEnabled": true
+          "locationAlwaysAndWhenInUsePermission": "Разрешите доступ к GPS для работы на линии"
         }
       ],
-      [
-        "expo-notifications",
-        {
-          "sounds": ["./assets/order_alert.wav"]
-        }
-      ]
+      "expo-notifications"
     ]
   }
 }

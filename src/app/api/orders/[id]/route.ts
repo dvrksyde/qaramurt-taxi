@@ -91,5 +91,25 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     where: { id: parseInt(id) },
     data: { status: "canceled", canceledAt: new Date(), cancelReason: "Отменён оператором" },
   });
+
+  // Log status change
+  await prisma.orderStatusLog.create({
+    data: { orderId: updated.id, status: "canceled", note: "Отменён оператором" },
+  });
+
+  // Notify monitor via socket
+  const io = (global as Record<string, unknown>).socketIO as { to: (room: string) => { emit: (event: string, data: unknown) => void } } | undefined;
+  if (io) {
+    io.to("monitor").emit("order_status_change", { orderId: updated.id, status: "canceled", driverId: updated.driverId });
+  }
+
+  // Free driver if order canceled
+  if (updated.driverId) {
+    await prisma.driver.update({
+      where: { id: updated.driverId },
+      data: { status: "free" },
+    }).catch(console.error);
+  }
+
   return NextResponse.json({ data: updated });
 }

@@ -1,18 +1,16 @@
-import { useEffect, useState } from "react";
-import { Stack, useRouter, useSegments } from "expo-router";
+import { useEffect, useState, useCallback } from "react";
+import { Stack, useRouter, useSegments, SplashScreen } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { loadToken, getToken } from "../services/api";
 import { View, ActivityIndicator } from "react-native";
 
 export default function RootLayout() {
   const [ready, setReady] = useState(false);
-  const [authenticated, setAuthenticated] = useState(false);
   const router = useRouter();
   const segments = useSegments();
 
   useEffect(() => {
-    loadToken().then((t) => {
-      setAuthenticated(!!t);
+    loadToken().then(() => {
       setReady(true);
     });
   }, []);
@@ -20,14 +18,15 @@ export default function RootLayout() {
   useEffect(() => {
     if (!ready) return;
 
+    const token = getToken();
     const inAuthGroup = segments[0] === "login";
 
-    if (!authenticated && !inAuthGroup) {
+    if (!token && !inAuthGroup) {
       router.replace("/login");
-    } else if (authenticated && inAuthGroup) {
+    } else if (token && inAuthGroup) {
       router.replace("/");
     }
-  }, [ready, authenticated, segments]);
+  }, [ready]);  // Only run once when ready, not on every segment change
 
   if (!ready) {
     return (

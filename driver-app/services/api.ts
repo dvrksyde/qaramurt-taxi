@@ -42,10 +42,18 @@ export async function api<T = any>(
   }
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+    console.log(`[API] ${options.method || "GET"} ${API_BASE}${path}`);
+
     const res = await fetch(`${API_BASE}${path}`, {
       ...options,
       headers,
+      signal: controller.signal,
     });
+
+    clearTimeout(timeout);
 
     const json = await res.json();
 
@@ -54,7 +62,10 @@ export async function api<T = any>(
     }
 
     return json;
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      return { error: `Сервер не отвечает (таймаут). Проверьте подключение к ${API_BASE}` };
+    }
     return { error: "Нет подключения к серверу" };
   }
 }

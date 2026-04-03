@@ -33,6 +33,12 @@ export default function DriversPage() {
 
   useEffect(() => { loadDrivers(); }, []);
 
+  const maxOrders = Math.max(...drivers.map((d: any) => d.ordersCount || 0), 1);
+  const calcRating = (count: number) => {
+    if (!count) return 0.0;
+    return (count / maxOrders) * 5.0;
+  };
+
   return (
     <div className="page-content">
       {/* Status legend & Action Bar */}
@@ -69,6 +75,7 @@ export default function DriversPage() {
                 <th rowSpan={2}>ID</th>
                 <th rowSpan={2}>Логин</th>
                 <th rowSpan={2}>Имя</th>
+                <th rowSpan={2} style={{ textAlign: "center" }}>Рейтинг</th>
                 <th rowSpan={2}>Баланс</th>
                 <th rowSpan={2}>Устройство</th>
                 <th colSpan={3} style={{ textAlign: "center", borderBottom: "1px solid var(--color-border-2)" }}>Автомобиль</th>
@@ -96,6 +103,11 @@ export default function DriversPage() {
                     <td className="text-muted text-sm">{driver.id}</td>
                     <td className="text-mono text-sm">{driver.login}</td>
                     <td style={{ fontWeight: 500 }}>{driver.lastName} {driver.firstName}</td>
+                    <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                      <span style={{ color: "#f39c12", marginRight: 4 }}>⭐</span>
+                      <strong style={{ color: "#2d3436" }}>{calcRating(driver.ordersCount || 0).toFixed(1)}</strong>
+                      <span style={{ color: "#b2bec3", fontSize: 12, marginLeft: 6 }}>({driver.ordersCount || 0} зкз.)</span>
+                    </td>
                     <td>
                       <span style={{ color: driver.balance < 0 ? "var(--status-offline)" : "inherit", fontWeight: driver.balance < 0 ? 700 : 400 }}>
                         {Number(driver.balance).toFixed(2)}

@@ -35,10 +35,10 @@ export default function GeozoneMapClient({ savedZones, onSaveSuccess }: Props) {
 
     // Initialize Map
     if (!mapInstance.current) {
-      mapInstance.current = L.map(mapRef.current).setView([42.316, 69.589], 12); // Def Shymkent/Qaramurt
+      mapInstance.current = L.map(mapRef.current).setView([42.309, 69.969], 14); // Карамурт, Сайрамский р-н
       
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "© OpenStreetMap contributors",
+      L.tileLayer("https://core-renderer-tiles.maps.yandex.net/tiles?l=map&x={x}&y={y}&z={z}&scale=1&lang=ru_RU&projection=web_mercator", {
+        attribution: "© Яндекс Карты",
       }).addTo(mapInstance.current);
 
       layersRef.current.addTo(mapInstance.current);

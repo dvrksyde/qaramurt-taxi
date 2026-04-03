@@ -27,6 +27,7 @@ export interface Driver {
   isActive: boolean;
   createdAt: string;
   deviceId?: string | null;
+  ordersCount?: number;
   vehicles?: { id: number; plate: string; make: string; model: string; color: string; classes?: any[] }[];
 }
 

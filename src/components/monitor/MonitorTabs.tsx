@@ -1,5 +1,6 @@
 "use client";
 import { useMonitorStore } from "@/stores/monitorStore";
+import { useEffect } from "react";
 
 type Tab = "current" | "scheduled" | "exchange" | "map" | "chat" | "system" | "alarms";
 
@@ -10,9 +11,18 @@ const TABS: { key: Tab; label: string; countKey?: keyof ReturnType<typeof useMon
   { key: "system",    label: "Системное",        countKey: "system" },
 ];
 
+const VALID_TABS = ["current", "scheduled", "exchange", "map", "chat", "system", "alarms"];
+
 export function MonitorTabs() {
   const { activeTab, setActiveTab, counts } = useMonitorStore();
 
+  // Restore saved tab after hydration
+  useEffect(() => {
+    const saved = localStorage.getItem("monitor_active_tab");
+    if (saved && VALID_TABS.includes(saved) && saved !== activeTab) {
+      setActiveTab(saved as Tab);
+    }
+  }, []);
   return (
     <div className="tabs-bar">
       {TABS.map((tab) => {

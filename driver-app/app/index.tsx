@@ -325,8 +325,8 @@ export default function MainScreen() {
           <MapView
             style={styles.map}
             initialRegion={{
-              latitude: lastLocationRef.current?.lat || 42.44, // Default Qaramurt approx
-              longitude: lastLocationRef.current?.lng || 69.83,
+              latitude: lastLocationRef.current?.lat || 42.309, // Карамурт
+              longitude: lastLocationRef.current?.lng || 69.969,
               latitudeDelta: 0.01,
               longitudeDelta: 0.01,
             }}

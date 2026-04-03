@@ -21,6 +21,7 @@ const NAV_LINKS = [
   { href: "/drivers",    label: "Водители",       requiredPerms: [] as string[] },
   { href: "/clients",    label: "Клиенты",        requiredPerms: ["clients"] },
   { href: "/journal",    label: "Журнал заказов", requiredPerms: ["journal_own", "journal_all"] },
+  { href: "/reports",    label: "Отчеты",         requiredPerms: ["admin"] },
 ];
 
 export function TopNav({ session }: Props) {
@@ -58,9 +59,6 @@ export function TopNav({ session }: Props) {
         <div className="nav-brand">
           <span style={{ color: "#f5c518" }}>🚖</span>
           <span style={{ color: "#3db84a" }}>{session.user?.name || "Администратор"}</span>
-          <span className="nav-brand-sub">|</span>
-          <span className="nav-brand-sub">Общ. касса: {totalCash} руб.</span>
-          <span style={{ color: "#f5c518" }} className="nav-brand-sub">ПО: {advanceBalance} руб.</span>
         </div>
 
         {/* Nav Links — filtered by permissions */}
