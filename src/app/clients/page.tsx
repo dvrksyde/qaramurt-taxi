@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import { useSocket } from "@/stores/socketStore";
 
 interface ClientRow {
   id: number;
@@ -24,8 +25,8 @@ export default function ClientsPage() {
   const [sortBy, setSortBy] = useState<SortField>("id");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  const fetchClients = useCallback(() => {
-    setLoading(true);
+  const fetchClients = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     params.set("sortBy", sortBy);
@@ -42,6 +43,21 @@ export default function ClientsPage() {
   }, [search, sortBy, sortDir]);
 
   useEffect(() => { fetchClients(); }, [fetchClients]);
+
+  const { socket } = useSocket();
+
+  useEffect(() => {
+    if (!socket) return;
+    const handleChange = () => fetchClients(true);
+    
+    socket.on("new_order", handleChange);
+    socket.on("order_status_change", handleChange);
+    
+    return () => {
+      socket.off("new_order", handleChange);
+      socket.off("order_status_change", handleChange);
+    };
+  }, [socket, fetchClients]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();

@@ -8,7 +8,14 @@ export function CurrentOrdersTab() {
 
   useEffect(() => {
     fetch("/api/orders?status=pending,assigned,arrived,in_progress")
-      .then((r) => r.json())
+      .then(async (r) => {
+        const text = await r.text();
+        if (!text) {
+          console.warn("API /api/orders returned empty string. Status:", r.status);
+          return { data: [] };
+        }
+        return JSON.parse(text);
+      })
       .then((data) => data.data && setCurrentOrders(data.data))
       .catch(console.error);
   }, []);
@@ -48,6 +55,7 @@ export function CurrentOrdersTab() {
 }
 
 function OrderRow({ order }: { order: Order }) {
+  const { setSelectedOrderId } = useMonitorStore();
   const statusLabels: Record<string, string> = {
     pending: "Ожидает",
     assigned: "Назначен",
@@ -69,7 +77,11 @@ function OrderRow({ order }: { order: Order }) {
   };
 
   return (
-    <tr>
+    <tr 
+      onClick={() => setSelectedOrderId(order.id)} 
+      style={{ cursor: "pointer" }}
+      className="clickable-row"
+    >
       <td className="text-muted">
         {new Date(order.createdAt).toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" })}
       </td>
@@ -90,7 +102,7 @@ function OrderRow({ order }: { order: Order }) {
       <td>{order.class ? (order.class as { name: string }).name : "Любой"}</td>
       <td>
         <div className="flex-row">
-          <button onClick={handleCancel} className="btn btn-ghost btn-sm" title="Отменить" style={{ color: "var(--status-offline)" }}>✕</button>
+          <button onClick={(e) => { e.stopPropagation(); handleCancel(); }} className="btn btn-ghost btn-sm" title="Отменить" style={{ color: "var(--status-offline)" }}>✕</button>
         </div>
       </td>
     </tr>

@@ -350,7 +350,7 @@ app.prepare().then(async () => {
   const PORT = parseInt(process.env.PORT || "3000", 10);
   const HOST = "0.0.0.0";
   httpServer.listen(PORT, HOST, () => {
-    console.log(`> Qaramurt Taxi ready on http://${HOST}:${PORT}`);
+    console.log(`> Qaramurt Taxi ready on http://localhost:${PORT} (network: http://${HOST}:${PORT})`);
     console.log(`> Socket.io running on /api/socket`);
     console.log(`> Redis: ${redisAvailable ? "connected" : "offline (degraded mode)"}`);
     console.log(`> Environment: ${dev ? "development" : "production"}`);

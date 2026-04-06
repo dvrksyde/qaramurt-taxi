@@ -2,6 +2,7 @@
 import { useMonitorStore } from "@/stores/monitorStore";
 import { useSocket } from "@/stores/socketStore";
 import { NewOrderModal } from "@/components/orders/NewOrderModal";
+import { OrderDetailsModal } from "@/components/orders/OrderDetailsModal";
 import { MonitorTabs } from "@/components/monitor/MonitorTabs";
 import { CurrentOrdersTab } from "@/components/monitor/CurrentOrdersTab";
 import { MapTab } from "@/components/monitor/MapTab";
@@ -10,7 +11,7 @@ import { SystemTab } from "@/components/monitor/SystemTab";
 import { useEffect } from "react";
 
 export default function MonitorPage() {
-  const { activeTab, isNewOrderOpen, openNewOrder, closeNewOrder } = useMonitorStore();
+  const { activeTab, isNewOrderOpen, openNewOrder, closeNewOrder, selectedOrderId, setSelectedOrderId } = useMonitorStore();
   const { connected } = useSocket();
 
   // Global keyboard shortcut: Alt+F1 → open new order
@@ -36,7 +37,6 @@ export default function MonitorPage() {
         >
           + Новый заказ (Alt+F1)
         </button>
-        <button className="btn btn-ghost btn-sm" title="Загрузить заказы">⬇</button>
         <span className="text-muted" style={{ marginLeft: 8, fontSize: 12 }}>
           Входящая линия:{" "}
           <span style={{ color: connected ? "var(--status-free)" : "var(--status-offline)" }}>
@@ -61,6 +61,14 @@ export default function MonitorPage() {
 
       {/* New Order Modal */}
       {isNewOrderOpen && <NewOrderModal onClose={closeNewOrder} />}
+
+      {/* Order Details Modal */}
+      {selectedOrderId && (
+        <OrderDetailsModal 
+          orderId={selectedOrderId} 
+          onClose={() => setSelectedOrderId(null)} 
+        />
+      )}
     </div>
   );
 }

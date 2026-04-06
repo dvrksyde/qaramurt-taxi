@@ -25,6 +25,19 @@ async function main() {
   });
   console.log("✓ TaxiService:", service.name);
 
+  const deliveryService = await prisma.taxiService.upsert({
+    where: { id: 2 },
+    update: {},
+    create: {
+      name: "Доставка",
+      priority: 9,
+      settlement: "Город",
+      autoSelectionType: "nearest",
+      isActive: true,
+    },
+  });
+  console.log("✓ TaxiService:", deliveryService.name);
+
   // ── Vehicle Class Group ────────────────────────────────────────────────────
   const group = await prisma.vehicleClassGroup.upsert({
     where: { id: 1 },
@@ -88,7 +101,7 @@ async function main() {
   // ── Admin Operator ─────────────────────────────────────────────────────────
   const admin = await prisma.operator.upsert({
     where: { login: "admin" },
-    update: {},
+    update: { passwordHash: await hashPassword("admin123") },
     create: {
       login: "admin",
       name: "Администратор",

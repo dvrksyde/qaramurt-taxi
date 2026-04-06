@@ -10,6 +10,7 @@ const jwt_1 = require("next-auth/jwt");
 const redis_1 = require("redis");
 const socket_io_1 = require("socket.io");
 const driverAuth_1 = require("./src/lib/driverAuth");
+const prisma_1 = require("./src/lib/prisma");
 const dev = process.env.NODE_ENV !== "production";
 const app = (0, next_1.default)({ dev });
 const handle = app.getRequestHandler();
@@ -106,7 +107,9 @@ app.prepare().then(async () => {
     const io = new socket_io_1.Server(httpServer, {
         path: "/api/socket",
         cors: {
-            origin: process.env.NEXTAUTH_URL || "http://localhost:3000",
+            origin: process.env.SOCKET_CORS_ORIGIN
+                ? process.env.SOCKET_CORS_ORIGIN.split(",")
+                : (process.env.NEXTAUTH_URL || "http://localhost:3000"),
             methods: ["GET", "POST"],
         },
     });
@@ -177,27 +180,79 @@ app.prepare().then(async () => {
                 return;
             io.to("monitor").emit("order_status_change", data);
         });
-        socket.on("chat_message", (msg) => {
+        socket.on("chat_message", async (msg) => {
             const auth = socket.data.auth;
             if (!auth)
                 return;
-            if (auth.kind === "operator") {
+            try {
+                const prisma = (0, prisma_1.getPrisma)();
+                if (auth.kind === "operator") {
+                    // Save to DB
+                    await prisma.chatMessage.create({
+                        data: {
+                            from: msg.from || "Оператор",
+                            driverId: msg.driverId || null,
+                            text: msg.text,
+                            direction: "outbound",
+                        },
+                    });
+                    const safeMessage = {
+                        ...msg,
+                        from: msg.from || "Оператор",
+                        direction: "outbound",
+                    };
+                    // Send to other monitors (excluding sender)
+                    socket.broadcast.to("monitor").emit("chat_message", safeMessage);
+                    // Send to target driver (they see it as inbound)
+                    if (msg.driverId) {
+                        io.to(`driver:${msg.driverId}`).emit("chat_message", {
+                            ...safeMessage,
+                            direction: "inbound",
+                        });
+                    }
+                    else {
+                        // Broadcast to all drivers
+                        io.to("drivers").emit("chat_message", {
+                            ...safeMessage,
+                            direction: "inbound",
+                        });
+                    }
+                    return;
+                }
+                // Driver sending message — look up driver name
+                let driverName = msg.from;
+                try {
+                    const driver = await prisma.driver.findUnique({
+                        where: { id: auth.driverId },
+                        select: { callsign: true, firstName: true, lastName: true },
+                    });
+                    if (driver) {
+                        driverName = `${driver.callsign || ""} ${driver.lastName} ${driver.firstName}`.trim();
+                    }
+                }
+                catch { }
+                // Save to DB
+                await prisma.chatMessage.create({
+                    data: {
+                        from: driverName,
+                        driverId: auth.driverId,
+                        text: msg.text,
+                        direction: "inbound",
+                    },
+                });
                 const safeMessage = {
                     ...msg,
-                    from: msg.from || `Operator #${auth.operatorId}`,
+                    from: driverName,
+                    driverId: auth.driverId,
+                    direction: "inbound",
                 };
+                // Send to monitor (dispatchers see it as inbound from driver)
                 io.to("monitor").emit("chat_message", safeMessage);
-                if (msg.driverId) {
-                    io.to(`driver:${msg.driverId}`).emit("chat_message", safeMessage);
-                }
-                return;
+                // Don't echo back to the driver
             }
-            const safeMessage = {
-                ...msg,
-                driverId: auth.driverId,
-            };
-            io.to("monitor").emit("chat_message", safeMessage);
-            io.to(`driver:${auth.driverId}`).emit("chat_message", safeMessage);
+            catch (err) {
+                console.error("[Chat] Error:", err);
+            }
         });
         socket.on("driver_alarm", (data) => {
             const auth = socket.data.auth;
@@ -232,8 +287,9 @@ app.prepare().then(async () => {
     }
     global.socketIO = io;
     const PORT = parseInt(process.env.PORT || "3000", 10);
-    httpServer.listen(PORT, () => {
-        console.log(`> Qaramurt Taxi ready on http://localhost:${PORT}`);
+    const HOST = "0.0.0.0";
+    httpServer.listen(PORT, HOST, () => {
+        console.log(`> Qaramurt Taxi ready on http://localhost:${PORT} (network: http://${HOST}:${PORT})`);
         console.log(`> Socket.io running on /api/socket`);
         console.log(`> Redis: ${redisAvailable ? "connected" : "offline (degraded mode)"}`);
         console.log(`> Environment: ${dev ? "development" : "production"}`);

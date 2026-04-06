@@ -815,3 +815,42 @@ code { font-family: var(--font-mono); font-size: 12px; }
 .nowrap      { white-space: nowrap; }
 .w-full      { width: 100%; }
 .divider     { height: 1px; background: var(--color-border); margin: 8px 0; }
+
+/* Landmark Autocomplete Dropdown */
+.landmark-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 80px;
+  right: 0;
+  background: white;
+  border: 1px solid #ddd;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  z-index: 1000;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.landmark-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+}
+.landmark-item:hover,
+.landmark-item.selected {
+  background: #f5f8ff;
+  border-left: 3px solid var(--color-primary);
+  padding-left: 9px;
+}
+.landmark-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: #333;
+}
+.landmark-full {
+  font-size: 11px;
+  color: #777;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

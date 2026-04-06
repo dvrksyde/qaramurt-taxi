@@ -55,6 +55,7 @@ enum TransactionType {
   deposit
   penalty
   bonus
+  order_fee
 }
 
 enum TariffType {
@@ -221,6 +222,8 @@ model Driver {
   /// Stored as "POINT(lng lat)" WKT string; use raw SQL for ST_DWithin
   currentLocation String?      @db.Text
   deviceId        String?      @db.VarChar(100)
+  osVersion       String?      @db.VarChar(50)
+  thirdPartyApps  Json         @default("[]")
   comment         String?
   isActive        Boolean      @default(true)
   createdAt       DateTime     @default(now())
@@ -312,8 +315,22 @@ model Operator {
   orders           Order[]
   cashTransactions CashTransaction[]
   callLogs         CallLog[]
+  settlements      OperatorSettlement[]
 
   @@map("operators")
+}
+
+model OperatorSettlement {
+  id          Int      @id @default(autoincrement())
+  operatorId  Int
+  amount      Decimal  @db.Decimal(10, 2)
+  type        String   @default("salary") @db.VarChar(50) // salary, bonus, penalty
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  operator Operator @relation(fields: [operatorId], references: [id])
+
+  @@map("operator_settlements")
 }
 
 // ─── CLIENTS ─────────────────────────────────────────────────────────────────
@@ -511,4 +528,17 @@ model ChatMessage {
   @@index([driverId])
   @@index([createdAt])
   @@map("chat_messages")
+}
+
+model AddressBook {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(100)
+  fullName  String?  @db.Text
+  latitude  Decimal  @db.Decimal(10, 7)
+  longitude Decimal  @db.Decimal(10, 7)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([name])
+  @@map("address_book")
 }

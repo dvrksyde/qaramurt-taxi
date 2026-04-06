@@ -3,19 +3,21 @@ import { useEffect, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import type { Operator } from "@/types";
 import { OperatorModal } from "@/components/operators/OperatorModal";
+import { SettlementModal } from "@/components/operators/SettlementModal";
 
 export default function OperatorsPage() {
   const { data: session } = useSession();
   const [operators, setOperators] = useState<Operator[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSettlementOpen, setIsSettlementOpen] = useState(false);
   const [selectedOperator, setSelectedOperator] = useState<Operator | null>(null);
 
   const user = session?.user as any;
   const isAdmin = user?.role === "admin";
 
-  const fetchOperators = useCallback(() => {
-    setLoading(true);
+  const fetchOperators = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
     fetch("/api/operators")
       .then((r) => r.json())
       .then((d) => d.data && setOperators(d.data))
@@ -34,7 +36,7 @@ export default function OperatorsPage() {
 
   // Re-fetch every 30s to refresh online statuses
   useEffect(() => {
-    const interval = setInterval(fetchOperators, 30_000);
+    const interval = setInterval(() => fetchOperators(true), 30_000);
     return () => clearInterval(interval);
   }, [fetchOperators]);
 
@@ -113,7 +115,7 @@ export default function OperatorsPage() {
                       <span className="op-actions">
                         <button
                           className="op-action-link"
-                          onClick={() => { /* TODO: расчёты */ }}
+                          onClick={() => { setSelectedOperator(op); setIsSettlementOpen(true); }}
                         >
                           Расчёты
                         </button>
@@ -155,6 +157,13 @@ export default function OperatorsPage() {
           operator={selectedOperator}
           onClose={() => setIsModalOpen(false)}
           onSuccess={fetchOperators}
+        />
+      )}
+
+      {isSettlementOpen && selectedOperator && isAdmin && (
+        <SettlementModal
+          operator={selectedOperator}
+          onClose={() => setIsSettlementOpen(false)}
         />
       )}
     </div>

@@ -56,7 +56,12 @@ export async function GET(req: NextRequest) {
     prisma.order.findMany({
       where,
       include: {
-        driver: { select: { id: true, firstName: true, lastName: true, callsign: true } },
+        driver: { 
+          select: { 
+            id: true, firstName: true, lastName: true, callsign: true, phone: true,
+            vehicles: { select: { plate: true, make: true, model: true, color: true } }
+          } 
+        },
         service: { select: { id: true, name: true } },
         class: { select: { id: true, name: true } },
         operator: { select: { id: true, name: true } },
@@ -82,7 +87,7 @@ export async function POST(req: NextRequest) {
     pickupAddress, dropoffAddress, stops, comment,
     classId, tariffId, cashlessAccountId, useBonuses,
     distributionMethod, optionIds, printReceipt, estimatedPrice,
-    pricePerKm,
+    pricePerKm, pickupPoint, dropoffPoint, distanceKm,
   } = body;
 
   if (!phone) return NextResponse.json({ error: "Телефон обязателен" }, { status: 400 });
@@ -109,7 +114,9 @@ export async function POST(req: NextRequest) {
       tariffId: tariffId ? parseInt(tariffId) : null,
       classId: classId ? parseInt(classId) : null,
       pickupAddress: pickupAddress || null,
+      pickupPoint: pickupPoint && pickupPoint.length === 2 ? `POINT(${pickupPoint[1]} ${pickupPoint[0]})` : null,
       dropoffAddress: dropoffAddress || null,
+      dropoffPoint: dropoffPoint && dropoffPoint.length === 2 ? `POINT(${dropoffPoint[1]} ${dropoffPoint[0]})` : null,
       stops: stops || [],
       comment: comment || null,
       isScheduled: timing === "scheduled",
@@ -120,6 +127,7 @@ export async function POST(req: NextRequest) {
       cashlessAccountId: cashlessAccountId ? parseInt(cashlessAccountId) : null,
       printReceipt: printReceipt || false,
       pricePerKm: pricePerKm ? parseInt(pricePerKm) : 80,
+      distanceKm: distanceKm ?? null,
       status: "pending",
       options: optionIds?.length
         ? { create: optionIds.map((id: number) => ({ optionId: id })) }

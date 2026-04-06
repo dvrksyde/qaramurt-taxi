@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useSocket } from "@/stores/socketStore";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
@@ -10,6 +11,7 @@ interface ReportsData {
     grossRevenue: number;
     companyCommission: number;
     siteCommission: number;
+    totalSettlements: number;
     netCompanyProfit: number;
     siteRate: number;
     companyRatePercent: number;
@@ -86,17 +88,9 @@ export default function ReportsPage() {
     return { background: "#f5f6fa", color: "#636e72", fontSize: 13, padding: "6px 16px", borderRadius: 20, border: "none" };
   };
 
-  useEffect(() => {
-    if (status === "loading") return;
-    
-    // ... rest of useeffect logic
-    const role = (session?.user as any)?.role;
-    if (!session || role !== "admin") {
-      router.push("/monitor");
-      return;
-    }
-
-    setLoading(true);
+  const fetchReport = useCallback((silent = false) => {
+    if (status === "loading" || !session || (session.user as any)?.role !== "admin") return;
+    if (!silent) setLoading(true);
     fetch(`/api/reports?startDate=${startDate}&endDate=${endDate}`)
       .then(async (r) => {
         const res = await r.json();
@@ -109,7 +103,34 @@ export default function ReportsPage() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [session, status, router, startDate, endDate]);
+  }, [session, status, startDate, endDate]);
+
+  useEffect(() => {
+    if (status === "loading") return;
+    const role = (session?.user as any)?.role;
+    if (!session || role !== "admin") {
+      router.push("/monitor");
+      return;
+    }
+    fetchReport();
+  }, [status, session, router, fetchReport]);
+
+  const { socket } = useSocket();
+
+  useEffect(() => {
+    if (!socket) return;
+    const handleChange = () => fetchReport(true);
+    
+    socket.on("new_order", handleChange);
+    socket.on("order_status_change", handleChange);
+    socket.on("order_updated", handleChange);
+    
+    return () => {
+      socket.off("new_order", handleChange);
+      socket.off("order_status_change", handleChange);
+      socket.off("order_updated", handleChange);
+    };
+  }, [socket, fetchReport]);
 
   if (status === "loading") {
     return (
@@ -201,6 +222,10 @@ export default function ReportsPage() {
                 <div style={{ fontSize: 24, fontWeight: 700, color: "#d63031", lineHeight: 1 }}>{data.summary.siteCommission.toLocaleString("ru-RU")} <span style={{fontSize:16}}>тг.</span></div>
                 <div style={{ fontSize: 13, color: "#ff7675", marginTop: 6 }}>комиссия разработчиков сайта (по {data.summary.siteRate} тг/заказ)</div>
               </div>
+              <div style={{ background: "rgba(255, 159, 67, 0.05)", padding: 16, borderRadius: 8, borderLeft: "3px solid #ff9f43" }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: "#ff9f43", lineHeight: 1 }}>{data.summary.totalSettlements.toLocaleString("ru-RU")} <span style={{fontSize:16}}>тг.</span></div>
+                <div style={{ fontSize: 13, color: "#ff9f43", marginTop: 6 }}>выплачено зарплат диспетчерам</div>
+              </div>
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 24, flexWrap: "wrap", gap: 16 }}>
@@ -208,7 +233,7 @@ export default function ReportsPage() {
                 <div style={{ fontSize: 16, color: "#00b894", fontWeight: 700, textTransform: "uppercase" }}>Чистая прибыль компании</div>
                 <div style={{ color: "#b2bec3", fontSize: 13, marginTop: 4, maxWidth: 500 }}>
                   Ставка: <strong>{data.summary.companyRatePercent}%</strong> от стоимости заказов. 
-                  Общий доход составил: <strong>{data.summary.companyCommission.toLocaleString("ru-RU")} тг.</strong> минус комиссия разработчикам.
+                  Общий доход составил: <strong>{data.summary.companyCommission.toLocaleString("ru-RU")} тг.</strong> минус комиссии и выплаты зарплат.
                 </div>
               </div>
               <div style={{ textAlign: "right" }}>

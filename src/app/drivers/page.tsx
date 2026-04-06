@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import type { Driver } from "@/types";
 import { DriverForm } from "@/components/drivers/DriverForm";
+import { BalanceModal } from "@/components/drivers/BalanceModal";
+import { useSocket } from "@/stores/socketStore";
+import { useCallback } from "react";
 
 export default function DriversPage() {
   const { data: session } = useSession();
@@ -10,6 +13,7 @@ export default function DriversPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editDriver, setEditDriver] = useState<Driver | null>(null);
+  const [balanceDriver, setBalanceDriver] = useState<Driver | null>(null);
 
   // Extract permissions from session
   const user = session?.user as any;
@@ -22,42 +26,59 @@ export default function DriversPage() {
   const canEdit = hasPerm("edit_drivers");
   const canDelete = hasPerm("delete_drivers");
 
-  const loadDrivers = () => {
-    setLoading(true);
+  const loadDrivers = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
     fetch(`/api/drivers`)
       .then((r) => r.json())
       .then((d) => { if (d.data) setDrivers(d.data); })
       .catch(console.error)
       .finally(() => setLoading(false));
-  };
+  }, []);
 
-  useEffect(() => { loadDrivers(); }, []);
+  useEffect(() => { loadDrivers(); }, [loadDrivers]);
 
-  const maxOrders = Math.max(...drivers.map((d: any) => d.ordersCount || 0), 1);
-  const calcRating = (count: number) => {
-    if (!count) return 0.0;
-    return (count / maxOrders) * 5.0;
-  };
+  const { socket } = useSocket();
+
+  useEffect(() => {
+    if (!socket) return;
+    const handleChange = () => loadDrivers(true);
+    
+    socket.on("driver_online", handleChange);
+    socket.on("driver_offline", handleChange);
+    socket.on("order_status_change", handleChange);
+    socket.on("order_updated", handleChange);
+    
+    return () => {
+      socket.off("driver_online", handleChange);
+      socket.off("driver_offline", handleChange);
+      socket.off("order_status_change", handleChange);
+      socket.off("order_updated", handleChange);
+    };
+  }, [socket, loadDrivers]);
+
+  // Calculate driver ranks
+  const sortedByOrders = [...drivers].sort((a, b) => (b.ordersCount || 0) - (a.ordersCount || 0));
+  const driverRanks = new Map<number, number>();
+  sortedByOrders.forEach((d, idx) => { driverRanks.set(d.id, idx + 1); });
 
   return (
     <div className="page-content">
-      {/* Status legend & Action Bar */}
+      {/* Action Bar */}
       <div style={{ padding: "8px 14px", marginBottom: 0, fontSize: 12, background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
           <strong style={{ color: "var(--color-text)", marginRight: 8 }}>Статусы:</strong>
           <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#00ff00" }}/> - свободен;</span>
           <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#ffd700" }}/> - на заказе;</span>
-          <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "var(--status-offline)" }}/> - отключен / не в сети;</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "var(--status-offline)" }}/> - не в сети;</span>
         </div>
 
         {canAdd && (
-          <button className="btn btn-ghost btn-sm" style={{ color: "var(--color-primary)", fontWeight: 600 }} onClick={() => { setEditDriver(null); setShowForm(true); }} id="btn-add-driver">
+          <button className="btn btn-ghost btn-sm" style={{ color: "var(--color-primary)", fontWeight: 600 }} onClick={() => { setEditDriver(null); setShowForm(true); }}>
             + Добавить водителя
           </button>
         )}
       </div>
 
-      {/* Table */}
       <div className="data-table-wrap">
         {loading ? (
           <div className="empty-state"><div className="pulse">Загрузка...</div></div>
@@ -65,7 +86,7 @@ export default function DriversPage() {
           <div className="empty-state">
             <div className="empty-state-icon">🚗</div>
             <div>Нет водителей</div>
-            {canAdd && <button className="btn btn-primary" onClick={() => setShowForm(true)}>Добавить первого водителя</button>}
+            {canAdd && <button className="btn btn-primary" onClick={() => setShowForm(true)}>Добавить</button>}
           </div>
         ) : (
           <table className="data-table">
@@ -94,6 +115,7 @@ export default function DriversPage() {
                 else if (driver.status === "busy") statusColor = "#ffd700";
 
                 const v = driver.vehicles?.[0];
+                const isLowBalance = Number(driver.balance) < 100;
 
                 return (
                   <tr key={driver.id}>
@@ -104,16 +126,43 @@ export default function DriversPage() {
                     <td className="text-mono text-sm">{driver.login}</td>
                     <td style={{ fontWeight: 500 }}>{driver.lastName} {driver.firstName}</td>
                     <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                      <span style={{ color: "#f39c12", marginRight: 4 }}>⭐</span>
-                      <strong style={{ color: "#2d3436" }}>{calcRating(driver.ordersCount || 0).toFixed(1)}</strong>
+                      <span style={{ color: "#f39c12", marginRight: 4 }}>🏆</span>
+                      <strong style={{ color: "#2d3436" }}>{driverRanks.get(driver.id)}</strong>
                       <span style={{ color: "#b2bec3", fontSize: 12, marginLeft: 6 }}>({driver.ordersCount || 0} зкз.)</span>
                     </td>
-                    <td>
-                      <span style={{ color: driver.balance < 0 ? "var(--status-offline)" : "inherit", fontWeight: driver.balance < 0 ? 700 : 400 }}>
-                        {Number(driver.balance).toFixed(2)}
-                      </span>
+                    <td style={{ verticalAlign: "middle" }}>
+                      <button 
+                        onClick={() => setBalanceDriver(driver)}
+                        style={{ 
+                          background: isLowBalance ? "#fff5f5" : "#f0fdf4",
+                          color: isLowBalance ? "#e03131" : "#099268",
+                          padding: "4px 10px",
+                          borderRadius: "16px",
+                          fontSize: "13px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          border: `1px solid ${isLowBalance ? "#ffc9c9" : "#bbf7d0"}`,
+                          transition: "all 0.2s ease"
+                        }}
+                        onMouseOver={(e) => {
+                          e.currentTarget.style.transform = "translateY(-1px)";
+                          e.currentTarget.style.boxShadow = "0 3px 6px rgba(0,0,0,0.1)";
+                        }}
+                        onMouseOut={(e) => {
+                          e.currentTarget.style.transform = "none";
+                          e.currentTarget.style.boxShadow = "none";
+                        }}
+                      >
+                        {isLowBalance && <span style={{ fontSize: "14px" }}>⚠️</span>}
+                        {Number(driver.balance).toLocaleString()} <span style={{ fontSize: "10px", opacity: 0.8 }}>₸</span>
+                      </button>
                     </td>
-                    <td className="text-muted text-sm">{driver.deviceId || "—"}</td>
+                    <td className="text-muted text-sm" style={{ lineHeight: 1.4 }}>
+                      <div style={{ color: "var(--color-primary)" }}>{(driver as any).osVersion || "Android"}</div>
+                    </td>
                     <td className="text-mono text-sm">{v?.plate || "—"}</td>
                     <td className="text-muted text-sm">{v ? `${v.make} ${v.model || ""}`.trim() : "—"}</td>
                     <td className="text-muted text-sm">{v?.color || "—"}</td>
@@ -125,19 +174,11 @@ export default function DriversPage() {
                           )}
                           {canDelete && (
                             <button className="btn btn-ghost btn-sm text-danger"
-                              title="Удалить из базы данных"
+                              title="Удалить"
                               onClick={async () => {
-                                if (confirm("Вы уверены, что хотите удалить этого водителя навсегда?")) {
-                                  try {
-                                    const res = await fetch(`/api/drivers/${driver.id}`, { method: "DELETE" });
-                                    const d = await res.json();
-                                    if (!res.ok) {
-                                      alert(d.error || "Ошибка удаления");
-                                    }
-                                    loadDrivers();
-                                  } catch {
-                                    alert("Ошибка сети");
-                                  }
+                                if (confirm("Вы уверены?")) {
+                                  await fetch(`/api/drivers/${driver.id}`, { method: "DELETE" });
+                                  loadDrivers();
                                 }
                               }}>🗑️</button>
                           )}
@@ -149,14 +190,22 @@ export default function DriversPage() {
               })}
             </tbody>
           </table>
-        )}
+        ) }
       </div>
 
-      {/* Driver Form Modal */}
+      {/* Modals */}
       {showForm && (
         <DriverForm
           driver={editDriver}
           onClose={() => { setShowForm(false); setEditDriver(null); loadDrivers(); }}
+        />
+      )}
+
+      {balanceDriver && (
+        <BalanceModal
+          driver={balanceDriver}
+          onClose={() => setBalanceDriver(null)}
+          onUpdate={loadDrivers}
         />
       )}
     </div>

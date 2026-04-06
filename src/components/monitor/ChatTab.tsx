@@ -83,10 +83,10 @@ export function ChatTab() {
 
   // Filter messages for selected driver
   const filteredMessages = selectedDriverId === "all"
-    ? chatMessages
+    ? chatMessages.filter((m) => !m.driverId && m.direction === "outbound")
     : selectedDriverId
       ? chatMessages.filter((m) => m.driverId === selectedDriverId || (!m.driverId && m.direction === "outbound"))
-      : chatMessages;
+      : [];
 
   const statusColor = (status: string) => {
     switch (status) {

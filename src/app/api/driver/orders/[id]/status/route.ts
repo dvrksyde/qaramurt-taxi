@@ -26,6 +26,7 @@ export async function PATCH(
   // Check order belongs to this driver
   const order = await prisma.order.findFirst({
     where: { id: orderId, driverId: auth.driverId },
+    include: { service: true }
   });
 
   if (!order) {
@@ -41,33 +42,70 @@ export async function PATCH(
     updateData.startedAt = new Date();
   } else if (status === "completed") {
     updateData.completedAt = new Date();
-    // Save final GPS point as dropoff
-    if (lat && lng) {
-      updateData.dropoffPoint = `POINT(${lng} ${lat})`;
-    }
-    // Save final distance and price
-    if (distanceKm !== undefined) {
-      updateData.distanceKm = distanceKm;
-    }
-    if (finalPrice !== undefined) {
-      updateData.finalPrice = finalPrice;
-    }
+    if (lat && lng) updateData.dropoffPoint = `POINT(${lng} ${lat})`;
+    if (distanceKm !== undefined) updateData.distanceKm = distanceKm;
+    if (finalPrice !== undefined) updateData.finalPrice = finalPrice;
   } else if (status === "canceled") {
     updateData.canceledAt = new Date();
   }
 
-  await prisma.order.update({
-    where: { id: orderId },
-    data: updateData,
-  });
-
-  // If completed or canceled — set driver back to free
-  if (status === "completed" || status === "canceled") {
-    await prisma.driver.update({
-      where: { id: auth.driverId },
-      data: { status: "free" },
+  // Use transaction to atomize status update and balance deduction
+  await prisma.$transaction(async (tx) => {
+    const updatedOrder = await tx.order.update({
+      where: { id: orderId },
+      data: updateData,
     });
-  }
+
+    const operatorId = 1; // System/Default operator for automatic driver actions
+
+    // 1. Commission (10%)
+    if (status === "completed" && updatedOrder.finalPrice) {
+      const commission = Number(updatedOrder.finalPrice) * 0.1;
+      if (commission > 0) {
+        await tx.driver.update({
+          where: { id: auth.driverId },
+          data: { balance: { decrement: commission } }
+        });
+        await tx.cashTransaction.create({
+          data: {
+            driverId: auth.driverId,
+            operatorId,
+            orderId,
+            amount: commission,
+            type: "order_fee",
+            description: `Комиссия 10% за заказ #${orderId} (завершил водитель)`
+          }
+        });
+      }
+    }
+
+    // 2. Penalty (50 тг)
+    if (status === "canceled") {
+      const penalty = 50;
+      await tx.driver.update({
+        where: { id: auth.driverId },
+        data: { balance: { decrement: penalty } }
+      });
+      await tx.cashTransaction.create({
+        data: {
+          driverId: auth.driverId,
+          operatorId,
+          orderId,
+          amount: penalty,
+          type: "penalty",
+          description: `Штраф за отмену заказа #${orderId} водителем`
+        }
+      });
+    }
+
+    // Set driver status to free if order ends
+    if (status === "completed" || status === "canceled") {
+      await tx.driver.update({
+        where: { id: auth.driverId },
+        data: { status: "free" },
+      });
+    }
+  });
 
   // Log status
   await prisma.orderStatusLog.create({

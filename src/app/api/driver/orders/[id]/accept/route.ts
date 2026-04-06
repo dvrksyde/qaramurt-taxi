@@ -12,6 +12,18 @@ export async function POST(
   const auth = verifyDriverToken(req);
   if (!auth) return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
 
+  // Check driver balance
+  const driver = await prisma.driver.findUnique({
+    where: { id: auth.driverId },
+    select: { balance: true }
+  });
+
+  if (driver && Number(driver.balance) < 100) {
+    return NextResponse.json({ 
+      error: "Недостаточный баланс (минимум 100 ₸). Пожалуйста, пополните счет." 
+    }, { status: 403 });
+  }
+
   const { id } = await params;
   const orderId = parseInt(id);
 

@@ -43,6 +43,10 @@ interface MonitorState {
   addAlarm: (alarm: AlarmEvent) => void;
   clearAlarms: () => void;
 
+  // Order details modal
+  selectedOrderId: number | null;
+  setSelectedOrderId: (id: number | null) => void;
+
   // New order modal
   isNewOrderOpen: boolean;
   openNewOrder: () => void;
@@ -175,6 +179,9 @@ export const useMonitorStore = create<MonitorState>((set) => ({
       counts: { ...s.counts, alarms: s.counts.alarms + 1 },
     })),
   clearAlarms: () => set({ alarms: [], counts: { ...useMonitorStore.getState().counts, alarms: 0 } }),
+
+  selectedOrderId: null,
+  setSelectedOrderId: (id) => set({ selectedOrderId: id }),
 
   isNewOrderOpen: false,
   openNewOrder: () => set({ isNewOrderOpen: true }),

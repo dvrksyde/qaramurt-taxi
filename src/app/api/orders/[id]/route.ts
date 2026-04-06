@@ -35,7 +35,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const body = await req.json();
-  const { status, driverId, vehicleId, finalPrice, cancelReason } = body;
+  const { status, driverId, vehicleId, finalPrice, cancelReason, source } = body;
 
   const now = new Date();
   const timestamps: Record<string, Date | null> = {};
@@ -45,17 +45,67 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (status === "completed")   { timestamps.completedAt = now; }
   if (status === "canceled")    { timestamps.canceledAt = now; }
 
-  const updated = await prisma.order.update({
-    where: { id: parseInt(id) },
-    data: {
-      ...(status && { status }),
-      ...(driverId !== undefined && { driverId }),
-      ...(vehicleId !== undefined && { vehicleId }),
-      ...(finalPrice !== undefined && { finalPrice }),
-      ...(cancelReason && { cancelReason }),
-      ...timestamps,
-    },
+  // Use a transaction for atomic update of order and driver balance
+  const result = await prisma.$transaction(async (tx) => {
+    const updated = await tx.order.update({
+      where: { id: parseInt(id) },
+      data: {
+        ...(status && { status }),
+        ...(driverId !== undefined && { driverId }),
+        ...(vehicleId !== undefined && { vehicleId }),
+        ...(finalPrice !== undefined && { finalPrice }),
+        ...(cancelReason && { cancelReason }),
+        ...timestamps,
+      },
+      include: { driver: true }
+    });
+
+    const operatorId = access.operatorId || 1; // Default to first operator if not in session
+
+    // 1. Commission Deduction (10%)
+    if (status === "completed" && updated.driverId && updated.finalPrice) {
+      const commission = Number(updated.finalPrice) * 0.1;
+      if (commission > 0) {
+        await tx.driver.update({
+          where: { id: updated.driverId },
+          data: { balance: { decrement: commission } }
+        });
+        await tx.cashTransaction.create({
+          data: {
+            driverId: updated.driverId,
+            operatorId,
+            orderId: updated.id,
+            amount: commission,
+            type: "order_fee",
+            description: `Комиссия 10% за заказ #${updated.id}`
+          }
+        });
+      }
+    }
+
+    // 2. Cancellation Penalty (50 тг)
+    if (status === "canceled" && source === "driver" && updated.driverId) {
+      const penalty = 50;
+      await tx.driver.update({
+        where: { id: updated.driverId },
+        data: { balance: { decrement: penalty } }
+      });
+      await tx.cashTransaction.create({
+        data: {
+          driverId: updated.driverId,
+          operatorId,
+          orderId: updated.id,
+          amount: penalty,
+          type: "penalty",
+          description: `Штраф за отмену заказа #${updated.id}`
+        }
+      });
+    }
+
+    return updated;
   });
+
+  const updated = result;
 
   // Log status change
   if (status) {
@@ -67,13 +117,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   // Notify monitor via socket
   const io = (global as Record<string, unknown>).socketIO as { to: (room: string) => { emit: (event: string, data: unknown) => void } } | undefined;
   if (io) {
-    io.to("monitor").emit("order_status_change", { orderId: updated.id, status, driverId });
+    io.to("monitor").emit("order_status_change", { orderId: updated.id, status, driverId: updated.driverId });
   }
 
   // Free driver if order completed or canceled
-  if ((status === "completed" || status === "canceled") && driverId) {
+  if ((status === "completed" || status === "canceled") && updated.driverId) {
     await prisma.driver.update({
-      where: { id: driverId },
+      where: { id: updated.driverId },
       data: { status: "free" },
     }).catch(console.error);
   }

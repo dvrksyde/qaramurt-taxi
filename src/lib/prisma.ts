@@ -26,6 +26,13 @@ export function getPrisma(): PrismaClient {
 // Also export a lazy proxy for convenience
 export const prisma = new Proxy({} as PrismaClient, {
   get(_target, prop) {
-    return getPrisma()[prop as keyof PrismaClient];
+    const client = getPrisma();
+    if (typeof prop === "string" && !prop.startsWith("_") && !(prop in client)) {
+      // If the property is missing and it's not a private member, 
+      // the schema might have changed. Clear singleton to force reload.
+      global.__prisma = undefined;
+      return getPrisma()[prop as keyof PrismaClient];
+    }
+    return client[prop as keyof PrismaClient];
   },
 });

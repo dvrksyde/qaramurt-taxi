@@ -60,7 +60,22 @@ export async function GET(req: NextRequest) {
 
     const companyCommission = grossRevenue * (COMPANY_COMMISSION_PERCENT / 100);
     const siteCommission = ordersCount * COMMISSION_PER_ORDER;
-    const netCompanyProfit = companyCommission - siteCommission;
+
+    // Fetch operator settlements in range
+    const settlements = await prisma.operatorSettlement.findMany({
+      where: {
+        createdAt: {
+          gte: startDate,
+          lte: endDate,
+        },
+      },
+      select: {
+        amount: true,
+      }
+    });
+
+    const totalSettlements = settlements.reduce((sum: number, s: { amount: number | string }) => sum + Number(s.amount), 0);
+    const netCompanyProfit = companyCommission - siteCommission - totalSettlements;
 
     return NextResponse.json({
       data: {
@@ -69,6 +84,7 @@ export async function GET(req: NextRequest) {
           grossRevenue: grossRevenue,
           companyCommission: Math.round(companyCommission),
           siteCommission: siteCommission,
+          totalSettlements: Math.round(totalSettlements),
           netCompanyProfit: Math.round(netCompanyProfit),
           siteRate: COMMISSION_PER_ORDER,
           companyRatePercent: COMPANY_COMMISSION_PERCENT,

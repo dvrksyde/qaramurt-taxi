@@ -191,7 +191,9 @@ export interface NewOrderFormData {
   timing: "now" | "scheduled";
   scheduledAt?: string;
   pickupAddress: string;
+  pickupPoint?: [number, number];
   dropoffAddress: string;
+  dropoffPoint?: [number, number];
   stops: Stop[];
   comment: string;
   classId: number | null;
@@ -203,6 +205,7 @@ export interface NewOrderFormData {
   optionIds: number[];
   printReceipt: boolean;
   pricePerKm: string;
+  distanceKm?: number;
 }
 
 // ─── SOCKET EVENTS ────────────────────────────────────────────────────────────
