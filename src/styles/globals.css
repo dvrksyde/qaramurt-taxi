@@ -854,3 +854,22 @@ code { font-family: var(--font-mono); font-size: 12px; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ─── LICENSE PLATE ──────────────────────────────────────────────────────── */
+.license-plate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border: 1px solid #1a1a1a;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: #000000;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  box-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+  line-height: 1.1;
+}

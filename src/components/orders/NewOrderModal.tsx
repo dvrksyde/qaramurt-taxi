@@ -111,7 +111,7 @@ export function NewOrderModal({ onClose }: Props) {
   // Landmark search
   useEffect(() => {
     const query = activeField === 'pickup' ? watchedPickup : watchedDropoff;
-    if (!query || query.length < 2) {
+    if (!query || query.trim().length === 0) {
       setLandmarks([]);
       return;
     }
@@ -125,7 +125,7 @@ export function NewOrderModal({ onClose }: Props) {
           setSelectedIndex(-1);
         }
       } catch (e) {}
-    }, 400);
+    }, 150);
 
     return () => clearTimeout(timer);
   }, [watchedPickup, watchedDropoff, activeField]);
@@ -300,8 +300,8 @@ export function NewOrderModal({ onClose }: Props) {
   const allClasses = classGroups.flatMap((g) => g.classes ?? []);
 
   return (
-    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={{ width: 1200, maxWidth: "96vw" }}>
+    <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ width: 1350, maxWidth: "96vw" }}>
         <div className="modal-header">
           Новый заказ
           <button className="modal-close" onClick={onClose}>×</button>
@@ -310,8 +310,8 @@ export function NewOrderModal({ onClose }: Props) {
         <form onSubmit={handleSubmit(onSubmit)}>
           <div className="modal-body" style={{ display: "grid", gridTemplateColumns: "1fr 380px 220px", gap: 12 }}>
             {/* ── LEFT: Map ── */}
-            <div style={{ minHeight: 400, borderRadius: 3, overflow: "hidden", background: "#e8e8e0", position: "relative" }}>
-              <div style={{ height: 400 }}>
+            <div style={{ minHeight: 500, borderRadius: 3, overflow: "hidden", background: "#e8e8e0", position: "relative" }}>
+              <div style={{ height: 500 }}>
                 <MiniMap 
                   pickup={watchedPickupPoint} 
                   dropoff={watchedDropoffPoint} 

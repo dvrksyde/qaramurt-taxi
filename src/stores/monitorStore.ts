@@ -76,12 +76,18 @@ export const useMonitorStore = create<MonitorState>((set) => ({
 
   currentOrders: [],
   scheduledOrders: [],
-  setCurrentOrders: (orders) => set({ currentOrders: orders }),
+  setCurrentOrders: (orders) => set((s) => ({ 
+    currentOrders: orders,
+    counts: { ...s.counts, current: orders.length }
+  })),
   addOrder: (order) =>
-    set((s) => ({
-      currentOrders: [order, ...s.currentOrders],
-      counts: { ...s.counts, current: s.counts.current + 1 },
-    })),
+    set((s) => {
+      if (s.currentOrders.some((o) => o.id === order.id)) return s;
+      return {
+        currentOrders: [order, ...s.currentOrders],
+        counts: { ...s.counts, current: s.counts.current + 1 },
+      };
+    }),
   updateOrder: (id, updates) =>
     set((s) => ({
       currentOrders: s.currentOrders.map((o) => (o.id === id ? { ...o, ...updates } : o)),

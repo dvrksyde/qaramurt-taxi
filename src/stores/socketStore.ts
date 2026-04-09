@@ -94,7 +94,12 @@ export function useSocket() {
     });
 
     socket.on("order_status_change", (data) => {
-      store.updateOrder(data.orderId, { status: data.status, driverId: data.driverId });
+      const finishedStatuses = ["completed", "canceled"];
+      if (finishedStatuses.includes(data.status)) {
+        store.removeOrder(data.orderId);
+      } else {
+        store.updateOrder(data.orderId, { status: data.status, driverId: data.driverId });
+      }
     });
 
     socket.on("chat_message", (msg) => {

@@ -113,13 +113,17 @@ export default function OperatorsPage() {
                   <td style={{ paddingLeft: 40, whiteSpace: "nowrap" }}>
                     {isAdmin ? (
                       <span className="op-actions">
-                        <button
-                          className="op-action-link"
-                          onClick={() => { setSelectedOperator(op); setIsSettlementOpen(true); }}
-                        >
-                          Расчёты
-                        </button>
-                        <span className="op-action-sep">·</span>
+                        {op.role !== "admin" && (
+                          <>
+                            <button
+                              className="op-action-link"
+                              onClick={() => { setSelectedOperator(op); setIsSettlementOpen(true); }}
+                            >
+                              Расчёты
+                            </button>
+                            <span className="op-action-sep">·</span>
+                          </>
+                        )}
                         <button
                           className="op-action-link"
                           onClick={() => { setSelectedOperator(op); setIsModalOpen(true); }}

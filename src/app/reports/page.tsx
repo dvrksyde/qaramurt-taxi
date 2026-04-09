@@ -196,7 +196,12 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {data && !error && (
+      {data && !error && (() => {
+        const showSalaries = activePreset === 'this_month' || activePreset === 'last_month' || activePreset === null;
+        const totalSettlementsRender = showSalaries ? data.summary.totalSettlements : 0;
+        const netProfitRender = data.summary.companyCommission - data.summary.siteCommission - totalSettlementsRender;
+
+        return (
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           
           {/* Main Results Card */}
@@ -222,10 +227,12 @@ export default function ReportsPage() {
                 <div style={{ fontSize: 24, fontWeight: 700, color: "#d63031", lineHeight: 1 }}>{data.summary.siteCommission.toLocaleString("ru-RU")} <span style={{fontSize:16}}>тг.</span></div>
                 <div style={{ fontSize: 13, color: "#ff7675", marginTop: 6 }}>комиссия разработчиков сайта (по {data.summary.siteRate} тг/заказ)</div>
               </div>
-              <div style={{ background: "rgba(255, 159, 67, 0.05)", padding: 16, borderRadius: 8, borderLeft: "3px solid #ff9f43" }}>
-                <div style={{ fontSize: 24, fontWeight: 700, color: "#ff9f43", lineHeight: 1 }}>{data.summary.totalSettlements.toLocaleString("ru-RU")} <span style={{fontSize:16}}>тг.</span></div>
-                <div style={{ fontSize: 13, color: "#ff9f43", marginTop: 6 }}>выплачено зарплат диспетчерам</div>
-              </div>
+              {showSalaries && (
+                <div style={{ background: "rgba(255, 159, 67, 0.05)", padding: 16, borderRadius: 8, borderLeft: "3px solid #ff9f43" }}>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: "#ff9f43", lineHeight: 1 }}>{totalSettlementsRender.toLocaleString("ru-RU")} <span style={{fontSize:16}}>тг.</span></div>
+                  <div style={{ fontSize: 13, color: "#ff9f43", marginTop: 6 }}>выплачено зарплат диспетчерам</div>
+                </div>
+              )}
             </div>
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 24, flexWrap: "wrap", gap: 16 }}>
@@ -233,18 +240,19 @@ export default function ReportsPage() {
                 <div style={{ fontSize: 16, color: "#00b894", fontWeight: 700, textTransform: "uppercase" }}>Чистая прибыль компании</div>
                 <div style={{ color: "#b2bec3", fontSize: 13, marginTop: 4, maxWidth: 500 }}>
                   Ставка: <strong>{data.summary.companyRatePercent}%</strong> от стоимости заказов. 
-                  Общий доход составил: <strong>{data.summary.companyCommission.toLocaleString("ru-RU")} тг.</strong> минус комиссии и выплаты зарплат.
+                  Общий доход составил: <strong>{data.summary.companyCommission.toLocaleString("ru-RU")} тг.</strong> минус комиссии{showSalaries ? " и выплаты зарплат" : ""}.
                 </div>
               </div>
               <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 48, fontWeight: 800, color: "#00b894", lineHeight: 1 }}>{data.summary.netCompanyProfit.toLocaleString("ru-RU")} <span style={{fontSize:24}}>тг.</span></div>
+                <div style={{ fontSize: 48, fontWeight: 800, color: "#00b894", lineHeight: 1 }}>{netProfitRender.toLocaleString("ru-RU")} <span style={{fontSize:24}}>тг.</span></div>
               </div>
             </div>
 
           </div>
 
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

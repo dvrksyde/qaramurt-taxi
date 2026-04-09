@@ -369,7 +369,7 @@ export default function JournalPage() {
                             {o.driver.vehicles?.[0] && (
                               <div style={{ fontSize: 11, color: "#666", lineHeight: 1.4 }}>
                                 🚗 {o.driver.vehicles[0].color} {o.driver.vehicles[0].make} {o.driver.vehicles[0].model}<br />
-                                <strong style={{ color: "#333" }}>{o.driver.vehicles[0].plate}</strong>
+                                <span className="license-plate" style={{ fontSize: 13, padding: "1px 5px" }}>{o.driver.vehicles[0].plate}</span>
                               </div>
                             )}
                           </div>

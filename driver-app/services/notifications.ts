@@ -1,16 +1,16 @@
-import * as Notifications from "expo-notifications";
+﻿import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
-// Configure how notifications are shown when app is in foreground
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
-/** Request notification permissions and get the push token */
 export async function registerForPushNotifications(): Promise<string | null> {
   try {
     if (Platform.OS === "android") {
@@ -44,12 +44,11 @@ export async function registerForPushNotifications(): Promise<string | null> {
   }
 }
 
-/** Show a local notification (used for new order alerts) */
 export async function showOrderNotification(pickupAddress: string, pricePerKm: number) {
   try {
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: "🚖 Новый заказ!",
+        title: "Новый заказ!",
         body: `📍 ${pickupAddress || "Адрес не указан"} · ${pricePerKm} ₸/км`,
         sound: "default",
       },

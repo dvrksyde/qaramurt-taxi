@@ -43,9 +43,6 @@ export default function MonitorPage() {
             {connected ? "Онлайн" : "ошибка (Offline)"}
           </span>
         </span>
-        <span className="text-muted" style={{ marginLeft: 16, fontSize: 12 }}>
-          Очередь:
-        </span>
       </div>
 
       {/* Sub-tabs */}
@@ -53,10 +50,10 @@ export default function MonitorPage() {
 
       {/* Tab content */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        {activeTab === "current"   && <CurrentOrdersTab />}
-        {activeTab === "map"       && <MapTab />}
-        {activeTab === "chat"      && <ChatTab />}
-        {activeTab === "system"    && <SystemTab />}
+        {activeTab === "current" && <CurrentOrdersTab />}
+        {activeTab === "map" && <MapTab />}
+        {activeTab === "chat" && <ChatTab />}
+        {activeTab === "system" && <SystemTab />}
       </div>
 
       {/* New Order Modal */}
@@ -64,9 +61,9 @@ export default function MonitorPage() {
 
       {/* Order Details Modal */}
       {selectedOrderId && (
-        <OrderDetailsModal 
-          orderId={selectedOrderId} 
-          onClose={() => setSelectedOrderId(null)} 
+        <OrderDetailsModal
+          orderId={selectedOrderId}
+          onClose={() => setSelectedOrderId(null)}
         />
       )}
     </div>

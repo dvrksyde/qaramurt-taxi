@@ -1,39 +1,34 @@
-export const dynamic = "force-dynamic";
+﻿export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyDriverToken } from "@/lib/driverAuth";
 
-// PATCH /api/driver/orders/[id]/status — update order status
-// arrived → in_progress → completed
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const auth = verifyDriverToken(req);
   if (!auth) return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
 
   const { id } = await params;
-  const orderId = parseInt(id);
+  const orderId = parseInt(id, 10);
   const { status, lat, lng, distanceKm, finalPrice } = await req.json();
 
-  // Validate status transitions
   const validStatuses = ["arrived", "in_progress", "completed", "canceled"];
   if (!validStatuses.includes(status)) {
     return NextResponse.json({ error: "Некорректный статус" }, { status: 400 });
   }
 
-  // Check order belongs to this driver
   const order = await prisma.order.findFirst({
     where: { id: orderId, driverId: auth.driverId },
-    include: { service: true }
+    include: { service: true },
   });
 
   if (!order) {
     return NextResponse.json({ error: "Заказ не найден" }, { status: 404 });
   }
 
-  // Build update data
   const updateData: Record<string, unknown> = { status };
 
   if (status === "arrived") {
@@ -49,22 +44,20 @@ export async function PATCH(
     updateData.canceledAt = new Date();
   }
 
-  // Use transaction to atomize status update and balance deduction
   await prisma.$transaction(async (tx) => {
     const updatedOrder = await tx.order.update({
       where: { id: orderId },
       data: updateData,
     });
 
-    const operatorId = 1; // System/Default operator for automatic driver actions
+    const operatorId = 1;
 
-    // 1. Commission (10%)
     if (status === "completed" && updatedOrder.finalPrice) {
       const commission = Number(updatedOrder.finalPrice) * 0.1;
       if (commission > 0) {
         await tx.driver.update({
           where: { id: auth.driverId },
-          data: { balance: { decrement: commission } }
+          data: { balance: { decrement: commission } },
         });
         await tx.cashTransaction.create({
           data: {
@@ -73,18 +66,17 @@ export async function PATCH(
             orderId,
             amount: commission,
             type: "order_fee",
-            description: `Комиссия 10% за заказ #${orderId} (завершил водитель)`
-          }
+            description: `Комиссия 10% за заказ #${orderId}`,
+          },
         });
       }
     }
 
-    // 2. Penalty (50 тг)
     if (status === "canceled") {
       const penalty = 50;
       await tx.driver.update({
         where: { id: auth.driverId },
-        data: { balance: { decrement: penalty } }
+        data: { balance: { decrement: penalty } },
       });
       await tx.cashTransaction.create({
         data: {
@@ -93,12 +85,11 @@ export async function PATCH(
           orderId,
           amount: penalty,
           type: "penalty",
-          description: `Штраф за отмену заказа #${orderId} водителем`
-        }
+          description: `Штраф за отмену заказа #${orderId}`,
+        },
       });
     }
 
-    // Set driver status to free if order ends
     if (status === "completed" || status === "canceled") {
       await tx.driver.update({
         where: { id: auth.driverId },
@@ -107,12 +98,10 @@ export async function PATCH(
     }
   });
 
-  // Log status
   await prisma.orderStatusLog.create({
     data: { orderId, driverId: auth.driverId, status },
   });
 
-  // Notify monitor
   const io = (global as Record<string, unknown>).socketIO as any;
   if (io) {
     io.to("monitor").emit("order_status_change", {
@@ -122,6 +111,12 @@ export async function PATCH(
       distanceKm,
       finalPrice,
     });
+
+    if (status === "completed") {
+      io.to("monitor").emit("driver_ratings_updated", { driverId: auth.driverId, orderId });
+      io.to("drivers").emit("driver_ratings_updated", { driverId: auth.driverId, orderId });
+      io.to(`driver:${auth.driverId}`).emit("driver_ratings_updated", { driverId: auth.driverId, orderId });
+    }
   }
 
   return NextResponse.json({ data: { orderId, status } });

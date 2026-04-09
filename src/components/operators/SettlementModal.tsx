@@ -21,7 +21,6 @@ export function SettlementModal({ operator, onClose }: Props) {
   const [submitting, setSubmitting] = useState(false);
   
   const [amount, setAmount] = useState("");
-  const [type, setType] = useState("salary");
   const [description, setDescription] = useState("");
 
   const fetchSettlements = useCallback(async () => {
@@ -52,7 +51,7 @@ export function SettlementModal({ operator, onClose }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount: Number(amount),
-          type,
+          type: "salary",
           description
         }),
       });
@@ -96,7 +95,6 @@ export function SettlementModal({ operator, onClose }: Props) {
                     <tr>
                       <th>Дата</th>
                       <th style={{ textAlign: "right" }}>Сумма</th>
-                      <th>Тип</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -104,11 +102,6 @@ export function SettlementModal({ operator, onClose }: Props) {
                       <tr key={s.id}>
                         <td>{new Date(s.createdAt).toLocaleDateString("ru-RU")}</td>
                         <td style={{ textAlign: "right", fontWeight: 700 }}>{Number(s.amount).toLocaleString()} ₸</td>
-                        <td>
-                          <span className={`badge ${s.type === 'salary' ? 'badge-success' : 'badge-info'}`} style={{ fontSize: 10 }}>
-                            {s.type === 'salary' ? 'Зарплата' : s.type === 'bonus' ? 'Бонус' : s.type}
-                          </span>
-                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -131,14 +124,7 @@ export function SettlementModal({ operator, onClose }: Props) {
                     required 
                   />
                 </div>
-                <div>
-                  <label className="form-label" style={{ fontSize: 12 }}>Тип</label>
-                  <select className="form-input" value={type} onChange={e => setType(e.target.value)}>
-                    <option value="salary">Зарплата</option>
-                    <option value="bonus">Бонус</option>
-                    <option value="penalty">Штраф</option>
-                  </select>
-                </div>
+
                 <div>
                   <label className="form-label" style={{ fontSize: 12 }}>Описание</label>
                   <textarea 

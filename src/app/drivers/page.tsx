@@ -1,11 +1,10 @@
-"use client";
-import { useEffect, useState } from "react";
+﻿"use client";
+import { useEffect, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import type { Driver } from "@/types";
 import { DriverForm } from "@/components/drivers/DriverForm";
 import { BalanceModal } from "@/components/drivers/BalanceModal";
 import { useSocket } from "@/stores/socketStore";
-import { useCallback } from "react";
 
 export default function DriversPage() {
   const { data: session } = useSession();
@@ -15,7 +14,6 @@ export default function DriversPage() {
   const [editDriver, setEditDriver] = useState<Driver | null>(null);
   const [balanceDriver, setBalanceDriver] = useState<Driver | null>(null);
 
-  // Extract permissions from session
   const user = session?.user as any;
   const role: string = user?.role || "operator";
   const permissions: string[] = user?.permissions || [];
@@ -30,46 +28,46 @@ export default function DriversPage() {
     if (!silent) setLoading(true);
     fetch(`/api/drivers`)
       .then((r) => r.json())
-      .then((d) => { if (d.data) setDrivers(d.data); })
+      .then((d) => {
+        if (d.data) setDrivers(d.data);
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { loadDrivers(); }, [loadDrivers]);
+  useEffect(() => {
+    loadDrivers();
+  }, [loadDrivers]);
 
   const { socket } = useSocket();
 
   useEffect(() => {
     if (!socket) return;
     const handleChange = () => loadDrivers(true);
-    
+
     socket.on("driver_online", handleChange);
     socket.on("driver_offline", handleChange);
     socket.on("order_status_change", handleChange);
     socket.on("order_updated", handleChange);
-    
+    socket.on("driver_ratings_updated", handleChange);
+
     return () => {
       socket.off("driver_online", handleChange);
       socket.off("driver_offline", handleChange);
       socket.off("order_status_change", handleChange);
       socket.off("order_updated", handleChange);
+      socket.off("driver_ratings_updated", handleChange);
     };
   }, [socket, loadDrivers]);
 
-  // Calculate driver ranks
-  const sortedByOrders = [...drivers].sort((a, b) => (b.ordersCount || 0) - (a.ordersCount || 0));
-  const driverRanks = new Map<number, number>();
-  sortedByOrders.forEach((d, idx) => { driverRanks.set(d.id, idx + 1); });
-
   return (
     <div className="page-content">
-      {/* Action Bar */}
       <div style={{ padding: "8px 14px", marginBottom: 0, fontSize: 12, background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
           <strong style={{ color: "var(--color-text)", marginRight: 8 }}>Статусы:</strong>
-          <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#00ff00" }}/> - свободен;</span>
-          <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#ffd700" }}/> - на заказе;</span>
-          <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "var(--status-offline)" }}/> - не в сети;</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#00ff00" }} /> - свободен;</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#ffd700" }} /> - на заказе;</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "var(--status-offline)" }} /> - не в сети;</span>
         </div>
 
         {canAdd && (
@@ -99,13 +97,13 @@ export default function DriversPage() {
                 <th rowSpan={2} style={{ textAlign: "center" }}>Рейтинг</th>
                 <th rowSpan={2}>Баланс</th>
                 <th rowSpan={2}>Устройство</th>
-                <th colSpan={3} style={{ textAlign: "center", borderBottom: "1px solid var(--color-border-2)" }}>Автомобиль</th>
+                <th colSpan={3} style={{ textAlign: "center", borderBottom: "1px solid var(--color-border-2)", borderLeft: "1px solid var(--color-border-2)", borderRight: "1px solid var(--color-border-2)" }}>Автомобиль</th>
                 {(canEdit || canDelete) && <th rowSpan={2} style={{ textAlign: "center", width: 80 }}>Действия</th>}
               </tr>
               <tr>
-                <th>г/н</th>
-                <th>Марка</th>
-                <th>Цвет</th>
+                <th style={{ textAlign: "center", borderLeft: "1px solid var(--color-border-2)", borderRight: "1px solid var(--color-border-2)" }}>г/н</th>
+                <th style={{ borderRight: "1px solid var(--color-border-2)" }}>Марка</th>
+                <th style={{ borderRight: "1px solid var(--color-border-2)" }}>Цвет</th>
               </tr>
             </thead>
             <tbody>
@@ -127,13 +125,13 @@ export default function DriversPage() {
                     <td style={{ fontWeight: 500 }}>{driver.lastName} {driver.firstName}</td>
                     <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
                       <span style={{ color: "#f39c12", marginRight: 4 }}>🏆</span>
-                      <strong style={{ color: "#2d3436" }}>{driverRanks.get(driver.id)}</strong>
+                      <strong style={{ color: "#2d3436" }}>{driver.rating}</strong>
                       <span style={{ color: "#b2bec3", fontSize: 12, marginLeft: 6 }}>({driver.ordersCount || 0} зкз.)</span>
                     </td>
                     <td style={{ verticalAlign: "middle" }}>
-                      <button 
+                      <button
                         onClick={() => setBalanceDriver(driver)}
-                        style={{ 
+                        style={{
                           background: isLowBalance ? "#fff5f5" : "#f0fdf4",
                           color: isLowBalance ? "#e03131" : "#099268",
                           padding: "4px 10px",
@@ -145,7 +143,7 @@ export default function DriversPage() {
                           alignItems: "center",
                           gap: "5px",
                           border: `1px solid ${isLowBalance ? "#ffc9c9" : "#bbf7d0"}`,
-                          transition: "all 0.2s ease"
+                          transition: "all 0.2s ease",
                         }}
                         onMouseOver={(e) => {
                           e.currentTarget.style.transform = "translateY(-1px)";
@@ -163,7 +161,9 @@ export default function DriversPage() {
                     <td className="text-muted text-sm" style={{ lineHeight: 1.4 }}>
                       <div style={{ color: "var(--color-primary)" }}>{(driver as any).osVersion || "Android"}</div>
                     </td>
-                    <td className="text-mono text-sm">{v?.plate || "—"}</td>
+                    <td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                      {v?.plate ? <span className="license-plate">{v.plate}</span> : <span className="text-muted text-sm">—</span>}
+                    </td>
                     <td className="text-muted text-sm">{v ? `${v.make} ${v.model || ""}`.trim() : "—"}</td>
                     <td className="text-muted text-sm">{v?.color || "—"}</td>
                     {(canEdit || canDelete) && (
@@ -173,14 +173,16 @@ export default function DriversPage() {
                             <button className="btn btn-ghost btn-sm" title="Редактировать" onClick={() => { setEditDriver(driver); setShowForm(true); }}>✏️</button>
                           )}
                           {canDelete && (
-                            <button className="btn btn-ghost btn-sm text-danger"
+                            <button
+                              className="btn btn-ghost btn-sm text-danger"
                               title="Удалить"
                               onClick={async () => {
                                 if (confirm("Вы уверены?")) {
                                   await fetch(`/api/drivers/${driver.id}`, { method: "DELETE" });
                                   loadDrivers();
                                 }
-                              }}>🗑️</button>
+                              }}
+                            >🗑️</button>
                           )}
                         </div>
                       </td>
@@ -190,14 +192,17 @@ export default function DriversPage() {
               })}
             </tbody>
           </table>
-        ) }
+        )}
       </div>
 
-      {/* Modals */}
       {showForm && (
         <DriverForm
           driver={editDriver}
-          onClose={() => { setShowForm(false); setEditDriver(null); loadDrivers(); }}
+          onClose={() => {
+            setShowForm(false);
+            setEditDriver(null);
+            loadDrivers();
+          }}
         />
       )}
 

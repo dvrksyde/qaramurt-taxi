@@ -1,12 +1,12 @@
-export const dynamic = "force-dynamic";
+﻿export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 
 import { signDriverToken } from "@/lib/driverAuth";
 import { hashPassword, verifyPassword } from "@/lib/passwords";
 import { prisma } from "@/lib/prisma";
+import { getDriverRank } from "@/lib/driverRanking";
 
-// POST /api/driver/auth — driver login
 export async function POST(req: NextRequest) {
   const { login, password } = await req.json();
 
@@ -40,6 +40,7 @@ export async function POST(req: NextRequest) {
   }
 
   const token = signDriverToken({ driverId: driver.id, login: driver.login });
+  const driverRank = await getDriverRank(driver.id);
 
   return NextResponse.json({
     data: {
@@ -50,8 +51,9 @@ export async function POST(req: NextRequest) {
         lastName: driver.lastName,
         callsign: driver.callsign,
         phone: driver.phone,
-        balance: driver.balance,
-        rating: driver.rating,
+        balance: Number(driver.balance),
+        rating: driverRank.rank,
+        ordersCount: driverRank.ordersCount,
         status: driver.status,
         vehicle: driver.vehicles[0] || null,
       },

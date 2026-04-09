@@ -2,10 +2,8 @@ import * as SecureStore from "expo-secure-store";
 
 import Constants from "expo-constants";
 
-const host = Constants.expoConfig?.hostUri?.split(":")[0] || "localhost";
-export const API_BASE = __DEV__
-  ? `http://${host}:3000`
-  : "https://your-production-domain.com";
+const host = "10.188.157.221"; // Ваш IP адрес компьютера
+export const API_BASE = `http://${host}:3000`; // Порт вашего сервера
 
 let token: string | null = null;
 

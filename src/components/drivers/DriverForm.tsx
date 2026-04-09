@@ -11,7 +11,6 @@ interface Props {
 interface DriverFormData {
   lastName: string;
   firstName: string;
-  middleName: string;
   phone: string;
   login: string;
   password?: string;
@@ -186,7 +185,6 @@ export function DriverForm({ driver, onClose }: Props) {
     defaultValues: {
       lastName:   driver ? driver.lastName : "",
       firstName:  driver ? driver.firstName : "",
-      middleName: driver?.middleName || "",
       phone:      driver ? driver.phone : "",
       login:      driver ? driver.login : "",
       callsign:   driver?.callsign || "",
@@ -272,10 +270,6 @@ export function DriverForm({ driver, onClose }: Props) {
                   <input {...register("firstName", { required: true })} className="form-input" id="driver-first-name" />
                 </div>
                 <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
-                  <span className="form-label" style={{ width: 120, fontSize: 13 }}>Отчество:</span>
-                  <input {...register("middleName")} className="form-input" id="driver-middle-name" />
-                </div>
-                <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
                   <span className="form-label" style={{ width: 120, fontSize: 13 }}>Позывной:</span>
                   <input {...register("callsign")} className="form-input" style={{ width: 100 }} id="driver-callsign" />
                 </div>
@@ -324,8 +318,6 @@ export function DriverForm({ driver, onClose }: Props) {
                   <span className="form-label" style={{ width: 120, fontSize: 13 }}>Отправить ссылку:</span>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button type="button" className="btn btn-ghost btn-sm" style={{ color: "#25D366", border: "1px solid #e0e0e0", fontSize: 12 }}>WhatsApp</button>
-                    <button type="button" className="btn btn-ghost btn-sm" style={{ color: "#7360F2", border: "1px solid #e0e0e0", fontSize: 12 }}>Viber</button>
-                    <button type="button" className="btn btn-ghost btn-sm" style={{ border: "1px solid #e0e0e0", fontSize: 12 }}>SMS</button>
                   </div>
                 </div>
 
