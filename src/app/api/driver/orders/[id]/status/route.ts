@@ -1,4 +1,4 @@
-﻿export const dynamic = "force-dynamic";
+export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -53,7 +53,13 @@ export async function PATCH(
     const operatorId = 1;
 
     if (status === "completed" && updatedOrder.finalPrice) {
-      const commission = Number(updatedOrder.finalPrice) * 0.1;
+      const dTG = await tx.driver.findUnique({
+        where: { id: auth.driverId },
+        include: { tariffGroup: true }
+      });
+      const commPercent = Number(dTG?.tariffGroup?.value || 15);
+      const commission = Number(updatedOrder.finalPrice) * (commPercent / 100);
+
       if (commission > 0) {
         await tx.driver.update({
           where: { id: auth.driverId },
@@ -66,7 +72,7 @@ export async function PATCH(
             orderId,
             amount: commission,
             type: "order_fee",
-            description: `Комиссия 10% за заказ #${orderId}`,
+            description: `Комиссия ${commPercent}% за заказ #${orderId}`,
           },
         });
       }

@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -77,10 +77,21 @@ export function DriverProfilePanel() {
 
         <View style={styles.summaryCard}>
           <Text style={styles.summaryName}>{profile?.lastName} {profile?.firstName}</Text>
+          <Text style={styles.summaryMeta}>Логин: {profile?.login}</Text>
           <Text style={styles.summaryMeta}>Позывной: {profile?.callsign || "—"}</Text>
           <Text style={styles.summaryMeta}>Рейтинг: #{Number(profile?.rating || 0)}</Text>
           <Text style={styles.summaryMeta}>Выполнено заказов: {Number((profile as any)?.ordersCount || 0)}</Text>
           <Text style={styles.summaryMeta}>Баланс: {Number(profile?.balance || 0).toLocaleString()} ₸</Text>
+          
+          <View style={styles.tariffBox}>
+            <Text style={styles.tariffTitle}>Текущий тариф</Text>
+            <View style={{flexDirection: "row", justifyContent: "space-between", alignItems: "center"}}>
+              <Text style={styles.tariffName}>
+                {profile?.tariffGroup ? `${profile.tariffGroup.name} (${Number(profile.tariffGroup.value)}%)` : "Не назначен"}
+              </Text>
+            </View>
+            <Text style={styles.tariffNote}>Чтобы изменить тариф, свяжитесь с диспетчером</Text>
+          </View>
         </View>
 
         <View style={styles.formCard}>
@@ -128,6 +139,10 @@ const styles = StyleSheet.create({
   summaryCard: { backgroundColor: "#252540", borderRadius: 16, padding: 18, gap: 6 },
   summaryName: { color: "#fff", fontSize: 22, fontWeight: "800" },
   summaryMeta: { color: "#b6b9d9", fontSize: 14 },
+  tariffBox: { marginTop: 8, padding: 12, backgroundColor: "#1e1f38", borderRadius: 10 },
+  tariffTitle: { color: "#888", fontSize: 12, marginBottom: 4 },
+  tariffName: { color: "#4CAF50", fontSize: 16, fontWeight: "700" },
+  tariffNote: { color: "#b6b9d9", fontSize: 11, marginTop: 6, fontStyle: "italic" },
   formCard: { backgroundColor: "#252540", borderRadius: 16, padding: 18 },
   label: { color: "#b6b9d9", fontSize: 13, marginBottom: 8, marginTop: 10 },
   input: { backgroundColor: "#1e1f38", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: "#fff", fontSize: 15 },

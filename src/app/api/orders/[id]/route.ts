@@ -62,9 +62,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
     const operatorId = access.operatorId || 1; // Default to first operator if not in session
 
-    // 1. Commission Deduction (10%)
+    // 1. Commission Deduction
     if (status === "completed" && updated.driverId && updated.finalPrice) {
-      const commission = Number(updated.finalPrice) * 0.1;
+      const driver = updated.driver;
+      // Default to 15% (Standard) if no tariff is set
+      // Fetch nested tariffGroup manually if not included or use a subquery/separate fetch.
+      const dTG = await tx.driver.findUnique({
+        where: { id: updated.driverId },
+        include: { tariffGroup: true }
+      });
+      const commPercent = Number(dTG?.tariffGroup?.value || 15);
+      const commission = Number(updated.finalPrice) * (commPercent / 100);
+
       if (commission > 0) {
         await tx.driver.update({
           where: { id: updated.driverId },
@@ -77,7 +86,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
             orderId: updated.id,
             amount: commission,
             type: "order_fee",
-            description: `Комиссия 10% за заказ #${updated.id}`
+            description: `Комиссия ${commPercent}% за заказ #${updated.id}`
           }
         });
       }

@@ -1,4 +1,4 @@
-﻿export const dynamic = "force-dynamic";
+export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -13,6 +13,7 @@ async function buildDriverProfile(driverId: number) {
       vehicles: {
         include: { classes: { include: { class: true } } },
       },
+      tariffGroup: true,
     },
   });
 
@@ -39,6 +40,7 @@ async function buildDriverProfile(driverId: number) {
     firstName: driver.firstName,
     lastName: driver.lastName,
     middleName: driver.middleName,
+    login: driver.login,
     callsign: driver.callsign,
     phone: driver.phone,
     balance: Number(driver.balance),
@@ -46,6 +48,7 @@ async function buildDriverProfile(driverId: number) {
     ordersCount: driverRank.ordersCount,
     status: driver.status,
     vehicle: driver.vehicles[0] || null,
+    tariffGroup: driver.tariffGroup,
     todayOrders,
     todayEarnings: Number(todayEarnings._sum.finalPrice || 0),
   };

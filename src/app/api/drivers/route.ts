@@ -1,4 +1,4 @@
-﻿export const dynamic = "force-dynamic";
+export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -15,6 +15,8 @@ function serializeDriver(driver: any, rating: number, ordersCount: number) {
     rating,
     ordersCount,
     currentLocation: null,
+    tariffGroup: driver.tariffGroup,
+    tariffGroupId: driver.tariffGroupId,
   };
 }
 
@@ -82,6 +84,7 @@ export async function POST(req: NextRequest) {
     carColor,
     carClassIds,
     autoGenCreds,
+    tariffGroupId,
   } = body;
 
   let generatedPassword = null;
@@ -108,7 +111,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Телефон или логин уже используется" }, { status: 409 });
   }
 
-  const passwordHash = await hashPassword(password);
+  // Default to Стандарт if no tariff provided
+  let finalTariffId = tariffGroupId ? Number(tariffGroupId) : null;
+  if (!finalTariffId) {
+    const standard = await prisma.driverTariffGroup.findFirst({ where: { name: "Стандарт" } });
+    if (standard) finalTariffId = standard.id;
+  }
 
   const driver = await prisma.driver.create({
     data: {
@@ -121,6 +129,7 @@ export async function POST(req: NextRequest) {
       callsign: callsign || null,
       comment: comment || null,
       status: "offline",
+      tariffGroupId: finalTariffId,
       ...(carPlate
         ? {
             vehicles: {
@@ -144,6 +153,7 @@ export async function POST(req: NextRequest) {
         : {}),
     },
     include: {
+      tariffGroup: { select: { name: true, type: true } },
       vehicles: true,
       _count: { select: { orders: { where: { status: "completed" } } } },
     },

@@ -1,4 +1,4 @@
-import { useRef, useMemo, useCallback, useEffect } from "react";
+import React, { useRef, useMemo, useCallback, useEffect, forwardRef, useImperativeHandle } from "react";
 import { ActivityIndicator, StyleSheet, View, TouchableOpacity } from "react-native";
 import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,17 +17,24 @@ interface Props {
   showCenterButton?: boolean;
 }
 
-export function YandexMapView({
-  center,
-  userLocation,
-  pickupLocation,
-  dropoffLocation,
-  zoom = 15,
-  showCenterButton = true,
-}: Props) {
+export type YandexMapViewHandle = {
+  centerOnMe: () => void;
+};
+
+export const YandexMapView = forwardRef<YandexMapViewHandle, Props>((
+  {
+    center,
+    userLocation,
+    pickupLocation,
+    dropoffLocation,
+    zoom = 15,
+    showCenterButton = true,
+  },
+  ref
+) => {
   const webViewRef = useRef<WebView>(null);
-  // Store initial center only once — prevent HTML regeneration on GPS updates
   const initialCenterRef = useRef<Point | null>(null);
+
   if (!initialCenterRef.current) {
     initialCenterRef.current = center || userLocation || pickupLocation || dropoffLocation || {
       latitude: 42.3417,
@@ -35,11 +42,20 @@ export function YandexMapView({
     };
   }
 
-  // Stable refs to avoid re-creating HTML when these change
   const pickupRef = useRef(pickupLocation);
   const dropoffRef = useRef(dropoffLocation);
   pickupRef.current = pickupLocation;
   dropoffRef.current = dropoffLocation;
+
+  const centerOnMe = useCallback(() => {
+    if (webViewRef.current) {
+      webViewRef.current.postMessage(JSON.stringify({ type: "centerOnDriver" }));
+    }
+  }, []);
+
+  useImperativeHandle(ref, () => ({
+    centerOnMe
+  }));
 
   // HTML is generated ONCE — never changes after initial render
   const html = useMemo(() => {
@@ -71,8 +87,6 @@ export function YandexMapView({
       `);
     }
 
-    const driverSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="%23c8440a" stroke="%23fff" stroke-width="3"/><text x="16" y="21" font-size="16" text-anchor="middle" fill="white">🚗</text></svg>';
-
     return `
       <!DOCTYPE html>
       <html>
@@ -81,15 +95,10 @@ export function YandexMapView({
           <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
           <style>
             html, body, #map {
-              margin: 0;
-              padding: 0;
-              width: 100%;
-              height: 100%;
-              background: #1a1a2e;
-              overflow: hidden;
+              margin: 0; padding: 0; width: 100%; height: 100%;
+              background: #1a1a2e; overflow: hidden;
             }
-            [class*="copyrights-pane"],
-            [class*="copyright"] {
+            [class*="copyrights-pane"], [class*="copyright"] {
               display: none !important;
             }
           </style>
@@ -98,46 +107,51 @@ export function YandexMapView({
         <body>
           <div id="map"></div>
           <script>
-            var driverSvgHref = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent('${driverSvg}');
+            // Debug logging to React Native
+            function log(msg) {
+              if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'log', message: msg }));
+              }
+            }
+
+            window.onerror = function(msg) { log('JS Error: ' + msg); };
 
             ymaps.ready(function () {
-              window.map = new ymaps.Map('map', {
-                center: [${initCenter.latitude}, ${initCenter.longitude}],
-                zoom: ${zoom},
-                controls: ['zoomControl']
-              }, {
-                suppressMapOpenBlock: true
-              });
+              log('Yandex Maps Ready');
+              try {
+                window.map = new ymaps.Map('map', {
+                  center: [${initCenter.latitude}, ${initCenter.longitude}],
+                  zoom: ${zoom},
+                  controls: ['zoomControl']
+                }, {
+                  suppressMapOpenBlock: true
+                });
 
-              ${markersInit.join("\n")}
+                ${markersInit.join("\n")}
 
-              // Listen for messages from React Native
-              window.addEventListener('message', function(event) {
-                try {
-                  var data = JSON.parse(event.data);
-                  if (data.type === 'updateDriver' && window.map) {
-                    var coords = [data.lat, data.lng];
-                    if (window.driverPlacemark) {
-                      window.driverPlacemark.geometry.setCoordinates(coords);
-                    } else {
-                      window.driverPlacemark = new ymaps.Placemark(
-                        coords,
-                        { balloonContentHeader: 'Водитель' },
-                        {
-                          iconLayout: 'default#image',
-                          iconImageHref: driverSvgHref,
-                          iconImageSize: [32, 32],
-                          iconImageOffset: [-16, -16]
-                        }
-                      );
-                      window.map.geoObjects.add(window.driverPlacemark);
+                // Listen for messages from React Native
+                window.addEventListener('message', function(event) {
+                  try {
+                    var data = JSON.parse(event.data);
+                    if (data.type === 'updateDriver' && window.map) {
+                      var coords = [data.lat, data.lng];
+                      if (window.driverPlacemark) {
+                        window.driverPlacemark.geometry.setCoordinates(coords);
+                      } else {
+                        window.driverPlacemark = new ymaps.Placemark(
+                          coords,
+                          { balloonContentHeader: 'Вы' },
+                          { preset: 'islands#redCircleDotIcon' }
+                        );
+                        window.map.geoObjects.add(window.driverPlacemark);
+                      }
                     }
-                  }
-                  if (data.type === 'centerOnDriver' && window.driverPlacemark) {
-                    window.map.setCenter(window.driverPlacemark.geometry.getCoordinates(), undefined, { duration: 300 });
-                  }
-                } catch(e) {}
-              });
+                    if (data.type === 'centerOnDriver' && window.driverPlacemark) {
+                      window.map.setCenter(window.driverPlacemark.geometry.getCoordinates(), undefined, { duration: 300 });
+                    }
+                  } catch(e) { log('Process Message Error: ' + e.message); }
+                });
+              } catch(err) { log('Map Init Error: ' + err.message); }
             });
           </script>
         </body>
@@ -159,11 +173,7 @@ export function YandexMapView({
     }
   }, [userLocation]);
 
-  const centerOnMe = useCallback(() => {
-    if (webViewRef.current) {
-      webViewRef.current.postMessage(JSON.stringify({ type: "centerOnDriver" }));
-    }
-  }, []);
+
 
   return (
     <View style={styles.container}>
@@ -175,6 +185,14 @@ export function YandexMapView({
         javaScriptEnabled
         domStorageEnabled
         startInLoadingState
+        onMessage={(event) => {
+          try {
+            const data = JSON.parse(event.nativeEvent.data);
+            if (data.type === "log") {
+              console.log("[WebView Log]", data.message);
+            }
+          } catch (e) {}
+        }}
         renderLoading={() => (
           <View style={styles.loader}>
             <ActivityIndicator color="#c8440a" />
@@ -188,7 +206,7 @@ export function YandexMapView({
       )}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#1a1a2e" },

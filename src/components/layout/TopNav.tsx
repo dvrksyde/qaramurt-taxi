@@ -19,6 +19,7 @@ const NAV_LINKS = [
   { href: "/monitor",   label: "Монитор",        requiredPerms: [] as string[] },
   { href: "/operators",  label: "Операторы",      requiredPerms: ["admin"] },
   { href: "/drivers",    label: "Водители",       requiredPerms: [] as string[] },
+  { href: "/settings/tariffs-driver", label: "Тарифы", requiredPerms: ["admin"] },
   { href: "/clients",    label: "Клиенты",        requiredPerms: ["clients"] },
   { href: "/journal",    label: "Журнал заказов", requiredPerms: ["journal_own", "journal_all"] },
   { href: "/reports",    label: "Отчеты",         requiredPerms: ["admin"] },

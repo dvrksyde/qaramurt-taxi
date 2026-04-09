@@ -22,6 +22,7 @@ interface DriverFormData {
   carModel: string;
   carColor: string;
   carClassIds: string[];
+  tariffGroupId?: string;
 }
 
 const CAR_COLORS = [
@@ -31,32 +32,19 @@ const CAR_COLORS = [
 ];
 
 const CAR_MAKES = [
-  "AC", "Acura", "Admiral", "Alfa Romeo", "Alpina", "Aro", "Asia", "Aston Martin", "Audi",
-  "Bentley", "BMW", "Brilliance", "Bugatti", "Buick", "BYD",
-  "Cadillac", "Caterham", "Chana", "Changan", "Changfeng", "Chery", "Chevrolet", "Chrysler", "Citroen",
-  "Dacia", "Dadi", "Daewoo", "Daihatsu", "Daimler", "Datsun", "De Tomaso", "Derways", "Dodge", "Doninvest", "Donkervoort",
-  "Eagle", "Evolute", "Exeed",
-  "FAW", "Ferrari", "FIAT", "Ford", "Foton", "FSO", "FSR",
-  "Geely", "Geo", "Ginetta", "GMC", "Gonow", "Great Wall",
-  "Hafei Motor", "Haima", "Holden", "Honda", "Huanghai", "Hummer", "Hyundai",
-  "Infiniti", "Intrall", "Iran Khodro", "Isuzu", "Iveco",
-  "JAC", "Jaguar", "Jeep", "Jinbei", "JMC",
-  "Kia", "Koenigsegg",
-  "LADA", "LADA Vesta", "LADA X-Ray", "Lamborghini", "Lancia", "Land Rover", "Landwind", "Lexus", "Lifan", "Lincoln", "Lotus",
-  "Mahindra", "Marcos", "Maruti", "Maserati", "Maybach", "Mazda", "McLaren",
-  "Mercedes-Benz", "Mercury", "Metrocab", "MG", "Microcar", "MINI", "Mitsubishi", "Mitsuoka", "Morgan",
-  "Nissan",
-  "Oldsmobile", "Omoda", "Opel",
-  "Pagani", "Panoz", "Peugeot", "Plymouth", "Pontiac", "Porsche", "Proton", "PUCH",
-  "Ravon", "Renault", "Roewe", "Rolls-Royce", "Rover",
-  "Saab", "Saleen", "Samsung", "Saturn", "Scion", "SEAT", "Shuanghuan", "Skoda", "Smart", "Spyker", "SsangYong", "Subaru", "Suzuki",
-  "Talbot", "Tata", "Tatra", "Tianma", "Tianye", "Tofas", "Toyota", "Trabant", "TVR",
-  "Venturi", "Volkswagen", "Volvo", "Vortex",
-  "Wartburg", "Wiesmann",
-  "Xin Kai",
-  "Yzk",
-  "ZAZ", "ZX",
-  "Велта", "Волга", "ГАЗ", "Газель", "ЕРАЗ", "ЗИЛ", "ИЖ", "КАМАЗ", "ЛУАЗ", "Москвич", "СеАЗ", "ТагАЗ", "УАЗ"
+  "Alpina", "Aston Martin", "Audi",
+  "Bentley", "BMW", "Bugatti", "BYD",
+  "Cadillac", "Changan", "Chery", "Chevrolet",
+  "Daewoo", "Dodge", "Evolute", "Exeed",
+  "Ferrari", "FIAT", "Ford", "Foton", "Geely",
+  "Honda", "Huanghai", "Hummer", "Hyundai",
+  "Infiniti", "Isuzu", "JAC", "Jaguar", "Jeep", "Kia", "Koenigsegg",
+  "LADA", "LADA Vesta", "LADA X-Ray", "Lamborghini", "Lancia", "Land Rover", "Lexus", "Lincoln", "Lotus",
+  "Maserati", "Maybach", "Mazda", "McLaren",
+  "Mercedes-Benz", "Mitsubishi", "Nissan", "Omoda", "Opel",
+  "Pagani", "Panoz", "Peugeot", "Porsche", "Ravon", "Renault", "Rolls-Royce", "Skoda", "Subaru", "Suzuki",
+  "Toyota", "Volkswagen", "Volvo", "Vortex",
+  "Велта", "Волга", "ГАЗ", "Газель", "ЗИЛ", "КАМАЗ", "Москвич"
 ];
 
 /* ── Searchable Select for car makes ── */
@@ -169,8 +157,28 @@ export function DriverForm({ driver, onClose }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [autoGenCreds, setAutoGenCreds] = useState(!driver);
   const [vehicleGroups, setVehicleGroups] = useState<any[]>([]);
+  const [tariffs, setTariffs] = useState<any[]>([]);
 
   const vehicle = driver?.vehicles?.[0]; // Get existing first vehicle if any
+
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<DriverFormData>({
+    defaultValues: {
+      lastName: driver ? driver.lastName : "",
+      firstName: driver ? driver.firstName : "",
+      phone: driver ? driver.phone : "",
+      login: driver ? driver.login : "",
+      callsign: driver?.callsign || "",
+      comment: (driver as any)?.comment || "",
+      carPlate: vehicle?.plate || "",
+      carMake: vehicle?.make || "",
+      carModel: vehicle?.model || "",
+      carColor: vehicle?.color || "белый",
+      carClassIds: vehicle?.classes?.map((c: any) => String(c.classId)) || [],
+      tariffGroupId: (driver as any)?.tariffGroupId ? String((driver as any).tariffGroupId) : "",
+      password: "",
+      password2: "",
+    },
+  });
 
   useEffect(() => {
     fetch("/api/vehicle-classes")
@@ -179,25 +187,24 @@ export function DriverForm({ driver, onClose }: Props) {
         if (d.data) setVehicleGroups(d.data);
       })
       .catch(console.error);
-  }, []);
 
-  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<DriverFormData>({
-    defaultValues: {
-      lastName:   driver ? driver.lastName : "",
-      firstName:  driver ? driver.firstName : "",
-      phone:      driver ? driver.phone : "",
-      login:      driver ? driver.login : "",
-      callsign:   driver?.callsign || "",
-      comment:    (driver as any)?.comment || "",
-      carPlate:   vehicle?.plate || "",
-      carMake:    vehicle?.make || "",
-      carModel:   vehicle?.model || "",
-      carColor:   vehicle?.color || "белый",
-      carClassIds: vehicle?.classes?.map((c: any) => String(c.classId)) || [],
-      password:   "",
-      password2:  "",
-    },
-  });
+    fetch("/api/tariff-groups")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.data) {
+          const activeTariffs = d.data.filter((t: any) => t.type === "commission" && t.isActive);
+          setTariffs(activeTariffs);
+
+          if (!driver || !(driver as any).tariffGroupId) {
+            const standard = activeTariffs.find((t: any) => t.name.toLowerCase() === "стандарт");
+            if (standard) {
+              setValue("tariffGroupId", String(standard.id));
+            }
+          }
+        }
+      })
+      .catch(console.error);
+  }, [driver, setValue]);
 
   const carMakeValue = watch("carMake");
 
@@ -206,7 +213,7 @@ export function DriverForm({ driver, onClose }: Props) {
       alert("Пароли не совпадают");
       return;
     }
-    
+
     setSubmitting(true);
     try {
       if (autoGenCreds && !driver) {
@@ -215,8 +222,8 @@ export function DriverForm({ driver, onClose }: Props) {
         data.password = Math.random().toString(36).slice(-6).toUpperCase();
       }
       const method = driver ? "PATCH" : "POST";
-      const url    = driver ? `/api/drivers/${driver.id}` : "/api/drivers";
-      
+      const url = driver ? `/api/drivers/${driver.id}` : "/api/drivers";
+
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
@@ -225,7 +232,7 @@ export function DriverForm({ driver, onClose }: Props) {
           autoGenCreds,
         }),
       });
-      
+
       const d = await res.json();
       if (res.ok) {
         if (autoGenCreds && !driver) {
@@ -244,7 +251,7 @@ export function DriverForm({ driver, onClose }: Props) {
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 800, maxWidth: "96vw", borderRadius: 8, overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
-        
+
         {/* Yellow Header */}
         <div className="modal-header" style={{ flexShrink: 0, background: "#ffcc00", color: "#000", borderBottom: 0, padding: "16px 20px" }}>
           <div style={{ fontWeight: 700, fontSize: 16 }}>
@@ -256,7 +263,7 @@ export function DriverForm({ driver, onClose }: Props) {
         <form onSubmit={handleSubmit(onSubmit)} style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <div className="modal-body" style={{ background: "#fff", padding: "24px", overflowY: "auto", flexGrow: 1 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
-              
+
               {/* Left Column: Personal info */}
               <div>
                 <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 13, color: "var(--color-text-3)", textTransform: "uppercase" }}>Личные данные</div>
@@ -276,6 +283,15 @@ export function DriverForm({ driver, onClose }: Props) {
                 <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
                   <span className="form-label" style={{ width: 120, fontSize: 13 }}>Моб. телефон:</span>
                   <input {...register("phone", { required: true })} className="form-input" placeholder="+7" id="driver-phone" />
+                </div>
+
+                <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                  <span className="form-label" style={{ width: 120, fontSize: 13 }}>Тариф (План):</span>
+                  <select {...register("tariffGroupId")} className="form-select" id="driver-tariff">
+                    {tariffs.map(t => (
+                      <option key={t.id} value={t.id}>{t.name} ({t.value}%)</option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="divider" style={{ margin: "24px 0" }} />
@@ -337,7 +353,7 @@ export function DriverForm({ driver, onClose }: Props) {
                   <span className="form-label" style={{ width: 100, fontSize: 13 }}>Гос. номер:</span>
                   <input {...register("carPlate")} className="form-input" placeholder="н-р: 777AAA01" id="car-plate" />
                 </div>
-                
+
                 <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
                   <span className="form-label" style={{ width: 100, fontSize: 13 }}>Марка:</span>
                   <SearchableCarSelect
@@ -350,7 +366,7 @@ export function DriverForm({ driver, onClose }: Props) {
                   <span className="form-label" style={{ width: 100, fontSize: 13 }}>Модель:</span>
                   <input {...register("carModel")} className="form-input" placeholder="н-р: Camry" id="car-model" />
                 </div>
-                
+
                 <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
                   <span className="form-label" style={{ width: 100, fontSize: 13 }}>Цвет:</span>
                   <select {...register("carColor")} className="form-select" id="car-color">
@@ -362,7 +378,7 @@ export function DriverForm({ driver, onClose }: Props) {
 
                 <div className="divider" style={{ margin: "24px 0" }} />
                 <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 13, color: "var(--color-text-3)", textTransform: "uppercase" }}>Классы автомобилей</div>
-                
+
                 {vehicleGroups.map((g) => (
                   <div key={g.id} style={{ marginBottom: 16, border: "1px solid var(--color-border-2)", borderRadius: 4, overflow: "hidden" }}>
                     <div style={{ padding: "6px 12px", background: "var(--color-surface-2)", fontSize: 13, fontStyle: "italic", color: "var(--color-primary)", borderBottom: "1px solid var(--color-border-2)" }}>

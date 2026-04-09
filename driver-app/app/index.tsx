@@ -9,6 +9,7 @@ import {
   Linking,
   Vibration,
   AppState,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -21,7 +22,7 @@ import { DriverHistoryPanel } from "../components/DriverHistoryPanel";
 import { DriverChatPanel } from "../components/DriverChatPanel";
 import { DriverProfilePanel } from "../components/DriverProfilePanel";
 import { ActiveOrdersPanel } from "../components/ActiveOrdersPanel";
-import { YandexMapView } from "../components/YandexMapView";
+import { YandexMapView, YandexMapViewHandle } from "../components/YandexMapView";
 import { SwipeButton } from "../components/SwipeButton";
 
 const BASE_FARE = 290;
@@ -48,9 +49,9 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLon / 2) *
+    Math.sin(dLon / 2);
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -77,6 +78,8 @@ export default function MainScreen() {
   const [alertTimer, setAlertTimer] = useState(30);
   const [activeTab, setActiveTab] = useState<DriverTab>("home");
   const [currentCoords, setCurrentCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [refreshingGPS, setRefreshingGPS] = useState(false);
+  const mapRef = useRef<YandexMapViewHandle>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const locationSubRef = useRef<Location.LocationSubscription | null>(null);
   const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -84,16 +87,35 @@ export default function MainScreen() {
   const realtimeDriverRef = useRef<number | null>(null);
 
   const refreshCurrentPosition = useCallback(async () => {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== "granted") return;
+    setRefreshingGPS(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Геолокация", "Предоставьте доступ к GPS в настройках");
+        return;
+      }
 
-    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
-    const nextCoords = {
-      latitude: loc.coords.latitude,
-      longitude: loc.coords.longitude,
-    };
-    setCurrentCoords(nextCoords);
-    lastLocationRef.current = { lat: nextCoords.latitude, lng: nextCoords.longitude };
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+      const nextCoords = {
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+      };
+      setCurrentCoords(nextCoords);
+      lastLocationRef.current = { lat: nextCoords.latitude, lng: nextCoords.longitude };
+
+      // Update server immediately
+      api("/api/driver/location", {
+        method: "POST",
+        body: JSON.stringify({ lat: nextCoords.latitude, lng: nextCoords.longitude }),
+      });
+
+      // Signal map to center
+      mapRef.current?.centerOnMe();
+    } catch (e) {
+      console.error("GPS Refresh Error:", e);
+    } finally {
+      setRefreshingGPS(false);
+    }
   }, []);
 
   const startLocationTracking = useCallback(async (driverId: number) => {
@@ -413,10 +435,28 @@ export default function MainScreen() {
     if (activeOrder) {
       return (
         <View style={styles.pageBlock}>
-          {/* Header: order id + rate + ⋯ menu */}
+          {/* Header: order id + rate + GPS + ⋯ menu */}
           <View style={styles.orderHeader}>
-            <Text style={styles.orderHeaderTitle}>Заказ #{activeOrder.id}</Text>
-            <Text style={styles.headerRate}>{activeOrder.pricePerKm} ₸/км</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.orderHeaderTitle}>Заказ #{activeOrder.id}</Text>
+              <Text style={styles.headerRate}>{activeOrder.pricePerKm} ₸/км</Text>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.gpsBadge, { marginRight: 8 }]}
+              onPress={refreshCurrentPosition}
+              disabled={refreshingGPS}
+            >
+              {refreshingGPS ? (
+                <ActivityIndicator size={10} color="#fff" style={{ marginRight: 4 }} />
+              ) : (
+                <Ionicons name="locate" size={12} color="#fff" />
+              )}
+              <Text style={[styles.gpsBadgeText, { fontSize: 10 }]}>
+                {refreshingGPS ? "Обновление..." : "Обновить GPS"}
+              </Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.menuBtn}
               onPress={() => {
@@ -464,6 +504,7 @@ export default function MainScreen() {
           {/* Map takes all available space */}
           <View style={styles.mapContainerOrder}>
             <YandexMapView
+              ref={mapRef}
               center={pickupCoords}
               userLocation={currentCoords}
               pickupLocation={pickupCoords}
@@ -537,10 +578,21 @@ export default function MainScreen() {
             <View style={[styles.statusDot, isOnline ? styles.dotOnline : styles.dotOffline]} />
             <Text style={styles.headerTitle}>{isOnline ? "На линии" : "Вне линии"}</Text>
           </View>
-          <View style={styles.gpsBadge}>
-            <Ionicons name={currentCoords ? "locate" : "locate-outline"} size={14} color="#fff" />
-            <Text style={styles.gpsBadgeText}>{currentCoords ? "GPS найден" : "Поиск GPS"}</Text>
-          </View>
+          <TouchableOpacity
+            style={styles.gpsBadge}
+            onPress={refreshCurrentPosition}
+            disabled={refreshingGPS}
+            activeOpacity={0.7}
+          >
+            {refreshingGPS ? (
+              <ActivityIndicator size="small" color="#fff" style={{ marginRight: 4 }} />
+            ) : (
+              <Ionicons name={currentCoords ? "locate" : "locate-outline"} size={14} color="#fff" />
+            )}
+            <Text style={styles.gpsBadgeText}>
+              {refreshingGPS ? "Обновление..." : (currentCoords ? "GPS найден" : "Поиск GPS")}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.statsRow}>
@@ -561,13 +613,17 @@ export default function MainScreen() {
         <View style={styles.centerArea}>
           <View style={styles.mapContainerWaiting}>
             <YandexMapView
+              ref={mapRef}
               center={currentCoords}
               userLocation={currentCoords}
               zoom={15}
             />
             <View style={styles.waitingOverlay}>
               <Ionicons name="radio-outline" size={20} color="#fff" />
-              <Text style={styles.waitingText}>{isOnline ? "Ожидание заказа..." : "Текущее местоположение"}</Text>
+              <View>
+                <Text style={styles.waitingText}>{isOnline ? "Ожидание заказа..." : "Текущее местоположение"}</Text>
+                <Text style={{ color: "rgba(255,255,255,0.6)", fontSize: 11 }}>Карамурт</Text>
+              </View>
             </View>
           </View>
         </View>

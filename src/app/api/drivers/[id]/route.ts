@@ -1,4 +1,4 @@
-﻿export const dynamic = "force-dynamic";
+export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -22,6 +22,8 @@ async function serializeDriver(driver: any) {
     rating: driverRank.rank,
     ordersCount: driverRank.ordersCount,
     currentLocation: null,
+    tariffGroup: driver.tariffGroup,
+    tariffGroupId: driver.tariffGroupId,
   };
 }
 
@@ -86,6 +88,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     carColor,
     carClassIds,
     password,
+    tariffGroupId,
   } = body;
 
   const updated = await prisma.driver.update({
@@ -99,9 +102,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       ...(callsign !== undefined && { callsign }),
       ...(comment !== undefined && { comment }),
       ...(status !== undefined && { status }),
+      ...(tariffGroupId !== undefined && { tariffGroupId: tariffGroupId ? Number(tariffGroupId) : null }),
       ...(password ? { passwordHash: await hashPassword(password) } : {}),
     },
-    include: { vehicles: true },
+    include: { vehicles: true, tariffGroup: true },
   });
 
   if (carPlate !== undefined) {
@@ -147,7 +151,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const finalDriver = await prisma.driver.findUnique({
     where: { id: driverId },
-    include: { vehicles: true },
+    include: { vehicles: true, tariffGroup: true },
   });
 
   return NextResponse.json({ data: await serializeDriver(finalDriver) });

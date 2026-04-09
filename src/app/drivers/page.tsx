@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import { useEffect, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import type { Driver } from "@/types";
@@ -96,6 +96,7 @@ export default function DriversPage() {
                 <th rowSpan={2}>Имя</th>
                 <th rowSpan={2} style={{ textAlign: "center" }}>Рейтинг</th>
                 <th rowSpan={2}>Баланс</th>
+                <th rowSpan={2}>Тариф</th>
                 <th rowSpan={2}>Устройство</th>
                 <th colSpan={3} style={{ textAlign: "center", borderBottom: "1px solid var(--color-border-2)", borderLeft: "1px solid var(--color-border-2)", borderRight: "1px solid var(--color-border-2)" }}>Автомобиль</th>
                 {(canEdit || canDelete) && <th rowSpan={2} style={{ textAlign: "center", width: 80 }}>Действия</th>}
@@ -157,6 +158,11 @@ export default function DriversPage() {
                         {isLowBalance && <span style={{ fontSize: "14px" }}>⚠️</span>}
                         {Number(driver.balance).toLocaleString()} <span style={{ fontSize: "10px", opacity: 0.8 }}>₸</span>
                       </button>
+                    </td>
+                    <td className="text-muted text-sm">
+                      <span style={{ background: "var(--color-bg)", padding: "2px 6px", borderRadius: 4, border: "1px solid var(--color-border)" }}>
+                        {(driver as any).tariffGroup?.name || "Стандарт"}
+                      </span>
                     </td>
                     <td className="text-muted text-sm" style={{ lineHeight: 1.4 }}>
                       <div style={{ color: "var(--color-primary)" }}>{(driver as any).osVersion || "Android"}</div>
