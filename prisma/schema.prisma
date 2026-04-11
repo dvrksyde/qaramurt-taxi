@@ -55,6 +55,7 @@ enum TransactionType {
   deposit
   penalty
   bonus
+  order_fee
 }
 
 enum TariffType {
@@ -221,6 +222,8 @@ model Driver {
   /// Stored as "POINT(lng lat)" WKT string; use raw SQL for ST_DWithin
   currentLocation String?      @db.Text
   deviceId        String?      @db.VarChar(100)
+  osVersion       String?      @db.VarChar(50)
+  thirdPartyApps  Json         @default("[]")
   comment         String?
   isActive        Boolean      @default(true)
   createdAt       DateTime     @default(now())
@@ -232,6 +235,7 @@ model Driver {
   documents     DriverDocument[]
   transactions  CashTransaction[]
   orderLogs     OrderStatusLog[]
+  chatMessages  ChatMessage[]
 
   @@map("drivers")
 }
@@ -295,22 +299,38 @@ model VehicleService {
 // ─── OPERATORS ───────────────────────────────────────────────────────────────
 
 model Operator {
-  id           Int      @id @default(autoincrement())
-  login        String   @unique @db.VarChar(50)
-  name         String   @db.VarChar(100)
-  passwordHash String   @db.VarChar(255)
-  role         String   @default("operator") @db.VarChar(20)
-  cashBalance  Decimal  @default(0) @db.Decimal(10, 2)
-  advanceBalance Decimal @default(100) @db.Decimal(10, 2)
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id             Int      @id @default(autoincrement())
+  login          String   @unique @db.VarChar(50)
+  name           String   @db.VarChar(100)
+  passwordHash   String   @db.VarChar(255)
+  role           String   @default("operator") @db.VarChar(20)
+  permissions    Json     @default("[]")
+  cashBalance    Decimal  @default(0) @db.Decimal(10, 2)
+  advanceBalance Decimal  @default(100) @db.Decimal(10, 2)
+  isActive       Boolean  @default(true)
+  lastSeenAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   orders           Order[]
   cashTransactions CashTransaction[]
   callLogs         CallLog[]
+  settlements      OperatorSettlement[]
 
   @@map("operators")
+}
+
+model OperatorSettlement {
+  id          Int      @id @default(autoincrement())
+  operatorId  Int
+  amount      Decimal  @db.Decimal(10, 2)
+  type        String   @default("salary") @db.VarChar(50) // salary, bonus, penalty
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
+
+  operator Operator @relation(fields: [operatorId], references: [id])
+
+  @@map("operator_settlements")
 }
 
 // ─── CLIENTS ─────────────────────────────────────────────────────────────────
@@ -349,6 +369,7 @@ model Order {
   /// Array of {address, point, order} objects
   stops              Json               @default("[]")
   distanceKm         Decimal?           @db.Decimal(10, 3)
+  pricePerKm         Decimal            @default(80) @db.Decimal(10, 2)
   estimatedPrice     Decimal?           @db.Decimal(10, 2)
   finalPrice         Decimal?           @db.Decimal(10, 2)
   cashlessAccountId  Int?
@@ -490,4 +511,34 @@ model Queue {
   createdAt   DateTime @default(now())
 
   @@map("queues")
+}
+
+// ─── CHAT MESSAGES ────────────────────────────────────────────────────────────
+
+model ChatMessage {
+  id        Int      @id @default(autoincrement())
+  from      String   @db.VarChar(100)
+  driverId  Int?
+  text      String   @db.Text
+  direction String   @default("inbound") @db.VarChar(20)
+  createdAt DateTime @default(now())
+
+  driver Driver? @relation(fields: [driverId], references: [id])
+
+  @@index([driverId])
+  @@index([createdAt])
+  @@map("chat_messages")
+}
+
+model AddressBook {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(100)
+  fullName  String?  @db.Text
+  latitude  Decimal  @db.Decimal(10, 7)
+  longitude Decimal  @db.Decimal(10, 7)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([name])
+  @@map("address_book")
 }

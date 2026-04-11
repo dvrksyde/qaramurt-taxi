@@ -4,6 +4,7 @@
  */
 import "dotenv/config";
 import { getPrisma } from "../src/lib/prisma";
+import { hashPassword } from "../src/lib/passwords";
 
 const prisma = getPrisma();
 
@@ -23,6 +24,19 @@ async function main() {
     },
   });
   console.log("✓ TaxiService:", service.name);
+
+  const deliveryService = await prisma.taxiService.upsert({
+    where: { id: 2 },
+    update: {},
+    create: {
+      name: "Доставка",
+      priority: 9,
+      settlement: "Город",
+      autoSelectionType: "nearest",
+      isActive: true,
+    },
+  });
+  console.log("✓ TaxiService:", deliveryService.name);
 
   // ── Vehicle Class Group ────────────────────────────────────────────────────
   const group = await prisma.vehicleClassGroup.upsert({
@@ -87,11 +101,11 @@ async function main() {
   // ── Admin Operator ─────────────────────────────────────────────────────────
   const admin = await prisma.operator.upsert({
     where: { login: "admin" },
-    update: {},
+    update: { passwordHash: await hashPassword("admin123") },
     create: {
       login: "admin",
       name: "Администратор",
-      passwordHash: "admin123", // In production: use bcrypt hash
+      passwordHash: await hashPassword("admin123"), // Real scrypt hash
       role: "admin",
       cashBalance: 0,
       advanceBalance: 0,
@@ -106,7 +120,7 @@ async function main() {
     update: {},
     create: {
       login: "driver001",
-      passwordHash: "driver123",
+      passwordHash: await hashPassword("driver123"),
       firstName: "Асхат",
       lastName: "Жумабеков",
       phone: "+77001234567",

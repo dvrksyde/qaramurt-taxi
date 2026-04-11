@@ -79,8 +79,27 @@ export function useSocket() {
       });
     });
 
+    socket.on("new_order", (order) => {
+      // Protect against duplicates
+      const current = useMonitorStore.getState().currentOrders;
+      if (!current.some((o) => o.id === order.id)) {
+        store.addOrder(order);
+      }
+      store.addSystemLog({
+        id: Date.now().toString(),
+        message: `Новый заказ #${order.id}`,
+        level: "info",
+        timestamp: new Date().toISOString(),
+      });
+    });
+
     socket.on("order_status_change", (data) => {
-      store.updateOrder(data.orderId, { status: data.status, driverId: data.driverId });
+      const finishedStatuses = ["completed", "canceled"];
+      if (finishedStatuses.includes(data.status)) {
+        store.removeOrder(data.orderId);
+      } else {
+        store.updateOrder(data.orderId, { status: data.status, driverId: data.driverId });
+      }
     });
 
     socket.on("chat_message", (msg) => {
@@ -104,6 +123,7 @@ export function useSocket() {
     orderId: number;
     method: string;
     targetDriverId?: number;
+    classId?: number;
   }) => {
     socketRef.current?.emit("dispatch_order", alert);
   };

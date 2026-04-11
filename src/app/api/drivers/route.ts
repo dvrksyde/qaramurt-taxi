@@ -1,14 +1,28 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { requireAuth, checkPermission } from "@/lib/permissions";
+import { hashPassword } from "@/lib/passwords";
+import { buildDriverRankMap } from "@/lib/driverRanking";
 
-// GET /api/drivers
+function serializeDriver(driver: any, rating: number, ordersCount: number) {
+  const { passwordHash: _passwordHash, ...safeDriver } = driver;
+  return {
+    ...safeDriver,
+    balance: Number(driver.balance),
+    maxCredit: Number(driver.maxCredit),
+    rating,
+    ordersCount,
+    currentLocation: null,
+    tariffGroup: driver.tariffGroup,
+    tariffGroupId: driver.tariffGroupId,
+  };
+}
+
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { allowed, response } = await requireAuth();
+  if (!allowed) return response!;
 
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
@@ -18,10 +32,10 @@ export async function GET(req: NextRequest) {
   if (status) where.status = status;
   if (search) {
     where.OR = [
-      { lastName:  { contains: search, mode: "insensitive" } },
+      { lastName: { contains: search, mode: "insensitive" } },
       { firstName: { contains: search, mode: "insensitive" } },
-      { phone:     { contains: search } },
-      { callsign:  { contains: search, mode: "insensitive" } },
+      { phone: { contains: search } },
+      { callsign: { contains: search, mode: "insensitive" } },
     ];
   }
 
@@ -29,36 +43,67 @@ export async function GET(req: NextRequest) {
     where,
     include: {
       tariffGroup: { select: { name: true, type: true } },
-      vehicles: { select: { id: true, plate: true, make: true, model: true, color: true } },
+      vehicles: { select: { id: true, plate: true, make: true, model: true, color: true, classes: true } },
+      _count: { select: { orders: { where: { status: "completed" } } } },
     },
     orderBy: [{ status: "asc" }, { lastName: "asc" }],
   });
 
-  // Serialize: strip binary location field, convert to {lat, lng}
-  const serialized = drivers.map((d) => ({
-    ...d,
-    balance: Number(d.balance),
-    maxCredit: Number(d.maxCredit),
-    rating: Number(d.rating),
-    currentLocation: null, // PostGIS geometry not JSON-serializable; use dedicated endpoint
-  }));
+  const rankMap = buildDriverRankMap(
+    drivers.map((driver) => ({
+      id: driver.id,
+      ordersCount: driver._count?.orders || 0,
+    })),
+  );
+
+  const serialized = drivers.map((driver) => {
+    const rankEntry = rankMap.get(driver.id) || { rank: 0, ordersCount: 0 };
+    return serializeDriver(driver, rankEntry.rank, rankEntry.ordersCount);
+  });
 
   return NextResponse.json({ data: serialized });
 }
 
-// POST /api/drivers — create driver
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { allowed, response } = await checkPermission(["add_drivers"]);
+  if (!allowed) return response!;
 
   const body = await req.json();
-  const { lastName, firstName, middleName, phone, login, password, callsign, tariffGroupId, maxCredit, comment } = body;
+  let {
+    lastName,
+    firstName,
+    middleName,
+    phone,
+    login,
+    password,
+    callsign,
+    comment,
+    carPlate,
+    carMake,
+    carModel,
+    carColor,
+    carClassIds,
+    autoGenCreds,
+    tariffGroupId,
+  } = body;
+
+  let generatedPassword = null;
+
+  if (autoGenCreds) {
+    if (!login) {
+      login = phone.replace(/\D/g, "").slice(-10);
+      if (!login) login = `dr${Math.floor(1000 + Math.random() * 9000)}`;
+    }
+    if (!password) {
+      password = Math.random().toString(36).substring(2, 8).toUpperCase();
+      generatedPassword = password;
+    }
+  }
 
   if (!lastName || !firstName || !phone || !login || !password) {
     return NextResponse.json({ error: "Заполните обязательные поля" }, { status: 400 });
   }
 
-  // Check uniqueness
   const exists = await prisma.driver.findFirst({
     where: { OR: [{ phone }, { login }] },
   });
@@ -66,8 +111,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Телефон или логин уже используется" }, { status: 409 });
   }
 
-  // In production, use bcrypt. For demo, store plain hash marker.
-  const passwordHash = password; // TODO: await bcrypt.hash(password, 10)
+  // Default to Стандарт if no tariff provided
+  let finalTariffId = tariffGroupId ? Number(tariffGroupId) : null;
+  if (!finalTariffId) {
+    const standard = await prisma.driverTariffGroup.findFirst({ where: { name: "Стандарт" } });
+    if (standard) finalTariffId = standard.id;
+  }
 
   const driver = await prisma.driver.create({
     data: {
@@ -78,12 +127,40 @@ export async function POST(req: NextRequest) {
       login,
       passwordHash,
       callsign: callsign || null,
-      tariffGroupId: tariffGroupId ? parseInt(tariffGroupId) : null,
-      maxCredit: maxCredit ? parseFloat(maxCredit) : 0,
       comment: comment || null,
       status: "offline",
+      tariffGroupId: finalTariffId,
+      ...(carPlate
+        ? {
+            vehicles: {
+              create: {
+                plate: carPlate,
+                make: carMake || "Неизвестно",
+                model: carModel || "",
+                color: carColor || "Неизвестно",
+                ownershipType: "driver",
+                isActive: true,
+                ...(carClassIds && carClassIds.length > 0
+                  ? {
+                      classes: {
+                        create: carClassIds.map((cId: any) => ({ classId: Number(cId) })),
+                      },
+                    }
+                  : {}),
+              },
+            },
+          }
+        : {}),
+    },
+    include: {
+      tariffGroup: { select: { name: true, type: true } },
+      vehicles: true,
+      _count: { select: { orders: { where: { status: "completed" } } } },
     },
   });
 
-  return NextResponse.json({ data: driver }, { status: 201 });
+  return NextResponse.json(
+    { data: serializeDriver(driver, 0, driver._count?.orders || 0), generatedPassword },
+    { status: 201 },
+  );
 }

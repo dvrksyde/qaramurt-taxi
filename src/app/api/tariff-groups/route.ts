@@ -1,19 +1,32 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(_req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
+export async function GET() {
   const groups = await prisma.driverTariffGroup.findMany({
-    where: { isActive: true },
-    orderBy: { name: "asc" },
+    orderBy: { id: "asc" },
   });
-  return NextResponse.json({
-    data: groups.map((g) => ({ ...g, value: Number(g.value) })),
+  return NextResponse.json({ data: groups });
+}
+
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const { name, value, description, type } = body;
+
+  if (!name || value === undefined) {
+    return NextResponse.json({ error: "Название и значение (процент) обязательны" }, { status: 400 });
+  }
+
+  const group = await prisma.driverTariffGroup.create({
+    data: {
+      name,
+      value: Number(value),
+      description: description || null,
+      type: type || "commission",
+      isActive: true,
+    },
   });
+
+  return NextResponse.json({ data: group });
 }

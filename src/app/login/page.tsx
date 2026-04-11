@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import styles from "./login.module.css";
 
 export default function LoginPage() {
@@ -32,7 +33,7 @@ export default function LoginPage() {
     <div className={styles.loginPage}>
       <div className={styles.loginBox}>
         <div className={styles.loginLogo}>
-          <span className={styles.logoIcon}>🚖</span>
+          <Image src="/logo-transparent.png" alt="Qaramurt Taxi" width={100} height={100} className={styles.logoImg} priority />
           <h1 className={styles.logoTitle}>Qaramurt Taxi</h1>
           <p className={styles.logoSub}>Система диспетчеризации</p>
         </div>

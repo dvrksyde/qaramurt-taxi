@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import type { Driver } from "@/types";
 
@@ -8,65 +8,236 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = "main" | "documents" | "rating" | "log";
-
 interface DriverFormData {
   lastName: string;
   firstName: string;
-  middleName: string;
   phone: string;
   login: string;
-  password: string;
-  password2: string;
+  password?: string;
+  password2?: string;
   callsign: string;
-  tariffGroupId: string;
-  maxCredit: number;
   comment: string;
+  carPlate: string;
+  carMake: string;
+  carModel: string;
+  carColor: string;
+  carClassIds: string[];
+  tariffGroupId?: string;
+}
+
+const CAR_COLORS = [
+  "белый", "голубой", "жёлтый", "зеленый", "золотистый", "коричневый", "красный", "оранжевый",
+  "светло-зеленый", "светло-красный", "светло-синий", "серебристый", "серый", "сине-зеленый", "синий",
+  "тёмно-бежевый", "тёмно-зеленый", "тёмно-красный", "тёмно-синий", "фиолетовый", "чёрный"
+];
+
+const CAR_MAKES = [
+  "Alpina", "Aston Martin", "Audi",
+  "Bentley", "BMW", "Bugatti", "BYD",
+  "Cadillac", "Changan", "Chery", "Chevrolet",
+  "Daewoo", "Dodge", "Evolute", "Exeed",
+  "Ferrari", "FIAT", "Ford", "Foton", "Geely",
+  "Honda", "Huanghai", "Hummer", "Hyundai",
+  "Infiniti", "Isuzu", "JAC", "Jaguar", "Jeep", "Kia", "Koenigsegg",
+  "LADA", "LADA Vesta", "LADA X-Ray", "Lamborghini", "Lancia", "Land Rover", "Lexus", "Lincoln", "Lotus",
+  "Maserati", "Maybach", "Mazda", "McLaren",
+  "Mercedes-Benz", "Mitsubishi", "Nissan", "Omoda", "Opel",
+  "Pagani", "Panoz", "Peugeot", "Porsche", "Ravon", "Renault", "Rolls-Royce", "Skoda", "Subaru", "Suzuki",
+  "Toyota", "Volkswagen", "Volvo", "Vortex",
+  "Велта", "Волга", "ГАЗ", "Газель", "ЗИЛ", "КАМАЗ", "Москвич"
+];
+
+/* ── Searchable Select for car makes ── */
+function SearchableCarSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState(value || "");
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const filtered = search
+    ? CAR_MAKES.filter((m) => m.toLowerCase().startsWith(search.toLowerCase()))
+    : CAR_MAKES;
+
+  // Sync external value changes
+  useEffect(() => {
+    setSearch(value || "");
+  }, [value]);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleSelect = (make: string) => {
+    setSearch(make);
+    onChange(make);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative", flex: 1, minWidth: 0 }}>
+      <input
+        type="text"
+        className="form-input"
+        placeholder="<< Выберите >>"
+        value={search}
+        onChange={(e) => {
+          setSearch(e.target.value);
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        id="car-make"
+        autoComplete="off"
+      />
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            maxHeight: 220,
+            overflowY: "auto",
+            background: "#fff",
+            border: "1px solid var(--color-border)",
+            borderTop: "none",
+            borderRadius: "0 0 4px 4px",
+            zIndex: 100,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+          }}
+        >
+          {filtered.length === 0 ? (
+            <div style={{ padding: "8px 12px", color: "var(--color-text-3)", fontSize: 12 }}>
+              Ничего не найдено
+            </div>
+          ) : (
+            filtered.map((make) => (
+              <div
+                key={make}
+                onClick={() => handleSelect(make)}
+                style={{
+                  padding: "6px 12px",
+                  fontSize: 13,
+                  cursor: "pointer",
+                  background: make === value ? "var(--color-primary-bg)" : "transparent",
+                  borderBottom: "1px solid #f0f0f0",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "#4a90d9";
+                  e.currentTarget.style.color = "#fff";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = make === value ? "var(--color-primary-bg)" : "transparent";
+                  e.currentTarget.style.color = "";
+                }}
+              >
+                {make}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function DriverForm({ driver, onClose }: Props) {
-  const [activeTab, setActiveTab] = useState<Tab>("main");
-  const [tariffGroups, setTariffGroups] = useState<Array<{ id: number; name: string; type: string }>>([]);
   const [submitting, setSubmitting] = useState(false);
   const [autoGenCreds, setAutoGenCreds] = useState(!driver);
+  const [vehicleGroups, setVehicleGroups] = useState<any[]>([]);
+  const [tariffs, setTariffs] = useState<any[]>([]);
+
+  const vehicle = driver?.vehicles?.[0]; // Get existing first vehicle if any
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<DriverFormData>({
-    defaultValues: driver
-      ? {
-          lastName:  driver.lastName,
-          firstName: driver.firstName,
-          middleName: driver.middleName || "",
-          phone:     driver.phone,
-          login:     driver.login,
-          callsign:  driver.callsign || "",
-          maxCredit: driver.maxCredit,
-        }
-      : { maxCredit: 0 },
+    defaultValues: {
+      lastName: driver ? driver.lastName : "",
+      firstName: driver ? driver.firstName : "",
+      phone: driver ? driver.phone : "",
+      login: driver ? driver.login : "",
+      callsign: driver?.callsign || "",
+      comment: (driver as any)?.comment || "",
+      carPlate: vehicle?.plate || "",
+      carMake: vehicle?.make || "",
+      carModel: vehicle?.model || "",
+      carColor: vehicle?.color || "белый",
+      carClassIds: vehicle?.classes?.map((c: any) => String(c.classId)) || [],
+      tariffGroupId: (driver as any)?.tariffGroupId ? String((driver as any).tariffGroupId) : "",
+      password: "",
+      password2: "",
+    },
   });
 
   useEffect(() => {
+    fetch("/api/vehicle-classes")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.data) setVehicleGroups(d.data);
+      })
+      .catch(console.error);
+
     fetch("/api/tariff-groups")
       .then((r) => r.json())
-      .then((d) => d.data && setTariffGroups(d.data))
+      .then((d) => {
+        if (d.data) {
+          const activeTariffs = d.data.filter((t: any) => t.type === "commission" && t.isActive);
+          setTariffs(activeTariffs);
+
+          if (!driver || !(driver as any).tariffGroupId) {
+            const standard = activeTariffs.find((t: any) => t.name.toLowerCase() === "стандарт");
+            if (standard) {
+              setValue("tariffGroupId", String(standard.id));
+            }
+          }
+        }
+      })
       .catch(console.error);
-  }, []);
+  }, [driver, setValue]);
+
+  const carMakeValue = watch("carMake");
 
   const onSubmit = async (data: DriverFormData) => {
-    if (!driver && data.password !== data.password2) {
+    if (!autoGenCreds && data.password !== data.password2) {
       alert("Пароли не совпадают");
       return;
     }
+
     setSubmitting(true);
     try {
+      if (autoGenCreds && !driver) {
+        const phoneDigits = data.phone.replace(/\D/g, "");
+        data.login = phoneDigits.slice(-10) || ('dr' + Math.floor(1000 + Math.random() * 9000));
+        data.password = Math.random().toString(36).slice(-6).toUpperCase();
+      }
       const method = driver ? "PATCH" : "POST";
-      const url    = driver ? `/api/drivers/${driver.id}` : "/api/drivers";
+      const url = driver ? `/api/drivers/${driver.id}` : "/api/drivers";
+
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          ...data,
+          autoGenCreds,
+        }),
       });
+
       const d = await res.json();
       if (res.ok) {
+        if (autoGenCreds && !driver) {
+          alert(`✅ Водитель успешно добавлен!\n\nЛогин для входа: ${data.login}\nПароль: ${data.password}\n\nОбязательно сохраните или передайте эти данные водителю!`);
+        }
         onClose();
       } else {
         alert(d.error || "Ошибка сохранения");
@@ -77,71 +248,59 @@ export function DriverForm({ driver, onClose }: Props) {
     setSubmitting(false);
   };
 
-  const TABS: { key: Tab; label: string }[] = [
-    { key: "main",      label: "Основное" },
-    { key: "documents", label: "Документы" },
-    { key: "rating",    label: "Рейтинг" },
-    { key: "log",       label: "Лог раздачи заказов" },
-  ];
-
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={{ width: 800, maxWidth: "96vw" }}>
-        <div className="modal-header">
-          {driver ? `Редактировать водителя — ${driver.lastName} ${driver.firstName}` : "Новый водитель"}
-          <button className="modal-close" onClick={onClose}>×</button>
+      <div className="modal" style={{ width: 800, maxWidth: "96vw", borderRadius: 8, overflow: "hidden", display: "flex", flexDirection: "column", maxHeight: "90vh" }}>
+
+        {/* Yellow Header */}
+        <div className="modal-header" style={{ flexShrink: 0, background: "#ffcc00", color: "#000", borderBottom: 0, padding: "16px 20px" }}>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>
+            {driver ? `Редактировать водителя — ${driver.lastName} ${driver.firstName}` : "Новый водитель"}
+          </div>
+          <button type="button" className="modal-close" onClick={onClose} style={{ color: "#000", fontSize: 24, padding: 0, background: "transparent", border: "none", cursor: "pointer", marginTop: -4 }}>×</button>
         </div>
 
-        {/* Tabs */}
-        <div className="tabs-bar" style={{ background: "var(--color-surface-2)" }}>
-          {TABS.map((tab) => (
-            <button
-              key={tab.key}
-              className={`tab-btn ${activeTab === tab.key ? "active" : ""}`}
-              onClick={() => setActiveTab(tab.key)}
-              type="button"
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        <form onSubmit={handleSubmit(onSubmit)} style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div className="modal-body" style={{ background: "#fff", padding: "24px", overflowY: "auto", flexGrow: 1 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
 
-        <form onSubmit={handleSubmit(onSubmit)}>
-          <div className="modal-body">
-            {/* ── MAIN TAB ── */}
-            {activeTab === "main" && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: 16 }}>
-                {/* Left: Personal info */}
-                <div>
-                  <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 12, color: "var(--color-text-3)", textTransform: "uppercase" }}>Личные данные</div>
+              {/* Left Column: Personal info */}
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 13, color: "var(--color-text-3)", textTransform: "uppercase" }}>Личные данные</div>
 
-                  <div className="form-row">
-                    <span className="form-label">Фамилия:</span>
-                    <input {...register("lastName", { required: true })} className="form-input" id="driver-last-name" />
-                  </div>
-                  <div className="form-row">
-                    <span className="form-label">Имя:</span>
-                    <input {...register("firstName", { required: true })} className="form-input" id="driver-first-name" />
-                  </div>
-                  <div className="form-row">
-                    <span className="form-label">Отчество:</span>
-                    <input {...register("middleName")} className="form-input" id="driver-middle-name" />
-                  </div>
-                  <div className="form-row">
-                    <span className="form-label">Позывной:</span>
-                    <input {...register("callsign")} className="form-input" style={{ maxWidth: 100 }} id="driver-callsign" />
-                  </div>
-                  <div className="form-row">
-                    <span className="form-label">Моб. телефон:</span>
-                    <input {...register("phone", { required: true })} className="form-input" placeholder="+7" id="driver-phone" />
-                  </div>
+                <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                  <span className="form-label" style={{ width: 120, fontSize: 13 }}>Фамилия:</span>
+                  <input {...register("lastName", { required: true })} className="form-input" id="driver-last-name" />
+                </div>
+                <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                  <span className="form-label" style={{ width: 120, fontSize: 13 }}>Имя:</span>
+                  <input {...register("firstName", { required: true })} className="form-input" id="driver-first-name" />
+                </div>
+                <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                  <span className="form-label" style={{ width: 120, fontSize: 13 }}>Позывной:</span>
+                  <input {...register("callsign")} className="form-input" style={{ width: 100 }} id="driver-callsign" />
+                </div>
+                <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                  <span className="form-label" style={{ width: 120, fontSize: 13 }}>Моб. телефон:</span>
+                  <input {...register("phone", { required: true })} className="form-input" placeholder="+7" id="driver-phone" />
+                </div>
 
-                  <div className="divider" />
+                <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                  <span className="form-label" style={{ width: 120, fontSize: 13 }}>Тариф (План):</span>
+                  <select {...register("tariffGroupId")} className="form-select" id="driver-tariff">
+                    {tariffs.map(t => (
+                      <option key={t.id} value={t.id}>{t.name} ({t.value}%)</option>
+                    ))}
+                  </select>
+                </div>
 
-                  {/* Credentials */}
-                  <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 12, color: "var(--color-text-3)", textTransform: "uppercase" }}>Доступ в приложение</div>
+                <div className="divider" style={{ margin: "24px 0" }} />
 
-                  <div className="form-row">
+                {/* Credentials */}
+                <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 13, color: "var(--color-text-3)", textTransform: "uppercase" }}>Доступ в приложение</div>
+
+                <div className="form-row" style={{ marginBottom: 16, border: "none" }}>
+                  <label htmlFor="driver-autogen" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", userSelect: "none", width: "100%" }}>
                     <input
                       type="checkbox"
                       className="form-checkbox"
@@ -149,149 +308,109 @@ export function DriverForm({ driver, onClose }: Props) {
                       onChange={(e) => setAutoGenCreds(e.target.checked)}
                       id="driver-autogen"
                     />
-                    <label htmlFor="driver-autogen" style={{ fontSize: 12, cursor: "pointer" }}>
-                      Сгенерировать логин и пароль автоматически
-                    </label>
-                  </div>
-
-                  {!autoGenCreds && (
-                    <>
-                      <div className="form-row">
-                        <span className="form-label">Логин:</span>
-                        <input {...register("login", { required: !driver })} className="form-input" id="driver-login" />
-                      </div>
-                      <div className="form-row">
-                        <span className="form-label">Пароль:</span>
-                        <input type="password" {...register("password", { required: !driver })} className="form-input" id="driver-password" />
-                      </div>
-                      <div className="form-row">
-                        <span className="form-label">Ещё раз пароль:</span>
-                        <input type="password" {...register("password2")} className="form-input" id="driver-password2" />
-                      </div>
-                    </>
-                  )}
-
-                  {/* App invite buttons */}
-                  <div className="form-row" style={{ marginTop: 4 }}>
-                    <span className="form-label">Отправить ссылку:</span>
-                    <button type="button" className="btn btn-ghost btn-sm" style={{ color: "#25D366" }}>WhatsApp</button>
-                    <button type="button" className="btn btn-ghost btn-sm" style={{ color: "#7360F2" }}>Viber</button>
-                    <button type="button" className="btn btn-ghost btn-sm">SMS</button>
-                  </div>
-
-                  <div className="divider" />
-                  <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 12, color: "var(--color-text-3)", textTransform: "uppercase" }}>Комментарий</div>
-                  <textarea {...register("comment")} className="form-textarea" rows={3} id="driver-comment" />
+                    Сгенерировать логин и пароль автоматически
+                  </label>
                 </div>
 
-                {/* Right: Tariff assignment */}
-                <div>
-                  <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 12, color: "var(--color-text-3)", textTransform: "uppercase" }}>Тарифы</div>
+                {!autoGenCreds && (
+                  <>
+                    <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                      <span className="form-label" style={{ width: 120, fontSize: 13 }}>Логин:</span>
+                      <input {...register("login", { required: !driver && !autoGenCreds })} className="form-input" id="driver-login" />
+                    </div>
+                    <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                      <span className="form-label" style={{ width: 120, fontSize: 13 }}>Пароль:</span>
+                      <input type="text" {...register("password", { required: !driver && !autoGenCreds })} className="form-input" id="driver-password" />
+                    </div>
+                    <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                      <span className="form-label" style={{ width: 120, fontSize: 13 }}>Ещё раз пароль:</span>
+                      <input type="text" {...register("password2", { required: !driver && !autoGenCreds })} className="form-input" id="driver-password-confirm" />
+                    </div>
+                  </>
+                )}
 
-                  <div className="form-row" style={{ flexDirection: "column", alignItems: "flex-start" }}>
-                    <span className="form-label" style={{ minWidth: "auto", marginBottom: 4 }}>Группа сдельных тарифов:</span>
-                    <select {...register("tariffGroupId")} className="form-select" id="driver-tariff-group">
-                      <option value="">— не назначено —</option>
-                      {tariffGroups
-                        .filter((g) => g.type === "commission" || g.type === "fixed")
-                        .map((g) => (
-                          <option key={g.id} value={g.id}>{g.name}</option>
-                        ))}
-                    </select>
+                {/* App invite buttons */}
+                <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                  <span className="form-label" style={{ width: 120, fontSize: 13 }}>Отправить ссылку:</span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button type="button" className="btn btn-ghost btn-sm" style={{ color: "#25D366", border: "1px solid #e0e0e0", fontSize: 12 }}>WhatsApp</button>
                   </div>
-
-                  <div className="form-row" style={{ flexDirection: "column", alignItems: "flex-start", marginTop: 8 }}>
-                    <span className="form-label" style={{ minWidth: "auto", marginBottom: 4 }}>Группа безлимитных тарифов:</span>
-                    <select className="form-select" id="driver-unlimited-group">
-                      <option value="">— не назначено —</option>
-                      {tariffGroups
-                        .filter((g) => g.type === "unlimited")
-                        .map((g) => (
-                          <option key={g.id} value={g.id}>{g.name}</option>
-                        ))}
-                    </select>
-                  </div>
-
-                  <div className="divider" />
-
-                  <div className="form-row">
-                    <span className="form-label" style={{ minWidth: "auto" }}>Макс. кредит:</span>
-                    <input
-                      type="number"
-                      {...register("maxCredit", { valueAsNumber: true })}
-                      className="form-input"
-                      step="0.01"
-                      id="driver-max-credit"
-                    />
-                    <span className="text-muted text-sm">руб.</span>
-                  </div>
-
-                  <div style={{ marginTop: 8, padding: "8px 10px", background: "var(--color-surface-2)", border: "1px solid var(--color-border)", borderRadius: 3, fontSize: 11, color: "var(--color-text-2)" }}>
-                    ⚠️ Если баланс ниже (-Макс. кредит), водитель не сможет принимать заказы.
-                  </div>
-
-                  <div className="divider" />
-                  <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 12, color: "var(--color-text-3)", textTransform: "uppercase" }}>Автомобили</div>
-                  <div style={{ fontSize: 12, color: "var(--color-text-3)" }}>Привяжите автомобиль после создания водителя.</div>
                 </div>
+
+                <div className="divider" style={{ margin: "24px 0" }} />
+                <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 13, color: "var(--color-text-3)", textTransform: "uppercase" }}>Комментарий</div>
+                <textarea {...register("comment")} className="form-textarea" rows={3} id="driver-comment" />
               </div>
-            )}
 
-            {/* ── DOCUMENTS TAB ── */}
-            {activeTab === "documents" && (
+              {/* Right Column: Vehicles Assignment */}
               <div>
-                <div style={{ fontSize: 13, color: "var(--color-text-2)", marginBottom: 12 }}>
-                  Документы водителя для верификации (Допуски).
+                <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 13, color: "var(--color-text-3)", textTransform: "uppercase" }}>Автомобиль</div>
+                <div style={{ fontSize: 12, color: "var(--color-text-2)", marginBottom: 16 }}>
+                  {driver && vehicle ? "Данные привязанного автомобиля" : "Привяжите автомобиль к данному профилю водителя (по желанию)"}
                 </div>
-                {[
-                  "Водительское удостоверение",
-                  "Паспорт",
-                  "Техпаспорт автомобиля",
-                  "Страховой полис",
-                  "Медицинская справка",
-                ].map((doc) => (
-                  <div key={doc} className="form-row" style={{ padding: "8px 0", borderBottom: "1px solid var(--color-border-2)" }}>
-                    <span style={{ flex: 1, fontSize: 13 }}>{doc}</span>
-                    <input type="file" accept="image/*,.pdf" style={{ fontSize: 12 }} />
-                    <span className="status-badge canceled" style={{ fontSize: 10 }}>Не загружен</span>
+
+                <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                  <span className="form-label" style={{ width: 100, fontSize: 13 }}>Гос. номер:</span>
+                  <input {...register("carPlate")} className="form-input" placeholder="н-р: 777AAA01" id="car-plate" />
+                </div>
+
+                <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                  <span className="form-label" style={{ width: 100, fontSize: 13 }}>Марка:</span>
+                  <SearchableCarSelect
+                    value={carMakeValue}
+                    onChange={(v) => setValue("carMake", v)}
+                  />
+                </div>
+
+                <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                  <span className="form-label" style={{ width: 100, fontSize: 13 }}>Модель:</span>
+                  <input {...register("carModel")} className="form-input" placeholder="н-р: Camry" id="car-model" />
+                </div>
+
+                <div className="form-row" style={{ marginBottom: 12, border: "none" }}>
+                  <span className="form-label" style={{ width: 100, fontSize: 13 }}>Цвет:</span>
+                  <select {...register("carColor")} className="form-select" id="car-color">
+                    {CAR_COLORS.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="divider" style={{ margin: "24px 0" }} />
+                <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 13, color: "var(--color-text-3)", textTransform: "uppercase" }}>Классы автомобилей</div>
+
+                {vehicleGroups.map((g) => (
+                  <div key={g.id} style={{ marginBottom: 16, border: "1px solid var(--color-border-2)", borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{ padding: "6px 12px", background: "var(--color-surface-2)", fontSize: 13, fontStyle: "italic", color: "var(--color-primary)", borderBottom: "1px solid var(--color-border-2)" }}>
+                      {g.name}
+                    </div>
+                    <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 8, background: "#f5f5f5" }}>
+                      {g.classes.map((c: any) => (
+                        <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            className="form-checkbox"
+                            value={String(c.id)}
+                            {...register("carClassIds")}
+                          />
+                          {c.name}
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
-            )}
 
-            {/* ── RATING TAB ── */}
-            {activeTab === "rating" && (
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 16 }}>
-                  <div style={{ fontSize: 48, fontWeight: 800, color: "var(--color-yellow)" }}>
-                    {driver ? Number(driver.rating).toFixed(1) : "—"}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 13 }}>Средний рейтинг</div>
-                    <div className="text-muted text-sm">На основании оценок пассажиров</div>
-                  </div>
-                </div>
-                <div className="empty-state" style={{ height: "auto" }}>
-                  <div>История оценок недоступна</div>
-                </div>
-              </div>
-            )}
-
-            {/* ── ORDER LOG TAB ── */}
-            {activeTab === "log" && (
-              <div className="empty-state" style={{ height: "auto", padding: "20px 0" }}>
-                <div className="empty-state-icon">📋</div>
-                <div>Лог раздачи заказов</div>
-                <div className="text-muted text-sm">История предложения заказов этому водителю</div>
-              </div>
-            )}
+            </div>
           </div>
 
-          <div className="modal-footer">
-            <button type="submit" className="btn btn-primary" disabled={submitting} id="btn-save-driver">
-              {submitting ? "Сохранение..." : "Сохранить"}
-            </button>
-            <button type="button" className="btn btn-ghost" onClick={onClose}>Отмена</button>
+          <div className="modal-footer" style={{ borderTop: "1px solid #eee", background: "#f9f9f9", padding: "16px 20px" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, width: "100%" }}>
+              <button type="submit" className="btn btn-primary" style={{ background: "#d35400", borderColor: "#d35400", color: "white", padding: "0 24px" }} disabled={submitting} id="btn-save-driver">
+                {submitting ? "Сохранение..." : "Сохранить"}
+              </button>
+              <button type="button" className="btn btn-ghost" style={{ background: "#fff", border: "1px solid #ccc", color: "#333", padding: "0 24px" }} onClick={onClose}>Отмена</button>
+            </div>
           </div>
         </form>
       </div>

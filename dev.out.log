@@ -1,0 +1,9 @@
+
+> qaramurt-taxi@0.1.0 dev
+> ts-node --project tsconfig.server.json server.ts
+
+> Redis connected: redis://localhost:6379
+> Qaramurt Taxi ready on http://localhost:3000
+> Socket.io running on /api/socket
+> Redis: connected
+> Environment: development

@@ -1,4 +1,5 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+#Remove-Item (Get-PSReadlineOption).HistorySavePath
 
 # dependencies
 /node_modules
@@ -35,7 +36,23 @@ yarn-error.log*
 
 # vercel
 .vercel
-
+removehistory.txt
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Compiled server files
+server.js
+src/lib/driverAuth.js
+
+# Custom debug logs
+*.log
+!npm-debug.log*
+dev.err.log
+dev.out.log
+seed_error.txt
+
+# Temp/planning
+.planning/
+deleteScript.js
+test_driver_post.js

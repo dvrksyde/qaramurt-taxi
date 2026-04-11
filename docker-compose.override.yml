@@ -1,0 +1,25 @@
+version: "3.9"
+
+# Override file to use ONLY in development mode
+# Opens database ports to host machine for external clients
+services:
+  db:
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_PASSWORD: qaramurt_pass
+    volumes:
+      - ./prisma/seed.sql:/docker-entrypoint-initdb.d/seed.sql
+
+  redis:
+    ports:
+      - "6379:6379"
+    command: redis-server
+
+  app:
+    environment:
+      DATABASE_URL: postgresql://qaramurt:qaramurt_pass@db:5432/qaramurt_taxi
+      REDIS_URL: redis://redis:6379
+      NEXTAUTH_SECRET: your-super-secret-key-change-in-production
+      NEXTAUTH_URL: http://localhost:3000
+      NODE_ENV: development

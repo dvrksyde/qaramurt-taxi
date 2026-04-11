@@ -45,14 +45,15 @@ export default function MapTabClient() {
   return (
     <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
       <MapContainer
-        center={[51.18, 71.45]} // Astana / Nur-Sultan default center
-        zoom={12}
+        center={[42.309, 69.969]} // Карамурт, Сайрамский район
+        zoom={14}
         style={{ width: "100%", height: "100%" }}
         zoomControl={true}
       >
         <TileLayer
-          attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://yandex.ru/maps">Яндекс Карты</a>'
+          url="https://core-renderer-tiles.maps.yandex.net/tiles?l=map&x={x}&y={y}&z={z}&scale=1&lang=ru_RU&projection=web_mercator"
+          subdomains={[""]}
         />
 
         {drivers.map((driver) => (

@@ -1,17 +1,13 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { requireOrderReadAccess, requireOrderWriteAccess } from "@/lib/operatorAccess";
 
 type Params = { params: Promise<{ id: string }> };
 
 // GET /api/orders/[id]
 export async function GET(_req: NextRequest, { params }: Params) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
   const { id } = await params;
   const order = await prisma.order.findUnique({
     where: { id: parseInt(id) },
@@ -27,17 +23,19 @@ export async function GET(_req: NextRequest, { params }: Params) {
   });
 
   if (!order) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const access = await requireOrderReadAccess(order.operatorId);
+  if (!access.allowed) return access.response!;
   return NextResponse.json({ data: order });
 }
 
 // PATCH /api/orders/[id] — update status or fields
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await requireOrderWriteAccess();
+  if (!access.allowed) return access.response!;
 
   const { id } = await params;
   const body = await req.json();
-  const { status, driverId, vehicleId, finalPrice, cancelReason } = body;
+  const { status, driverId, vehicleId, finalPrice, cancelReason, source } = body;
 
   const now = new Date();
   const timestamps: Record<string, Date | null> = {};
@@ -47,17 +45,76 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (status === "completed")   { timestamps.completedAt = now; }
   if (status === "canceled")    { timestamps.canceledAt = now; }
 
-  const updated = await prisma.order.update({
-    where: { id: parseInt(id) },
-    data: {
-      ...(status && { status }),
-      ...(driverId !== undefined && { driverId }),
-      ...(vehicleId !== undefined && { vehicleId }),
-      ...(finalPrice !== undefined && { finalPrice }),
-      ...(cancelReason && { cancelReason }),
-      ...timestamps,
-    },
+  // Use a transaction for atomic update of order and driver balance
+  const result = await prisma.$transaction(async (tx) => {
+    const updated = await tx.order.update({
+      where: { id: parseInt(id) },
+      data: {
+        ...(status && { status }),
+        ...(driverId !== undefined && { driverId }),
+        ...(vehicleId !== undefined && { vehicleId }),
+        ...(finalPrice !== undefined && { finalPrice }),
+        ...(cancelReason && { cancelReason }),
+        ...timestamps,
+      },
+      include: { driver: true }
+    });
+
+    const operatorId = access.operatorId || 1; // Default to first operator if not in session
+
+    // 1. Commission Deduction
+    if (status === "completed" && updated.driverId && updated.finalPrice) {
+      const driver = updated.driver;
+      // Default to 15% (Standard) if no tariff is set
+      // Fetch nested tariffGroup manually if not included or use a subquery/separate fetch.
+      const dTG = await tx.driver.findUnique({
+        where: { id: updated.driverId },
+        include: { tariffGroup: true }
+      });
+      const commPercent = Number(dTG?.tariffGroup?.value || 15);
+      const commission = Number(updated.finalPrice) * (commPercent / 100);
+
+      if (commission > 0) {
+        await tx.driver.update({
+          where: { id: updated.driverId },
+          data: { balance: { decrement: commission } }
+        });
+        await tx.cashTransaction.create({
+          data: {
+            driverId: updated.driverId,
+            operatorId,
+            orderId: updated.id,
+            amount: commission,
+            type: "order_fee",
+            description: `Комиссия ${commPercent}% за заказ #${updated.id}`
+          }
+        });
+      }
+    }
+
+    // 2. Cancellation Penalty (50 тг)
+    if (status === "canceled" && source === "driver" && updated.driverId) {
+      const penalty = 50;
+      await tx.driver.update({
+        where: { id: updated.driverId },
+        data: { balance: { decrement: penalty } }
+      });
+      await tx.cashTransaction.create({
+        data: {
+          driverId: updated.driverId,
+          operatorId,
+          orderId: updated.id,
+          amount: penalty,
+          type: "penalty",
+          description: `Штраф за отмену заказа #${updated.id}`
+        }
+      });
+    }
+
+    return updated;
   });
+
+  const updated = result;
 
   // Log status change
   if (status) {
@@ -69,13 +126,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   // Notify monitor via socket
   const io = (global as Record<string, unknown>).socketIO as { to: (room: string) => { emit: (event: string, data: unknown) => void } } | undefined;
   if (io) {
-    io.to("monitor").emit("order_status_change", { orderId: updated.id, status, driverId });
+    io.to("monitor").emit("order_status_change", { orderId: updated.id, status, driverId: updated.driverId });
   }
 
   // Free driver if order completed or canceled
-  if ((status === "completed" || status === "canceled") && driverId) {
+  if ((status === "completed" || status === "canceled") && updated.driverId) {
     await prisma.driver.update({
-      where: { id: driverId },
+      where: { id: updated.driverId },
       data: { status: "free" },
     }).catch(console.error);
   }
@@ -85,13 +142,33 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
 // DELETE /api/orders/[id] — cancel
 export async function DELETE(_req: NextRequest, { params }: Params) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await requireOrderWriteAccess();
+  if (!access.allowed) return access.response!;
 
   const { id } = await params;
   const updated = await prisma.order.update({
     where: { id: parseInt(id) },
     data: { status: "canceled", canceledAt: new Date(), cancelReason: "Отменён оператором" },
   });
+
+  // Log status change
+  await prisma.orderStatusLog.create({
+    data: { orderId: updated.id, status: "canceled", note: "Отменён оператором" },
+  });
+
+  // Notify monitor via socket
+  const io = (global as Record<string, unknown>).socketIO as { to: (room: string) => { emit: (event: string, data: unknown) => void } } | undefined;
+  if (io) {
+    io.to("monitor").emit("order_status_change", { orderId: updated.id, status: "canceled", driverId: updated.driverId });
+  }
+
+  // Free driver if order canceled
+  if (updated.driverId) {
+    await prisma.driver.update({
+      where: { id: updated.driverId },
+      data: { status: "free" },
+    }).catch(console.error);
+  }
+
   return NextResponse.json({ data: updated });
 }

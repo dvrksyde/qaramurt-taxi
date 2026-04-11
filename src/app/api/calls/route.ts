@@ -1,14 +1,24 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { checkPermission } from "@/lib/permissions";
+
+async function authorizeCallsWrite(req: NextRequest) {
+  const webhookSecret = process.env.CALLS_WEBHOOK_SECRET;
+  const providedSecret = req.headers.get("x-calls-webhook-secret");
+
+  if (webhookSecret && providedSecret === webhookSecret) {
+    return { allowed: true as const };
+  }
+
+  return checkPermission(["accept_calls"]);
+}
 
 // GET /api/calls
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { allowed, response } = await checkPermission(["accept_calls"]);
+  if (!allowed) return response!;
 
   const { searchParams } = new URL(req.url);
   const fromDate   = searchParams.get("fromDate");
@@ -46,6 +56,9 @@ export async function GET(req: NextRequest) {
 
 // POST /api/calls — log incoming call (from SIP webhook)
 export async function POST(req: NextRequest) {
+  const { allowed, response } = await authorizeCallsWrite(req);
+  if (!allowed) return response!;
+
   const body = await req.json();
   const { phoneFrom, phoneTo, callType, operatorId, serviceId, durationTotalSec, durationWaitSec, durationTalkSec, status, recordingUrl } = body;
 

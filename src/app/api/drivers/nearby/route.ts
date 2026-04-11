@@ -1,14 +1,13 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { findNearbyDrivers } from "@/lib/geo";
+import { checkPermission } from "@/lib/permissions";
 
 // GET /api/drivers/nearby?lat=&lng=&radius=&classId=
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { allowed, response } = await checkPermission(["current_orders"]);
+  if (!allowed) return response!;
 
   const { searchParams } = new URL(req.url);
   const lat = parseFloat(searchParams.get("lat") || "0");
