@@ -38,6 +38,11 @@ export interface DriverLocation {
   status: DriverStatus;
   callsign?: string | null;
   heading?: number;
+  firstName?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
+  plate?: string | null;
+  vehicleLabel?: string | null;
 }
 
 export interface Order {

@@ -15,10 +15,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "lat и lng обязательны" }, { status: 400 });
   }
 
-  // Update driver location in DB (WKT format for PostGIS)
-  await prisma.driver.update({
+  // Update driver location in DB (WKT format for PostGIS) + fetch driver info for monitor
+  const driver = await prisma.driver.update({
     where: { id: auth.driverId },
     data: { currentLocation: `POINT(${lng} ${lat})` },
+    include: {
+      vehicles: { where: { isActive: true }, take: 1, select: { plate: true, make: true, model: true, color: true } },
+    },
   });
 
   // Forward to monitor via Socket.io
@@ -28,7 +31,13 @@ export async function POST(req: NextRequest) {
       driverId: auth.driverId,
       lat,
       lng,
-      status: "free",
+      status: driver.status as string,
+      callsign: driver.callsign,
+      firstName: driver.firstName,
+      lastName: driver.lastName,
+      phone: driver.phone,
+      plate: driver.vehicles[0]?.plate ?? null,
+      vehicleLabel: driver.vehicles[0] ? `${driver.vehicles[0].make} ${driver.vehicles[0].model}` : null,
     });
   }
 
