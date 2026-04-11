@@ -926,7 +926,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  orderActions: { marginBottom: 35 },
+  orderActions: { marginBottom: 15 },
   statusActions: { gap: 12, marginBottom: 16 },
   statusHint: { color: "#666", fontSize: 13, textAlign: "center", marginBottom: 4 },
 
