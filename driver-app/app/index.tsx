@@ -252,8 +252,6 @@ export default function MainScreen() {
     setActiveOrder(nextOrder);
     setOnline(shouldStayConnected);
 
-    await refreshCurrentPosition();
-
     if (shouldStayConnected) {
       startSocketAndGPS(nextProfile.id);
     } else {
@@ -810,7 +808,7 @@ const styles = StyleSheet.create({
   contentArea: { flex: 1 },
   loadingWrap: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0a0a0a" },
   loadingText: { color: "#666", fontSize: 16 },
-  pageBlock: { flex: 1, paddingHorizontal: 16 },
+  pageBlock: { flex: 1, paddingHorizontal: 16, paddingBottom: 90 },
 
   // ─── Header (waiting) ─────────────────────────────────────
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14, paddingTop: 4 },
