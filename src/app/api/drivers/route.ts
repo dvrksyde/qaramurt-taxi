@@ -125,7 +125,7 @@ export async function POST(req: NextRequest) {
       middleName: middleName || null,
       phone,
       login,
-      passwordHash,
+      passwordHash: await hashPassword(password),
       callsign: callsign || null,
       comment: comment || null,
       status: "offline",
