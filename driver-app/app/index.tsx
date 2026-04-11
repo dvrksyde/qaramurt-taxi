@@ -127,9 +127,9 @@ export default function MainScreen() {
 
     locationSubRef.current = await Location.watchPositionAsync(
       {
-        accuracy: Location.Accuracy.Highest,
-        distanceInterval: 10,
-        timeInterval: 2000,
+        accuracy: Location.Accuracy.High, // Снижаем точность на одну ступень для экономии батареи (High достаточно)
+        distanceInterval: 15, // Обновлять только если авто проехал 15 метров (не срабатывает в пробке просто так)
+        timeInterval: 5000, // И не чаще чем раз в 5 секунд (было 2 сек)
       },
       (loc) => {
         const { latitude: lat, longitude: lng } = loc.coords;
@@ -928,7 +928,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  orderActions: { marginBottom: 15 },
+  orderActions: { marginBottom: 35 },
   statusActions: { gap: 12, marginBottom: 16 },
   statusHint: { color: "#666", fontSize: 13, textAlign: "center", marginBottom: 4 },
 
