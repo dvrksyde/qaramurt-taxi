@@ -178,16 +178,9 @@ export function NewOrderModal({ onClose }: Props) {
   }, [onClose]);
 
   const handleMapClick = useCallback(async (lat: number, lng: number) => {
-    const apiKey = process.env.NEXT_PUBLIC_YANDEX_API_KEY;
-    
     try {
-      const res = await fetch(`https://geocode-maps.yandex.ru/1.x/?apikey=${apiKey}&format=json&geocode=${lng},${lat}&lang=ru_RU`);
-      const json = await res.json();
-      
-      const geoObject = json.response?.GeoObjectCollection?.featureMember?.[0]?.GeoObject;
+      // 1. Check for nearby landmark first
       let address = "";
-
-      // 1. Check for nearby landmark (popular name)
       try {
         const landmarkRes = await fetch(`/api/address-book/nearest?lat=${lat}&lng=${lng}`);
         const landmarkData = await landmarkRes.json();
@@ -198,19 +191,13 @@ export function NewOrderModal({ onClose }: Props) {
         console.warn("Nearest landmark fetch failed", e);
       }
 
-      // 2. If no landmark, use formal address
-      if (!address && geoObject) {
-        const metaData = geoObject.metaDataProperty.GeocoderMetaData;
-        const components = metaData.Address.Components;
-        
-        const localityRaw = components.find((c: any) => c.kind === "locality")?.name || "Карамурт";
-        const locality = localityRaw.replace(/^[сС]ело\s+/, "");
-        const street = components.find((c: any) => c.kind === "street")?.name;
-        const house = components.find((c: any) => c.kind === "house")?.name;
-
-        address = locality;
-        if (street) address += `, ${street}`;
-        if (house) address += `, ${house}`;
+      // 2. If no landmark, use server-side geocoding proxy (Yandex key stays on server)
+      if (!address) {
+        const geoRes = await fetch(`/api/geocode?lat=${lat}&lng=${lng}`);
+        const geoData = await geoRes.json();
+        if (geoData.data?.address) {
+          address = geoData.data.address;
+        }
       }
 
       if (address) {
@@ -226,7 +213,9 @@ export function NewOrderModal({ onClose }: Props) {
           setValue("dropoffPoint", [lat, lng]);
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Map click geocoding failed", e);
+    }
   }, [activeField, setValue, isDelivery, setFocus]);
 
   const handleLandmarkSelect = (item: any) => {
