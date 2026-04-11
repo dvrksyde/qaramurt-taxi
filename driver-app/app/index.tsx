@@ -930,7 +930,7 @@ const styles = StyleSheet.create({
   },
 
   orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 90, left: 16, right: 16 },
-  homeSwipeContainer: { marginTop: "auto", marginBottom: 20 },
+  homeSwipeContainer: { position: "absolute", bottom: Platform.OS === "ios" ? 100 : 80, left: 16, right: 16 },
   statusActions: { gap: 12, marginBottom: 16 },
   statusHint: { color: "#666", fontSize: 13, textAlign: "center", marginBottom: 4 },
 
