@@ -95,7 +95,7 @@ export default function LoginScreen() {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.footer}>Qaramurt Taxi © 2026</Text>
+      <Text style={styles.footer}>Qaramurt Taxi ©2026</Text>
     </KeyboardAvoidingView>
   );
 }
@@ -103,7 +103,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#1a1a2e",
+    backgroundColor: "#111",
     justifyContent: "center",
     paddingHorizontal: 32,
   },
@@ -134,7 +134,7 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#252540",
+    backgroundColor: "#222",
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#333",
@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   loginBtn: {
-    backgroundColor: "#c8440a",
+    backgroundColor: "#FFD000",
     borderRadius: 12,
     height: 52,
     justifyContent: "center",
@@ -164,7 +164,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   loginBtnText: {
-    color: "#fff",
+    color: "#000000ff",
     fontSize: 16,
     fontWeight: "700",
     letterSpacing: 1,

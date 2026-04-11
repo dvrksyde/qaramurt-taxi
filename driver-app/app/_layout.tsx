@@ -30,8 +30,8 @@ export default function RootLayout() {
 
   if (!ready) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#1a1a2e" }}>
-        <ActivityIndicator size="large" color="#c8440a" />
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#222222ff" }}>
+        <ActivityIndicator size="large" color="#FFD000" />
       </View>
     );
   }
@@ -42,7 +42,7 @@ export default function RootLayout() {
       <Stack
         screenOptions={{
           headerShown: false,
-          contentStyle: { backgroundColor: "#1a1a2e" },
+          contentStyle: { backgroundColor: "#111" },
           animation: "fade",
         }}
       />
