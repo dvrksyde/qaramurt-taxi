@@ -9,36 +9,20 @@ interface Props {
   onSuccess: () => void;
 }
 
-// Full permissions list based on Taxomet-style dispatcher panel
+// Only permissions that are actually enforced in the codebase
 const PERMISSIONS_LIST = [
-  { key: "accept_calls", label: "Разрешить принимать звонки" },
-  { key: "current_orders", label: "Текущие заказы" },
-  { key: "journal_own", label: "Журнал заказов (только свои заказы)" },
-  { key: "journal_all", label: "Журнал заказов по всем операторам" },
-  { key: "add_drivers", label: "Разрешить добавлять новых водителей" },
-  { key: "edit_drivers", label: "Разрешить редактировать информацию водителей" },
-  { key: "block_driver_app", label: "Разрешить блокировать программу водителя" },
-  { key: "delete_drivers", label: "Разрешить удалять водителей" },
-  { key: "driver_stats", label: "Разрешить просмотр статистики по водителям" },
-  { key: "topup_drivers", label: "Разрешить пополнять счета водителей" },
-  { key: "adjust_driver_balance", label: "Разрешить делать корректировки счетов водителей" },
-  { key: "show_competitor_apps", label: "Показывать установленные программы конкурентов-такси в списке водителей" },
-  { key: "show_driver_apps", label: "Показывать список установленных приложений водителя в карточке устройства водителя" },
-  { key: "operator_stats", label: "Разрешить просмотр статистики по операторам" },
-  { key: "topup_operators", label: "Разрешить пополнять счета операторов" },
-  { key: "order_stats", label: "Разрешить просмотр статистики по заказам" },
-  { key: "blacklist", label: "Разрешить просматривать/редактировать черный список" },
-  { key: "clients", label: "Разрешить просматривать/редактировать список клиентов" },
-  { key: "vehicle_admissions", label: "Разрешить выдавать/принимать автомобили" },
-  { key: "kassa_report_all", label: "Разрешить просматривать отчет по кассе (операции всех операторов)" },
-  { key: "kassa_operations", label: "Разрешить создавать операции по кассе" },
-  { key: "acquiring_report", label: "Разрешить просматривать отчет по платежам через интернет-эквайринг" },
-  { key: "cashless_accounts", label: "Разрешить просматривать/редактировать лицевые счета по безналичным расчетам" },
-  { key: "control_journal", label: "Разрешить просматривать журнал контроля водителей и операторов" },
-  { key: "show_total_kassa", label: "Показывать общую сумму кассы по всем операторам" },
-  { key: "show_taxomet_balance", label: "Отображать лицевой счет из личного кабинета (ПО)" },
-  { key: "map_editor", label: "Редактор карт" },
-  { key: "admin", label: "Администрирование" },
+  { key: "current_orders",   label: "Текущие заказы и монитор" },
+  { key: "journal_own",      label: "Журнал заказов (только свои)" },
+  { key: "journal_all",      label: "Журнал заказов (все операторы)" },
+  { key: "accept_calls",     label: "Принимать входящие звонки" },
+  { key: "add_drivers",      label: "Добавлять новых водителей" },
+  { key: "edit_drivers",     label: "Редактировать водителей и баланс" },
+  { key: "delete_drivers",   label: "Удалять водителей" },
+  { key: "clients",          label: "Просматривать и редактировать клиентов" },
+  { key: "vehicle_admissions", label: "Выдавать / принимать автомобили" },
+  { key: "kassa_report_all", label: "Просматривать отчёт по кассе" },
+  { key: "kassa_operations", label: "Создавать операции по кассе" },
+  { key: "admin",            label: "Администрирование (полный доступ)" },
 ];
 
 export function OperatorModal({ operator, onClose, onSuccess }: Props) {
