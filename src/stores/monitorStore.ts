@@ -3,7 +3,7 @@ import type { Order, Driver, DriverLocation, TabCounts, ChatMessage, AlarmEvent,
 
 interface MonitorState {
   // Active tab
-  activeTab: "current" | "scheduled" | "exchange" | "map" | "chat" | "system" | "alarms";
+  activeTab: "current" | "scheduled" | "exchange" | "map" | "chat" | "system" | "alarms" | "leaderboard";
   setActiveTab: (tab: MonitorState["activeTab"]) => void;
 
   // Tab counts

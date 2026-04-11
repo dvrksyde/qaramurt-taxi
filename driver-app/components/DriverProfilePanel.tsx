@@ -82,10 +82,10 @@ export function DriverProfilePanel() {
           <Text style={styles.summaryMeta}>Рейтинг: #{Number(profile?.rating || 0)}</Text>
           <Text style={styles.summaryMeta}>Выполнено заказов: {Number((profile as any)?.ordersCount || 0)}</Text>
           <Text style={styles.summaryMeta}>Баланс: {Number(profile?.balance || 0).toLocaleString()} ₸</Text>
-          
+
           <View style={styles.tariffBox}>
             <Text style={styles.tariffTitle}>Текущий тариф</Text>
-            <View style={{flexDirection: "row", justifyContent: "space-between", alignItems: "center"}}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
               <Text style={styles.tariffName}>
                 {profile?.tariffGroup ? `${profile.tariffGroup.name} (${Number(profile.tariffGroup.value)}%)` : "Не назначен"}
               </Text>
@@ -118,13 +118,13 @@ export function DriverProfilePanel() {
           />
 
           <TouchableOpacity style={styles.saveBtn} onPress={saveProfile} disabled={saving}>
-            <Ionicons name="save-outline" size={20} color="#fff" />
-            <Text style={styles.saveBtnText}>{saving ? "..." : "Сохранить"}</Text>
+            <Ionicons name="save-outline" size={20} color="#000" />
+            <Text style={styles.saveBtnText}>{saving ? "..." : "Сохранить профиль"}</Text>
           </TouchableOpacity>
         </View>
 
         <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
-          <Ionicons name="log-out-outline" size={18} color="#fff" />
+          <Ionicons name="log-out-outline" size={20} color="#ef4444" />
           <Text style={styles.logoutBtnText}>Выйти из аккаунта</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -133,38 +133,40 @@ export function DriverProfilePanel() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#1a1a2e" },
-  content: { paddingHorizontal: 20, paddingBottom: 32, gap: 16 },
-  title: { color: "#fff", fontSize: 22, fontWeight: "800", marginBottom: 12 },
-  summaryCard: { backgroundColor: "#252540", borderRadius: 16, padding: 18, gap: 6 },
-  summaryName: { color: "#fff", fontSize: 22, fontWeight: "800" },
-  summaryMeta: { color: "#b6b9d9", fontSize: 14 },
-  tariffBox: { marginTop: 8, padding: 12, backgroundColor: "#1e1f38", borderRadius: 10 },
-  tariffTitle: { color: "#888", fontSize: 12, marginBottom: 4 },
-  tariffName: { color: "#4CAF50", fontSize: 16, fontWeight: "700" },
-  tariffNote: { color: "#b6b9d9", fontSize: 11, marginTop: 6, fontStyle: "italic" },
-  formCard: { backgroundColor: "#252540", borderRadius: 16, padding: 18 },
-  label: { color: "#b6b9d9", fontSize: 13, marginBottom: 8, marginTop: 10 },
-  input: { backgroundColor: "#1e1f38", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: "#fff", fontSize: 15 },
+  container: { flex: 1 },
+  content: { paddingHorizontal: 16, paddingBottom: 40, gap: 16 },
+  title: { color: "#fff", fontSize: 20, fontWeight: "800", letterSpacing: 0.5 },
+  summaryCard: { backgroundColor: "#111", borderRadius: 16, padding: 20, gap: 8, borderWidth: 1, borderColor: "#1e1e1e" },
+  summaryName: { color: "#fff", fontSize: 20, fontWeight: "700", marginBottom: 4 },
+  summaryMeta: { color: "#aaa", fontSize: 15, fontWeight: "500" },
+  tariffBox: { marginTop: 12, padding: 16, backgroundColor: "#161616", borderRadius: 12, borderWidth: 1, borderColor: "#222" },
+  tariffTitle: { color: "#919191ff", fontSize: 12, marginBottom: 6, fontWeight: "700", textTransform: "uppercase" },
+  tariffName: { color: "#FFD000", fontSize: 18, fontWeight: "800" },
+  tariffNote: { color: "#919191ff", fontSize: 12, marginTop: 8, fontStyle: "italic" },
+  formCard: { backgroundColor: "#111", borderRadius: 16, padding: 20, borderWidth: 1, borderColor: "#1e1e1e" },
+  label: { color: "#888", fontSize: 13, marginBottom: 8, marginTop: 12, fontWeight: "600", textTransform: "uppercase" },
+  input: { backgroundColor: "#161616", borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, color: "#fff", fontSize: 16, borderWidth: 1, borderColor: "#2a2a2a" },
   saveBtn: {
-    marginTop: 18,
-    height: 52,
+    marginTop: 24,
+    height: 56,
     borderRadius: 14,
-    backgroundColor: "#c8440a",
+    backgroundColor: "#FFD000",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
   },
-  saveBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  saveBtnText: { color: "#000", fontSize: 16, fontWeight: "800" },
   logoutBtn: {
-    height: 52,
+    height: 56,
     borderRadius: 14,
-    backgroundColor: "#f44336",
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: "rgba(239, 68, 68, 0.5)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
   },
-  logoutBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
+  logoutBtnText: { color: "#ef4444", fontSize: 16, fontWeight: "700" },
 });

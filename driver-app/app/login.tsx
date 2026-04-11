@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, Alert, KeyboardAvoidingView, Platform,
+  StyleSheet, Alert, KeyboardAvoidingView, Platform, Image,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { api, saveToken } from "../services/api";
@@ -45,9 +45,11 @@ export default function LoginScreen() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <View style={styles.logoContainer}>
-        <View style={styles.logoCircle}>
-          <Ionicons name="car-sport" size={48} color="#c8440a" />
-        </View>
+        <Image
+          source={require("../assets/icon.png")}
+          style={styles.logoImg}
+          resizeMode="contain"
+        />
         <Text style={styles.title}>Qaramurt Taxi</Text>
         <Text style={styles.subtitle}>Приложение водителя</Text>
       </View>
@@ -109,16 +111,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 48,
   },
-  logoCircle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: "#252540",
-    justifyContent: "center",
-    alignItems: "center",
+  logoImg: {
+    width: 110,
+    height: 110,
+    borderRadius: 22,
     marginBottom: 16,
-    borderWidth: 2,
-    borderColor: "#c8440a",
   },
   title: {
     fontSize: 28,

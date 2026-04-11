@@ -23,6 +23,12 @@
   font-size: 40px;
 }
 
+.logoImg {
+  border-radius: 12px;
+  object-fit: contain;
+  margin-bottom: 4px;
+}
+
 .logoTitle {
   font-size: 22px;
   font-weight: 800;

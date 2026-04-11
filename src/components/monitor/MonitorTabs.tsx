@@ -8,10 +8,11 @@ const TABS: { key: Tab; label: string; countKey?: keyof ReturnType<typeof useMon
   { key: "current",   label: "Текущие заказы",  countKey: "current" },
   { key: "map",       label: "Карта" },
   { key: "chat",      label: "Чат",              countKey: "chat" },
+  { key: "leaderboard", label: "Рейтинг" },
   { key: "system",    label: "Системное",        countKey: "system" },
 ];
 
-const VALID_TABS = ["current", "scheduled", "exchange", "map", "chat", "system", "alarms"];
+const VALID_TABS = ["current", "scheduled", "exchange", "map", "chat", "system", "alarms", "leaderboard"];
 
 export function MonitorTabs() {
   const { activeTab, setActiveTab, counts } = useMonitorStore();

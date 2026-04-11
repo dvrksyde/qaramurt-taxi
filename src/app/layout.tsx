@@ -8,6 +8,10 @@ import { Providers } from "@/components/Providers";
 export const metadata: Metadata = {
   title: "Qaramurt Taxi — Dispatch System",
   description: "Professional taxi dispatch and fleet management platform",
+  icons: {
+    icon: "/logo-transparent.png",
+    apple: "/logo-transparent.png",
+  },
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

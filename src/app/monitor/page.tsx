@@ -8,6 +8,7 @@ import { CurrentOrdersTab } from "@/components/monitor/CurrentOrdersTab";
 import { MapTab } from "@/components/monitor/MapTab";
 import { ChatTab } from "@/components/monitor/ChatTab";
 import { SystemTab } from "@/components/monitor/SystemTab";
+import { LeaderboardTab } from "@/components/monitor/LeaderboardTab";
 import { useEffect } from "react";
 
 export default function MonitorPage() {
@@ -53,6 +54,7 @@ export default function MonitorPage() {
         {activeTab === "current" && <CurrentOrdersTab />}
         {activeTab === "map" && <MapTab />}
         {activeTab === "chat" && <ChatTab />}
+        {activeTab === "leaderboard" && <LeaderboardTab />}
         {activeTab === "system" && <SystemTab />}
       </div>
 

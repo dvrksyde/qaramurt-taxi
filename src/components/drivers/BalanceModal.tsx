@@ -21,7 +21,7 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
       const res = await fetch(`/api/drivers/${driver.id}/transactions`);
       const data = await res.json();
       if (data.data) setHistory(data.data);
-    } catch (e) {}
+    } catch (e) { }
     setLoading(false);
   };
 
@@ -81,9 +81,9 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
               <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", alignItems: "center", gap: 12 }}>
                   <label style={{ fontSize: 13, color: "#666" }}>Тип:</label>
-                  <select 
-                    className="form-select" 
-                    value={type} 
+                  <select
+                    className="form-select"
+                    value={type}
                     onChange={e => setType(e.target.value)}
                     style={{ height: 38, borderColor: "var(--color-border)", borderRadius: 6 }}
                   >
@@ -92,15 +92,15 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
                     <option value="bonus">Премия / Бонус</option>
                   </select>
                 </div>
-                
+
                 <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", alignItems: "center", gap: 12 }}>
                   <label style={{ fontSize: 13, color: "#666" }}>Сумма (₸):</label>
                   <div style={{ position: "relative" }}>
-                    <input 
-                      type="number" 
-                      className="form-input" 
-                      value={amount} 
-                      onChange={e => setAmount(e.target.value)} 
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={amount}
+                      onChange={e => setAmount(e.target.value)}
                       placeholder="0"
                       required
                       style={{ height: 38, paddingLeft: 12, fontSize: 15, fontWeight: 600, borderRadius: 6 }}
@@ -110,10 +110,10 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
 
                 <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", alignItems: "start", gap: 12 }}>
                   <label style={{ fontSize: 13, color: "#666", marginTop: 8 }}>Инфо:</label>
-                  <textarea 
-                    className="form-input" 
-                    value={description} 
-                    onChange={e => setDescription(e.target.value)} 
+                  <textarea
+                    className="form-input"
+                    value={description}
+                    onChange={e => setDescription(e.target.value)}
                     placeholder="Причина (необязательно)..."
                     rows={2}
                     style={{ borderRadius: 6, padding: 10, minHeight: 60 }}
@@ -131,26 +131,26 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
             {/* Right: Summary */}
             <div style={{ background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)", padding: 24, borderRadius: 10, border: "1px solid var(--color-border-2)", textAlign: "center" }}>
               <div style={{ fontSize: 14, color: "#666", marginBottom: 8 }}>Текущий баланс:</div>
-              <div style={{ 
-                fontSize: 36, 
-                fontWeight: 800, 
+              <div style={{
+                fontSize: 30,
+                fontWeight: 800,
                 color: Number(driver.balance) < 100 ? "var(--status-offline)" : "var(--color-primary)",
                 letterSpacing: "-0.5px"
               }}>
-                {Number(driver.balance).toLocaleString()} <span style={{ fontSize: 20 }}>₸</span>
+                {Number(driver.balance).toLocaleString()}₸
               </div>
-              <div style={{ 
-                fontSize: 12, 
-                marginTop: 16, 
-                padding: "6px 12px", 
-                borderRadius: 20, 
+              <div style={{
+                fontSize: 12,
+                marginTop: 16,
+                padding: "6px 12px",
+                borderRadius: 20,
                 display: "inline-block",
                 background: Number(driver.balance) < 100 ? "#fff0f0" : "#f0fdf4",
                 color: Number(driver.balance) < 100 ? "#e03131" : "#099268",
                 fontWeight: 600,
                 border: "1px solid currentColor"
               }}>
-                {Number(driver.balance) < 100 ? "⚠️ Лимит исчерпан (< 100 ₸)" : "✅ Баланс в норме"}
+                {Number(driver.balance) < 100 ? "⚠️ Пополните баланс" : "✅ Баланс в норме"}
               </div>
             </div>
           </div>
@@ -182,14 +182,14 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
                     return (
                       <tr key={tx.id}>
                         <td style={{ fontSize: 11, color: "#666" }}>
-                          {new Date(tx.createdAt).toLocaleDateString()}<br/>
+                          {new Date(tx.createdAt).toLocaleDateString()}<br />
                           <span style={{ color: "#999" }}>{new Date(tx.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </td>
                         <td style={{ fontSize: 11, fontWeight: 500 }}>{TYPE_LABELS[tx.type] || tx.type}</td>
-                        <td style={{ 
-                          fontWeight: 700, 
+                        <td style={{
+                          fontWeight: 700,
                           fontSize: 13,
-                          color: isPositive ? "#2b8a3e" : "#c92a2a" 
+                          color: isPositive ? "#2b8a3e" : "#c92a2a"
                         }}>
                           {isPositive ? "+" : "−"}{Number(tx.amount).toLocaleString()}
                         </td>

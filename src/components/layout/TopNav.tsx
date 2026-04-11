@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { useState } from "react";
@@ -16,13 +17,13 @@ interface Props { session: Session; }
  * `requiredPerms: ["admin"]` means only visible for admins or users with "admin" permission.
  */
 const NAV_LINKS = [
-  { href: "/monitor",   label: "Монитор",        requiredPerms: [] as string[] },
-  { href: "/operators",  label: "Операторы",      requiredPerms: ["admin"] },
-  { href: "/drivers",    label: "Водители",       requiredPerms: [] as string[] },
+  { href: "/monitor", label: "Монитор", requiredPerms: [] as string[] },
+  { href: "/operators", label: "Операторы", requiredPerms: ["admin"] },
+  { href: "/drivers", label: "Водители", requiredPerms: [] as string[] },
+  { href: "/clients", label: "Клиенты", requiredPerms: ["clients"] },
+  { href: "/journal", label: "Журнал заказов", requiredPerms: ["journal_own", "journal_all"] },
   { href: "/settings/tariffs-driver", label: "Тарифы", requiredPerms: ["admin"] },
-  { href: "/clients",    label: "Клиенты",        requiredPerms: ["clients"] },
-  { href: "/journal",    label: "Журнал заказов", requiredPerms: ["journal_own", "journal_all"] },
-  { href: "/reports",    label: "Отчеты",         requiredPerms: ["admin"] },
+  { href: "/reports", label: "Отчеты", requiredPerms: ["admin"] },
 ];
 
 export function TopNav({ session }: Props) {
@@ -58,7 +59,7 @@ export function TopNav({ session }: Props) {
 
         {/* Brand */}
         <div className="nav-brand">
-          <span style={{ color: "#f5c518" }}>🚖</span>
+          <Image src="/logo-transparent.png" alt="Qaramurt Taxi" width={25} height={25} style={{ borderRadius: 6, objectFit: "contain" }} priority />
           <span style={{ color: "#3db84a" }}>{session.user?.name || "Администратор"}</span>
         </div>
 

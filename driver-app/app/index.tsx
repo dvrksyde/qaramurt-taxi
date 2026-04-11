@@ -22,7 +22,6 @@ import { DriverHistoryPanel } from "../components/DriverHistoryPanel";
 import { DriverChatPanel } from "../components/DriverChatPanel";
 import { DriverProfilePanel } from "../components/DriverProfilePanel";
 import { ActiveOrdersPanel } from "../components/ActiveOrdersPanel";
-import { YandexMapView, YandexMapViewHandle } from "../components/YandexMapView";
 import { SwipeButton } from "../components/SwipeButton";
 
 const BASE_FARE = 290;
@@ -79,7 +78,6 @@ export default function MainScreen() {
   const [activeTab, setActiveTab] = useState<DriverTab>("home");
   const [currentCoords, setCurrentCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [refreshingGPS, setRefreshingGPS] = useState(false);
-  const mapRef = useRef<YandexMapViewHandle>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const locationSubRef = useRef<Location.LocationSubscription | null>(null);
   const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -108,9 +106,6 @@ export default function MainScreen() {
         method: "POST",
         body: JSON.stringify({ lat: nextCoords.latitude, lng: nextCoords.longitude }),
       });
-
-      // Signal map to center
-      mapRef.current?.centerOnMe();
     } catch (e) {
       console.error("GPS Refresh Error:", e);
     } finally {
@@ -143,11 +138,14 @@ export default function MainScreen() {
         // Only recalculate price for non-fixed-price orders (taxi, not delivery)
         if (state.activeOrder?.status === "in_progress" && lastLocationRef.current && !state.activeOrder.isFixedPrice) {
           const d = haversine(lastLocationRef.current.lat, lastLocationRef.current.lng, lat, lng);
-          // Ignore GPS drift — only count movement > 20 meters
-          if (d > 0.02) {
+          const speed = loc.coords.speed; // speed in m/s
+          const isMoving = speed !== null ? speed > 1.0 : true; // > 3.6 km/h
+
+          // Ignore GPS drift — only count movement > 20 meters and actual speed
+          if (d > 0.02 && isMoving) {
             tripDistanceRef.current += d;
             const price = roundTo5(BASE_FARE + tripDistanceRef.current * Number(state.activeOrder.pricePerKm));
-            setTripMeter(tripDistanceRef.current, price);
+            useDriverStore.getState().setTripMeter(tripDistanceRef.current, price);
           }
         }
 
@@ -365,6 +363,7 @@ export default function MainScreen() {
     if (status === "in_progress") {
       startTrip();
       tripDistanceRef.current = 0;
+      setTripMeter(0, activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : BASE_FARE);
     }
 
     if (status === "completed") {
@@ -419,6 +418,45 @@ export default function MainScreen() {
     }
   };
 
+  const openNavigator = () => {
+    if (!activeOrder) return;
+
+    // Smart destination: pickup when going to client, dropoff when carrying client
+    const goingToDropoff =
+      (activeOrder.status === "arrived" || activeOrder.status === "in_progress") &&
+      activeOrder.dropoffPoint;
+
+    const targetCoords = goingToDropoff
+      ? parseWktPoint(activeOrder.dropoffPoint)
+      : parseWktPoint(activeOrder.pickupPoint);
+
+    const targetAddress = goingToDropoff
+      ? (activeOrder.dropoffAddress || "")
+      : (activeOrder.pickupAddress || "");
+
+    if (targetCoords) {
+      const { latitude: lat, longitude: lng } = targetCoords;
+      // Include driver current location as "from" point so navigator doesn't ask
+      const fromPart = currentCoords
+        ? `&lat_from=${currentCoords.latitude}&lon_from=${currentCoords.longitude}`
+        : "";
+      const deepLink = `yandexnavi://build_route_on_map?lat_to=${lat}&lon_to=${lng}${fromPart}&zoom=15`;
+      const webFallback = currentCoords
+        ? `https://yandex.ru/maps/?rtext=${currentCoords.latitude},${currentCoords.longitude}~${lat},${lng}&rtt=auto`
+        : `https://yandex.ru/maps/?rtext=~${lat},${lng}&rtt=auto`;
+
+      Linking.canOpenURL(deepLink).then((canOpen) => {
+        Linking.openURL(canOpen ? deepLink : webFallback);
+      });
+    } else if (targetAddress) {
+      const encoded = encodeURIComponent(targetAddress);
+      const webUrl = `https://yandex.ru/maps/?text=${encoded}&rtt=auto`;
+      Linking.openURL(webUrl);
+    } else {
+      Alert.alert("Навигатор", "Адрес назначения не указан");
+    }
+  };
+
   const tripElapsed = tripStartTime ? Math.floor((Date.now() - tripStartTime) / 60000) : 0;
   const pickupCoords = parseWktPoint(activeOrder?.pickupPoint);
   const dropoffCoords = parseWktPoint(activeOrder?.dropoffPoint);
@@ -438,8 +476,7 @@ export default function MainScreen() {
           {/* Header: order id + rate + GPS + ⋯ menu */}
           <View style={styles.orderHeader}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.orderHeaderTitle}>Заказ #{activeOrder.id}</Text>
-              <Text style={styles.headerRate}>{activeOrder.pricePerKm} ₸/км</Text>
+              <Text style={styles.orderHeaderTitle}>  Заказ №{activeOrder.id}</Text>
             </View>
 
             <TouchableOpacity
@@ -482,7 +519,7 @@ export default function MainScreen() {
           {/* Address + phone strip */}
           <View style={styles.addressStrip}>
             <View style={styles.addressLine}>
-              <Ionicons name="location" size={16} color="#4CAF50" />
+              <Ionicons name="location" size={16} color="#FFD000" />
               <Text style={styles.addressLineText} numberOfLines={1}>{activeOrder.pickupAddress || "Адрес не указан"}</Text>
             </View>
             {/* Show dropoff only for delivery (fixed price) orders */}
@@ -492,25 +529,49 @@ export default function MainScreen() {
                 <Text style={styles.addressLineText} numberOfLines={1}>{activeOrder.dropoffAddress}</Text>
               </View>
             )}
-            <View style={styles.addressLine}>
-              <Ionicons name="call" size={16} color="#25D366" />
-              <Text style={styles.phoneText}>{activeOrder.phone}</Text>
-              <TouchableOpacity style={styles.callBtnCompact} onPress={callClient}>
-                <Text style={styles.callBtnCompactText}>Позвонить</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity style={styles.addressLine} onPress={callClient} activeOpacity={0.7}>
+              <Ionicons name="call" size={16} color="#FFD000" />
+              <Text style={[styles.phoneText, { color: "#FFD000", textDecorationLine: "underline" }]}>
+                {activeOrder.phone}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Navigator button — full width */}
+            <TouchableOpacity style={styles.navBtn} onPress={openNavigator} activeOpacity={0.85}>
+              <Ionicons name="navigate" size={18} color="#000000ff" />
+              <Text style={styles.navBtnText}>
+                {
+                  activeOrder.status === "assigned"
+                    ? "Открыть навигатор → К клиенту"
+                    : activeOrder.status === "arrived"
+                      ? "Открыть навигатор → К назначению"
+                      : activeOrder.status === "in_progress"
+                        ? "Открыть навигатор → К назначению"
+                        : "Открыть навигатор"
+                }
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          {/* Map takes all available space */}
-          <View style={styles.mapContainerOrder}>
-            <YandexMapView
-              ref={mapRef}
-              center={pickupCoords}
-              userLocation={currentCoords}
-              pickupLocation={pickupCoords}
-              dropoffLocation={dropoffCoords}
-              zoom={15}
-            />
+          {/* Elegant Status Center Fill */}
+          <View style={styles.orderStatusCenter}>
+            <View style={styles.statusPulseCircle}>
+              <Ionicons
+                name={activeOrder.status === 'assigned' ? "paper-plane" : activeOrder.status === 'arrived' ? "body" : "car-sport"}
+                size={54}
+                color="#FFD000"
+              />
+            </View>
+            <Text style={styles.statusCenterText}>
+              {activeOrder.status === 'assigned' ? "Подача автомобиля..." :
+                activeOrder.status === 'arrived' ? "Ожидание клиента..." :
+                  "В пути..."}
+            </Text>
+
+            <View style={styles.paymentBadge}>
+              <Ionicons name="cash-outline" size={16} color="#22c55e" />
+              <Text style={styles.paymentBadgeText}>Оплата наличными</Text>
+            </View>
           </View>
 
           {/* Meter strip — single row */}
@@ -543,7 +604,7 @@ export default function MainScreen() {
               <SwipeButton
                 title="Я на месте"
                 onSwipeComplete={() => updateOrderStatus("arrived")}
-                color="#2196F3"
+                color="#FFD000"
                 iconName="navigate"
                 disabled={loading}
               />
@@ -552,7 +613,7 @@ export default function MainScreen() {
               <SwipeButton
                 title="Клиент сел — поехали"
                 onSwipeComplete={() => updateOrderStatus("in_progress")}
-                color="#4CAF50"
+                color="#FFD000"
                 iconName="car"
                 disabled={loading}
               />
@@ -561,7 +622,7 @@ export default function MainScreen() {
               <SwipeButton
                 title="Завершить поездку"
                 onSwipeComplete={() => updateOrderStatus("completed")}
-                color="#c8440a"
+                color="#ffd000ff"
                 iconName="checkmark-circle"
                 disabled={loading}
               />
@@ -576,7 +637,7 @@ export default function MainScreen() {
         <View style={styles.header}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <View style={[styles.statusDot, isOnline ? styles.dotOnline : styles.dotOffline]} />
-            <Text style={styles.headerTitle}>{isOnline ? "На линии" : "Вне линии"}</Text>
+            <Text style={styles.headerTitle}>{isOnline ? "Вы на линии" : "Вы вне линии"}</Text>
           </View>
           <TouchableOpacity
             style={styles.gpsBadge}
@@ -611,27 +672,50 @@ export default function MainScreen() {
         </View>
 
         <View style={styles.centerArea}>
-          <View style={styles.mapContainerWaiting}>
-            <YandexMapView
-              ref={mapRef}
-              center={currentCoords}
-              userLocation={currentCoords}
-              zoom={15}
-            />
-            <View style={styles.waitingOverlay}>
-              <Ionicons name="radio-outline" size={20} color="#fff" />
-              <View>
-                <Text style={styles.waitingText}>{isOnline ? "Ожидание заказа..." : "Текущее местоположение"}</Text>
-                <Text style={{ color: "rgba(255,255,255,0.6)", fontSize: 11 }}>Карамурт</Text>
-              </View>
+          {/* GPS status card replacing the map */}
+          <View style={styles.gpsStatusCard}>
+            <View style={styles.gpsStatusIcon}>
+              <Ionicons
+                name={currentCoords ? "locate" : "locate-outline"}
+                size={48}
+                color={currentCoords ? "#FFD000" : "#444"}
+              />
             </View>
+            <Text style={styles.gpsStatusTitle}>
+              {isOnline ? "Ожидание заказа..." : "Вы вне линии"}
+            </Text>
+            {currentCoords ? (
+              <Text style={styles.gpsStatusCoords}>
+                📍 {currentCoords.latitude.toFixed(5)}, {currentCoords.longitude.toFixed(5)}
+              </Text>
+            ) : (
+              <Text style={styles.gpsStatusCoords}>Поиск GPS...</Text>
+            )}
+            <TouchableOpacity
+              style={styles.gpsRefreshBtn}
+              onPress={refreshCurrentPosition}
+              disabled={refreshingGPS}
+              activeOpacity={0.7}
+            >
+              {refreshingGPS ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="refresh" size={16} color="#fff" />
+              )}
+              <Text style={styles.gpsRefreshBtnText}>
+                {refreshingGPS ? "Обновление..." : "Обновить GPS"}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
         <SwipeButton
           title={loading ? "..." : isOnline ? "Уйти с линии" : "Выйти на линию"}
           onSwipeComplete={toggleOnline}
-          color={isOnline ? "#f44336" : "#4CAF50"}
+          color={isOnline ? "#cb1111ff" : "#FFD000"}
+          textColor={isOnline ? "#fff" : "#000"}
+          thumbColor={isOnline ? "#fff" : "#000"}
+          iconColor={isOnline ? "#cb1111ff" : "#FFD000"}
           iconName={isOnline ? "power" : "flash"}
           disabled={loading}
         />
@@ -669,7 +753,7 @@ export default function MainScreen() {
           const isActive = activeTab === item.key;
           return (
             <TouchableOpacity key={item.key} style={styles.navItem} onPress={() => setActiveTab(item.key as DriverTab)}>
-              <Ionicons name={item.icon as any} size={22} color={isActive ? "#c8440a" : "#888"} />
+              <Ionicons name={item.icon as any} size={22} color={isActive ? "#FFD000" : "#555"} />
               <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>{item.label}</Text>
             </TouchableOpacity>
           );
@@ -680,21 +764,21 @@ export default function MainScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.alertCard}>
             <View style={styles.alertHeader}>
-              <Ionicons name="notifications" size={24} color="#c8440a" />
+              <Ionicons name="notifications" size={28} color="#FFD000" />
               <Text style={styles.alertTitle}>НОВЫЙ ЗАКАЗ!</Text>
             </View>
 
             <View style={styles.alertBody}>
               <View style={styles.alertRow}>
-                <Ionicons name="location" size={18} color="#c8440a" />
+                <Ionicons name="location" size={18} color="#FFD000" />
                 <Text style={styles.alertText}>{orderAlert?.pickupAddress || "Адрес не указан"}</Text>
               </View>
               <View style={styles.alertRow}>
-                <Ionicons name="call" size={18} color="#25D366" />
+                <Ionicons name="call" size={18} color="#FFD000" />
                 <Text style={styles.alertText}>{orderAlert?.phone ? `${orderAlert.phone.slice(0, 8)}***` : "—"}</Text>
               </View>
               <View style={styles.alertRow}>
-                <Ionicons name="speedometer" size={18} color="#2196F3" />
+                <Ionicons name="speedometer" size={18} color="#FFD000" />
                 <Text style={styles.alertText}>{orderAlert?.pricePerKm || 80} ₸/км</Text>
               </View>
             </View>
@@ -704,11 +788,11 @@ export default function MainScreen() {
             </View>
 
             <View style={styles.alertActions}>
-              <TouchableOpacity style={[styles.alertBtn, { backgroundColor: "#4CAF50" }]} onPress={acceptOrder} disabled={loading}>
+              <TouchableOpacity style={[styles.alertBtn, { backgroundColor: "#00cb07ff" }]} onPress={acceptOrder} disabled={loading}>
                 <Ionicons name="checkmark" size={24} color="#fff" />
                 <Text style={styles.alertBtnText}>Принять</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.alertBtn, { backgroundColor: "#f44336" }]} onPress={rejectOrder}>
+              <TouchableOpacity style={[styles.alertBtn, { backgroundColor: "#d2291dff" }]} onPress={rejectOrder}>
                 <Ionicons name="close" size={24} color="#fff" />
                 <Text style={styles.alertBtnText}>Отклонить</Text>
               </TouchableOpacity>
@@ -721,116 +805,176 @@ export default function MainScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#1a1a2e", paddingTop: 44 },
+  // ─── Layout ───────────────────────────────────────────────
+  container: { flex: 1, backgroundColor: "#0a0a0a", paddingTop: 44 },
   contentArea: { flex: 1 },
-  loadingWrap: { flex: 1, justifyContent: "center", alignItems: "center" },
-  loadingText: { color: "#888", fontSize: 16 },
-  pageBlock: { flex: 1, paddingHorizontal: 20 },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  headerTitle: { color: "#fff", fontSize: 18, fontWeight: "700" },
-  headerRate: { color: "#c8440a", fontSize: 14, fontWeight: "600" },
-  gpsBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#2b3b63", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
-  gpsBadgeText: { color: "#fff", fontSize: 12, fontWeight: "600" },
-  statusDot: { width: 12, height: 12, borderRadius: 6 },
-  dotOnline: { backgroundColor: "#4CAF50" },
-  dotOffline: { backgroundColor: "#f44336" },
-  statsRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
-  statCard: { flex: 1, backgroundColor: "#252540", borderRadius: 10, padding: 8, alignItems: "center" },
-  statLabel: { color: "#888", fontSize: 11, marginBottom: 4 },
-  statValue: { color: "#fff", fontSize: 16, fontWeight: "700" },
-  centerArea: { flex: 1, marginBottom: 10 },
-  mapContainerWaiting: { flex: 1, borderRadius: 16, overflow: "hidden" },
-  mapContainerOrder: { flex: 1, borderRadius: 12, overflow: "hidden", marginBottom: 8 },
-  map: { width: "100%", height: "100%" },
-  waitingOverlay: { position: "absolute", top: 12, left: 12, backgroundColor: "rgba(26,26,46,0.84)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, flexDirection: "row", alignItems: "center", gap: 6 },
-  waitingText: { color: "#fff", fontSize: 13, fontWeight: "600" },
-  // Order header
-  orderHeader: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
-  orderHeaderTitle: { color: "#fff", fontSize: 17, fontWeight: "700", flex: 1 },
-  menuBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#252540", justifyContent: "center", alignItems: "center" },
-  // Address + phone strip
-  addressStrip: { backgroundColor: "#252540", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 8, gap: 8 },
-  addressLine: { flexDirection: "row", alignItems: "center", gap: 10 },
-  addressLineText: { color: "#fff", fontSize: 14, flex: 1 },
-  phoneText: { color: "#fff", fontSize: 14, flex: 1 },
-  callBtnCompact: { backgroundColor: "#25D366", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 5 },
-  callBtnCompactText: { color: "#fff", fontSize: 13, fontWeight: "600" },
-  // Meter strip — single row
-  meterStrip: { flexDirection: "row", alignItems: "center", justifyContent: "center", backgroundColor: "#252540", borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 8, gap: 16, borderWidth: 1, borderColor: "#c8440a" },
-  meterStripItem: { flexDirection: "row", alignItems: "center", gap: 5 },
-  meterStripLabel: { color: "#888", fontSize: 13 },
-  meterStripValue: { color: "#fff", fontSize: 15, fontWeight: "700" },
-  meterStripPrice: { color: "#c8440a", fontSize: 28, fontWeight: "800" },
-  // Legacy styles kept for compatibility
-  card: { backgroundColor: "#252540", borderRadius: 12, padding: 16, marginBottom: 16, gap: 12 },
-  infoRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  infoText: { color: "#fff", fontSize: 15, flex: 1 },
-  callBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#25D366", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
-  callBtnText: { color: "#fff", fontSize: 13, fontWeight: "600" },
-  meterCard: { backgroundColor: "#252540", borderRadius: 16, padding: 20, marginBottom: 16, alignItems: "center", borderWidth: 1, borderColor: "#c8440a" },
-  meterRow: { flexDirection: "row", gap: 24, marginBottom: 16 },
-  meterItem: { alignItems: "center" },
-  meterLabel: { color: "#888", fontSize: 12, marginBottom: 4 },
-  meterValue: { color: "#fff", fontSize: 20, fontWeight: "700" },
-  priceLabel: { color: "#888", fontSize: 12, marginBottom: 4 },
-  priceValue: { color: "#c8440a", fontSize: 42, fontWeight: "800" },
-  orderActions: { marginBottom: 4 },
-  statusActions: { gap: 12, marginBottom: 16 },
-  statusHint: { color: "#888", fontSize: 13, textAlign: "center", marginBottom: 4 },
-  // SOS & Cancel — compact inline chips
-  orderBottomBar: {
-    flexDirection: "row",
+  loadingWrap: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0a0a0a" },
+  loadingText: { color: "#666", fontSize: 16 },
+  pageBlock: { flex: 1, paddingHorizontal: 16 },
+
+  // ─── Header (waiting) ─────────────────────────────────────
+  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14, paddingTop: 4 },
+  headerTitle: { color: "#fff", fontSize: 20, fontWeight: "800", letterSpacing: 0.3 },
+  headerRate: { color: "#FFD000", fontSize: 17, fontWeight: "700" },
+
+  // ─── GPS badge (top right in waiting) ─────────────────────
+  gpsBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#1c1c1c", paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: "#2a2a2a" },
+  gpsBadgeText: { color: "#aaa", fontSize: 12, fontWeight: "600" },
+
+  // ─── Online dot ───────────────────────────────────────────
+  statusDot: { width: 10, height: 10, borderRadius: 5 },
+  dotOnline: { backgroundColor: "#22c55e", shadowColor: "#22c55e", shadowOpacity: 0.8, shadowRadius: 4, elevation: 4 },
+  dotOffline: { backgroundColor: "#ef4444" },
+
+  // ─── Stats row ────────────────────────────────────────────
+  statsRow: { flexDirection: "row", gap: 8, marginBottom: 14 },
+  statCard: { flex: 1, backgroundColor: "#161616", borderRadius: 14, padding: 12, alignItems: "center", borderWidth: 1, borderColor: "#222" },
+  statLabel: { color: "#555", fontSize: 11, marginBottom: 4, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.5 },
+  statValue: { color: "#fff", fontSize: 18, fontWeight: "800" },
+
+  // ─── GPS status card (center area) ────────────────────────
+  centerArea: { flex: 1, marginBottom: 14 },
+  gpsStatusCard: {
+    flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    gap: 12,
-    paddingVertical: 6,
+    backgroundColor: "#111",
+    borderRadius: 24,
+    gap: 14,
+    borderWidth: 1,
+    borderColor: "#1e1e1e",
   },
-  sosChip: {
+  gpsStatusIcon: {
+    width: 100, height: 100, borderRadius: 50,
+    backgroundColor: "#161616",
+    justifyContent: "center", alignItems: "center",
+    borderWidth: 2, borderColor: "#2a2a2a",
+  },
+  gpsStatusTitle: { color: "#fff", fontSize: 20, fontWeight: "800", letterSpacing: 0.3 },
+  gpsStatusCoords: { color: "#444", fontSize: 11, fontFamily: "monospace" },
+  gpsRefreshBtn: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: "#1c1c1c",
+    paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24,
+    borderWidth: 1, borderColor: "#2a2a2a", marginTop: 4,
+  },
+  gpsRefreshBtnText: { color: "#aaa", fontSize: 13, fontWeight: "600" },
+
+  // ─── Order header ─────────────────────────────────────────
+  orderHeader: { flexDirection: "row", alignItems: "center", gap: 0, marginBottom: 10, paddingTop: 3 },
+  orderHeaderTitle: { color: "#fff", fontSize: 17, flex: 1, paddingTop: 10, fontWeight: "800" },
+  menuBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: "#161616", justifyContent: "center", alignItems: "center", borderWidth: 1, borderColor: "#222" },
+
+  // ─── Address strip ────────────────────────────────────────
+  addressStrip: { backgroundColor: "#111", borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 10, gap: 10, borderWidth: 1, borderColor: "#1e1e1e" },
+  addressLine: { flexDirection: "row", alignItems: "center", gap: 10 },
+  addressLineText: { color: "#e0e0e0", fontSize: 19, flex: 1, lineHeight: 25, marginTop: 4, fontWeight: "700" },
+  phoneText: { color: "#e0e0e0", fontSize: 19, flex: 1, marginTop: 4, fontWeight: "700" },
+
+  // ─── Navigator button ─────────────────────────────────────
+  navBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: "#FFD000", borderRadius: 30,
+    paddingHorizontal: 14, paddingVertical: 12, marginTop: 10,
+  },
+  navBtnText: { color: "#000", fontSize: 15, fontWeight: "800", flex: 1, textAlign: "center" },
+
+  // ─── BIG Meter strip ──────────────────────────────────────
+  meterStrip: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    backgroundColor: "#111", borderRadius: 20,
+    paddingHorizontal: 16, paddingVertical: 18, marginBottom: 10, gap: 20,
+    borderWidth: 2, borderColor: "#FFD000",
+  },
+  meterStripItem: { flexDirection: "row", alignItems: "center", gap: 6 },
+  meterStripLabel: { color: "#666", fontSize: 13 },
+  meterStripValue: { color: "#ddd", fontSize: 18, fontWeight: "700" },
+  meterStripPrice: { color: "#FFD000", fontSize: 52, fontWeight: "900", letterSpacing: -1 },
+
+  // ─── Status Center Overlay ────────────────────────────────
+  orderStatusCenter: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 15,
+  },
+  statusPulseCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: "rgba(255, 208, 0, 0.05)",
+    borderWidth: 2,
+    borderColor: "rgba(255, 208, 0, 0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  statusCenterText: {
+    color: "#eed535ff",
+    fontSize: 16,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  paymentBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    backgroundColor: "rgba(244,67,54,0.12)",
-    borderRadius: 16,
+    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: "rgba(244,67,54,0.3)",
+    borderRadius: 20,
   },
-  sosChipText: {
-    color: "#f44336",
-    fontSize: 12,
+  paymentBadgeText: {
+    color: "#22c55e",
+    fontSize: 13,
     fontWeight: "700",
   },
-  cancelChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "rgba(136,136,136,0.1)",
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: "rgba(136,136,136,0.2)",
-  },
-  cancelChipText: {
-    color: "#888",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  navBar: { flexDirection: "row", justifyContent: "space-around", borderTopWidth: 1, borderTopColor: "#252540", paddingVertical: 10, paddingHorizontal: 10, backgroundColor: "#1a1a2e" },
-  navItem: { alignItems: "center", gap: 2 },
-  navLabel: { color: "#888", fontSize: 10, fontWeight: "600" },
-  navLabelActive: { color: "#c8440a" },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.8)", justifyContent: "center", paddingHorizontal: 24 },
-  alertCard: { backgroundColor: "#252540", borderRadius: 20, padding: 24, borderWidth: 2, borderColor: "#c8440a" },
-  alertHeader: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 20 },
-  alertTitle: { color: "#c8440a", fontSize: 22, fontWeight: "800" },
-  alertBody: { gap: 12, marginBottom: 20 },
-  alertRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  alertText: { color: "#fff", fontSize: 15, flex: 1 },
-  timerCircle: { width: 64, height: 64, borderRadius: 32, borderWidth: 3, borderColor: "#c8440a", justifyContent: "center", alignItems: "center", alignSelf: "center", marginBottom: 20 },
-  timerText: { color: "#c8440a", fontSize: 24, fontWeight: "800" },
+
+  orderActions: { marginBottom: 15 },
+  statusActions: { gap: 12, marginBottom: 16 },
+  statusHint: { color: "#666", fontSize: 13, textAlign: "center", marginBottom: 4 },
+
+  // ─── Legacy (for compatibility) ───────────────────────────
+  card: { backgroundColor: "#111", borderRadius: 14, padding: 16, marginBottom: 16, gap: 12 },
+  infoRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  infoText: { color: "#e0e0e0", fontSize: 15, flex: 1 },
+  callBtn: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#16a34a", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  callBtnText: { color: "#fff", fontSize: 13, fontWeight: "600" },
+  meterCard: { backgroundColor: "#111", borderRadius: 20, padding: 20, marginBottom: 16, alignItems: "center", borderWidth: 2, borderColor: "#FFD000" },
+  meterRow: { flexDirection: "row", gap: 24, marginBottom: 16 },
+  meterItem: { alignItems: "center" },
+  meterLabel: { color: "#666", fontSize: 12, marginBottom: 4 },
+  meterValue: { color: "#fff", fontSize: 22, fontWeight: "700" },
+  priceLabel: { color: "#666", fontSize: 12, marginBottom: 4 },
+  priceValue: { color: "#FFD000", fontSize: 52, fontWeight: "900" },
+  orderBottomBar: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 12, paddingVertical: 6 },
+  sosChip: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(239,68,68,0.12)", borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(239,68,68,0.3)" },
+  sosChipText: { color: "#ef4444", fontSize: 12, fontWeight: "700" },
+  cancelChip: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(80,80,80,0.1)", borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: "rgba(80,80,80,0.2)" },
+  cancelChipText: { color: "#666", fontSize: 12, fontWeight: "600" },
+
+  // ─── Map containers (kept for safety) ────────────────────
+  mapContainerWaiting: { flex: 1, borderRadius: 20, overflow: "hidden" },
+  mapContainerOrder: { flex: 1, borderRadius: 16, overflow: "hidden", marginBottom: 8 },
+  map: { width: "100%", height: "100%" },
+  waitingOverlay: { position: "absolute", top: 12, left: 12, backgroundColor: "rgba(0,0,0,0.75)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, flexDirection: "row", alignItems: "center", gap: 6 },
+  waitingText: { color: "#fff", fontSize: 13, fontWeight: "600" },
+
+  // ─── Bottom nav bar ───────────────────────────────────────
+  navBar: { flexDirection: "row", justifyContent: "space-around", borderTopWidth: 1, borderTopColor: "#505050ff", paddingVertical: 10, paddingHorizontal: 10, backgroundColor: "#0a0a0a" },
+  navItem: { alignItems: "center", gap: 3 },
+  navLabel: { color: "#888888ff", fontSize: 10, fontWeight: "600" },
+  navLabelActive: { color: "#FFD000" },
+
+  // ─── New order alert modal ────────────────────────────────
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.88)", justifyContent: "center", paddingHorizontal: 20 },
+  alertCard: { backgroundColor: "#111", borderRadius: 24, padding: 24, borderWidth: 2, borderColor: "#FFD000" },
+  alertHeader: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, marginBottom: 20 },
+  alertTitle: { color: "#FFD000", fontSize: 24, fontWeight: "900", letterSpacing: 1 },
+  alertBody: { gap: 14, marginBottom: 20 },
+  alertRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  alertText: { color: "#e0e0e0", fontSize: 15, flex: 1 },
+  timerCircle: { width: 72, height: 72, borderRadius: 36, borderWidth: 3, borderColor: "#FFD000", justifyContent: "center", alignItems: "center", alignSelf: "center", marginBottom: 20, backgroundColor: "#161600" },
+  timerText: { color: "#FFD000", fontSize: 28, fontWeight: "900" },
   alertActions: { flexDirection: "row", gap: 12 },
-  alertBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 52, borderRadius: 12 },
-  alertBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+  alertBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 56, borderRadius: 14 },
+  alertBtnText: { color: "#fff", fontSize: 16, fontWeight: "800" },
 });

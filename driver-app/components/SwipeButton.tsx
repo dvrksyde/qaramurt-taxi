@@ -20,6 +20,9 @@ interface SwipeButtonProps {
   color?: string;
   iconName?: string;
   disabled?: boolean;
+  textColor?: string;
+  iconColor?: string;
+  thumbColor?: string;
 }
 
 export function SwipeButton({
@@ -28,6 +31,9 @@ export function SwipeButton({
   color = "#4CAF50",
   iconName = "chevron-forward",
   disabled = false,
+  textColor = "#000",
+  iconColor,
+  thumbColor = "#000",
 }: SwipeButtonProps) {
   const translateX = useRef(new Animated.Value(0)).current;
   const [containerWidth, setContainerWidth] = useState(SCREEN_WIDTH - 40);
@@ -128,24 +134,25 @@ export function SwipeButton({
           {
             backgroundColor: "#fff",
             opacity: progressOpacity,
-            transform: [{ scaleX: translateX.interpolate({
-              inputRange: [0, maxSlide],
-              outputRange: [0, 1],
-              extrapolate: "clamp",
-            }) }],
+            transform: [{
+              scaleX: translateX.interpolate({
+                inputRange: [0, maxSlide],
+                outputRange: [0, 1],
+                extrapolate: "clamp",
+              })
+            }],
           },
         ]}
       />
 
       {/* Chevron hints */}
       <Animated.View style={[styles.chevronsContainer, { opacity: chevronOpacity }]}>
-        <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.4)" />
-        <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.5)" />
-        <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.6)" />
+        <Ionicons name="chevron-forward" size={12} color="rgba(0, 0, 0, 0.8)" />
+        <Ionicons name="chevron-forward" size={12} color="rgba(0, 0, 0, 0.8)" />
       </Animated.View>
 
       {/* Title text */}
-      <Animated.Text style={[styles.title, { opacity: textOpacity }]}>
+      <Animated.Text style={[styles.title, { opacity: textOpacity, color: textColor }]}>
         {title}
       </Animated.Text>
 
@@ -153,14 +160,14 @@ export function SwipeButton({
       <Animated.View
         style={[
           styles.thumb,
-          { transform: [{ translateX }] },
+          { transform: [{ translateX }], backgroundColor: thumbColor },
         ]}
         {...panResponder.panHandlers}
       >
         <Ionicons
           name={iconName as any}
           size={24}
-          color={disabled ? "#888" : color}
+          color={disabled ? "#888" : (iconColor || color)}
         />
       </Animated.View>
     </View>

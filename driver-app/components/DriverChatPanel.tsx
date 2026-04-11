@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -105,8 +105,8 @@ export function DriverChatPanel() {
   const renderMessage = ({ item }: { item: Message }) => (
     <View style={[styles.bubble, item.direction === "outbound" ? styles.bubbleOut : styles.bubbleIn]}>
       {item.direction === "inbound" && <Text style={styles.bubbleFrom}>{item.from}</Text>}
-      <Text style={styles.bubbleText}>{item.text}</Text>
-      <Text style={styles.bubbleTime}>{formatTime(item.timestamp)}</Text>
+      <Text style={[styles.bubbleText, item.direction === "outbound" && { color: "#000" }]}>{item.text}</Text>
+      <Text style={[styles.bubbleTime, item.direction === "outbound" && { color: "rgba(0,0,0,0.5)" }]}>{formatTime(item.timestamp)}</Text>
     </View>
   );
 
@@ -140,7 +140,7 @@ export function DriverChatPanel() {
           returnKeyType="send"
         />
         <TouchableOpacity style={[styles.sendBtn, !text.trim() && styles.sendBtnDisabled]} onPress={sendMessage} disabled={!text.trim()}>
-          <Ionicons name="send" size={20} color="#fff" />
+          <Ionicons name="send" size={20} color="#000" />
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -148,41 +148,43 @@ export function DriverChatPanel() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#1a1a2e" },
-  title: { color: "#fff", fontSize: 22, fontWeight: "800", paddingHorizontal: 20, marginBottom: 12 },
+  container: { flex: 1 },
+  title: { color: "#fff", fontSize: 20, fontWeight: "800", paddingHorizontal: 16, marginBottom: 16, letterSpacing: 0.5 },
   messageList: { paddingHorizontal: 16, paddingBottom: 8, flexGrow: 1 },
-  bubble: { maxWidth: "80%", borderRadius: 16, padding: 12, marginBottom: 8 },
-  bubbleIn: { backgroundColor: "#252540", alignSelf: "flex-start", borderBottomLeftRadius: 4 },
-  bubbleOut: { backgroundColor: "#c8440a", alignSelf: "flex-end", borderBottomRightRadius: 4 },
-  bubbleFrom: { color: "#cfd3ff", fontSize: 11, fontWeight: "600", marginBottom: 2 },
-  bubbleText: { color: "#fff", fontSize: 15, lineHeight: 20 },
-  bubbleTime: { color: "rgba(255,255,255,0.5)", fontSize: 10, alignSelf: "flex-end", marginTop: 4 },
-  empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 8, marginTop: 100 },
-  emptyText: { color: "#666", fontSize: 16 },
-  emptyHint: { color: "#444", fontSize: 13 },
+  bubble: { maxWidth: "80%", borderRadius: 16, padding: 14, marginBottom: 10 },
+  bubbleIn: { backgroundColor: "#111", alignSelf: "flex-start", borderBottomLeftRadius: 4, borderWidth: 1, borderColor: "#1e1e1e" },
+  bubbleOut: { backgroundColor: "#FFD000", alignSelf: "flex-end", borderBottomRightRadius: 4 },
+  bubbleFrom: { color: "#888", fontSize: 11, fontWeight: "600", marginBottom: 4, textTransform: "uppercase" },
+  bubbleText: { color: "#e0e0e0", fontSize: 16, lineHeight: 22 },
+  bubbleTime: { color: "#666", fontSize: 10, alignSelf: "flex-end", marginTop: 6, fontWeight: "500" },
+  empty: { flex: 1, justifyContent: "center", alignItems: "center", gap: 12, marginTop: 100 },
+  emptyText: { color: "#666", fontSize: 16, fontWeight: "600" },
+  emptyHint: { color: "#444", fontSize: 13, textAlign: "center" },
   inputBar: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderTopWidth: 1,
-    borderTopColor: "#252540",
-    gap: 8,
+    borderTopColor: "#1e1e1e",
+    gap: 12,
   },
   input: {
     flex: 1,
-    backgroundColor: "#252540",
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    backgroundColor: "#111",
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
     color: "#fff",
-    fontSize: 15,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: "#222",
   },
   sendBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#c8440a",
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#FFD000",
     justifyContent: "center",
     alignItems: "center",
   },

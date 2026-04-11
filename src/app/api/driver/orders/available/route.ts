@@ -9,14 +9,11 @@ export async function GET(req: NextRequest) {
   const auth = verifyDriverToken(req);
   if (!auth) return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
 
-  // Only show orders from the last 15 minutes
-  const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-
   const orders = await prisma.order.findMany({
     where: {
       status: "pending",
       driverId: null,
-      createdAt: { gte: fifteenMinutesAgo },
+      // Removed 15-minute filter to see all pending orders
     },
     select: {
       id: true,

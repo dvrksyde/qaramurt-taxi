@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Svg, { Circle } from "react-native-svg";
@@ -187,7 +187,7 @@ export function DriverHistoryPanel() {
               <View style={styles.summaryDivider} />
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryLabel}>Завершено</Text>
-                <Text style={[styles.summaryValue, { color: "#4CAF50" }]}>{summary.completedOrders}</Text>
+                <Text style={[styles.summaryValue, { color: "#FFD000" }]}>{summary.completedOrders}</Text>
               </View>
               <View style={styles.summaryDivider} />
               <View style={styles.summaryItem}>
@@ -211,41 +211,41 @@ export function DriverHistoryPanel() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#1a1a2e" },
-  title: { color: "#fff", fontSize: 22, fontWeight: "800", paddingHorizontal: 20, marginBottom: 16 },
-  tabs: { flexDirection: "row", marginHorizontal: 20, marginBottom: 16, gap: 8 },
-  tab: { flex: 1, paddingVertical: 8, borderRadius: 8, backgroundColor: "#252540", alignItems: "center" },
-  tabActive: { backgroundColor: "#c8440a" },
-  tabText: { color: "#888", fontSize: 13, fontWeight: "600" },
-  tabTextActive: { color: "#fff" },
-  summary: { flexDirection: "row", backgroundColor: "#252540", borderRadius: 12, padding: 16, marginBottom: 16, alignItems: "center" },
+  container: { flex: 1 },
+  title: { color: "#fff", fontSize: 20, fontWeight: "800", paddingHorizontal: 16, marginBottom: 16, letterSpacing: 0.5 },
+  tabs: { flexDirection: "row", marginHorizontal: 16, marginBottom: 16, gap: 8 },
+  tab: { flex: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: "#111", alignItems: "center", borderWidth: 1, borderColor: "#222" },
+  tabActive: { backgroundColor: "#FFD000", borderColor: "#FFD000" },
+  tabText: { color: "#888", fontSize: 13, fontWeight: "700" },
+  tabTextActive: { color: "#000", fontWeight: "800" },
+  summary: { flexDirection: "row", backgroundColor: "#111", borderRadius: 16, padding: 16, marginBottom: 16, alignItems: "center", borderWidth: 1, borderColor: "#1e1e1e" },
   summaryItem: { flex: 1, alignItems: "center" },
-  summaryDivider: { width: 1, height: 32, backgroundColor: "#333" },
-  summaryLabel: { color: "#888", fontSize: 12, marginBottom: 4 },
-  summaryValue: { color: "#fff", fontSize: 20, fontWeight: "800" },
-  list: { paddingHorizontal: 20, paddingBottom: 20 },
-  chartCard: { backgroundColor: "#252540", borderRadius: 16, padding: 18, marginBottom: 16 },
-  chartWrap: { alignItems: "center", justifyContent: "center", marginBottom: 18 },
+  summaryDivider: { width: 1, height: 32, backgroundColor: "#2a2a2a" },
+  summaryLabel: { color: "#666", fontSize: 12, marginBottom: 4, fontWeight: "600", textTransform: "uppercase" },
+  summaryValue: { color: "#fff", fontSize: 22, fontWeight: "800" },
+  list: { paddingHorizontal: 16, paddingBottom: 20 },
+  chartCard: { backgroundColor: "#111", borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: "#1e1e1e" },
+  chartWrap: { alignItems: "center", justifyContent: "center", marginBottom: 20 },
   chartCenter: { position: "absolute", alignItems: "center", justifyContent: "center", width: 110 },
-  chartCenterLabel: { color: "#888", fontSize: 11, textAlign: "center", marginBottom: 4 },
-  chartCenterValue: { color: "#fff", fontSize: 18, fontWeight: "800", textAlign: "center" },
-  legendList: { gap: 10 },
+  chartCenterLabel: { color: "#9f9f9fff", fontSize: 11, textAlign: "center", marginBottom: 4, fontWeight: "600", textTransform: "uppercase" },
+  chartCenterValue: { color: "#fff", fontSize: 20, fontWeight: "800", textAlign: "center" },
+  legendList: { gap: 12, paddingTop: 8 },
   legendRow: { flexDirection: "row", alignItems: "center" },
-  legendDot: { width: 10, height: 10, borderRadius: 5, marginRight: 10 },
-  legendLabel: { flex: 1, color: "#cfd3ff", fontSize: 13 },
-  legendValue: { color: "#fff", fontSize: 13, fontWeight: "700" },
-  orderCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#252540", borderRadius: 10, padding: 14, marginBottom: 10 },
+  legendDot: { width: 12, height: 12, borderRadius: 6, marginRight: 10 },
+  legendLabel: { flex: 1, color: "#e0e0e0", fontSize: 14, fontWeight: "500" },
+  legendValue: { color: "#fff", fontSize: 15, fontWeight: "800" },
+  orderCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#111", borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "#1e1e1e" },
   orderLeft: { alignItems: "center", marginRight: 12, gap: 4 },
-  orderTime: { color: "#888", fontSize: 12, fontWeight: "600" },
-  statusBadge: { width: 20, height: 20, borderRadius: 10, justifyContent: "center", alignItems: "center" },
-  badgeCompleted: { backgroundColor: "#4CAF50" },
-  badgeCanceled: { backgroundColor: "#f44336" },
-  orderMiddle: { flex: 1, gap: 2 },
-  orderAddress: { color: "#fff", fontSize: 14 },
-  orderDistance: { color: "#888", fontSize: 12 },
-  orderRight: { marginLeft: 8 },
-  orderPrice: { color: "#c8440a", fontSize: 16, fontWeight: "700" },
-  orderPriceCanceled: { color: "#666", textDecorationLine: "line-through" },
+  orderTime: { color: "#888", fontSize: 12, fontWeight: "700" },
+  statusBadge: { width: 16, height: 16, borderRadius: 8, justifyContent: "center", alignItems: "center" },
+  badgeCompleted: { backgroundColor: "#22c55e" },
+  badgeCanceled: { backgroundColor: "#ef4444" },
+  orderMiddle: { flex: 1, gap: 4 },
+  orderAddress: { color: "#e0e0e0", fontSize: 15, fontWeight: "500" },
+  orderDistance: { color: "#888", fontSize: 13 },
+  orderRight: { marginLeft: 10 },
+  orderPrice: { color: "#FFD000", fontSize: 18, fontWeight: "800" },
+  orderPriceCanceled: { color: "#666", textDecorationLine: "line-through", fontSize: 15 },
   empty: { alignItems: "center", marginTop: 60, gap: 12 },
-  emptyText: { color: "#666", fontSize: 16 },
+  emptyText: { color: "#666", fontSize: 16, fontWeight: "600" },
 });

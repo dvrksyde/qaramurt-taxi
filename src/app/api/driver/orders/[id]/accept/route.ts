@@ -24,6 +24,20 @@ export async function POST(
     }, { status: 403 });
   }
 
+  // Check if driver is already on another active order
+  const existingOrder = await prisma.order.findFirst({
+    where: {
+      driverId: auth.driverId,
+      status: { in: ["assigned", "arrived", "in_progress"] },
+    }
+  });
+
+  if (existingOrder) {
+    return NextResponse.json({
+      error: "У вас уже есть активный заказ. Сначала завершите текущую поездку."
+    }, { status: 403 });
+  }
+
   const { id } = await params;
   const orderId = parseInt(id);
 

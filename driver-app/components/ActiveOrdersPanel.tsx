@@ -8,6 +8,7 @@ import {
   RefreshControl,
   Alert,
   ActivityIndicator,
+  AppState,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "../services/api";
@@ -39,7 +40,7 @@ export function ActiveOrdersPanel() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [acceptingId, setAcceptingId] = useState<number | null>(null);
-  const { setActiveOrder, isOnline } = useDriverStore();
+  const { activeOrder, setActiveOrder, isOnline, orderAlert } = useDriverStore();
 
   const fetchOrders = useCallback(async () => {
     const res = await api("/api/driver/orders/available");
@@ -68,6 +69,21 @@ export function ActiveOrdersPanel() {
         socket.off("order_taken", handleOrderTaken);
       }
     };
+  }, [fetchOrders]);
+
+  // Instantly fetch orders when a new order alert comes in
+  useEffect(() => {
+    if (orderAlert) {
+      fetchOrders();
+    }
+  }, [orderAlert, fetchOrders]);
+
+  // Fetch orders right away when the app comes back to the foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") fetchOrders();
+    });
+    return () => sub.remove();
   }, [fetchOrders]);
 
   const onRefresh = useCallback(async () => {
@@ -175,6 +191,18 @@ export function ActiveOrdersPanel() {
     </View>
   );
 
+  if (activeOrder) {
+    return (
+      <View style={styles.emptyContainer}>
+        <Ionicons name="car-sport" size={64} color="#FFD000" />
+        <Text style={styles.emptyTitle}>У вас активный заказ</Text>
+        <Text style={styles.emptySubtitle}>
+          Пожалуйста, завершите текущий заказ, чтобы принимать новые заявки.
+        </Text>
+      </View>
+    );
+  }
+
   if (!isOnline) {
     return (
       <View style={styles.emptyContainer}>
@@ -236,7 +264,8 @@ export function ActiveOrdersPanel() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
+    paddingTop: 8,
   },
   header: {
     flexDirection: "row",
@@ -246,12 +275,12 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
+    fontSize: 20,
+    fontWeight: "800",
     flex: 1,
   },
   countBadge: {
-    backgroundColor: "#c8440a",
+    backgroundColor: "#FFD000",
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -259,9 +288,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   countText: {
-    color: "#fff",
-    fontSize: 13,
-    fontWeight: "700",
+    color: "#000",
+    fontSize: 14,
+    fontWeight: "800",
   },
   list: {
     paddingBottom: 20,
@@ -273,12 +302,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   orderCard: {
-    backgroundColor: "#252540",
-    borderRadius: 14,
+    backgroundColor: "#111",
+    borderRadius: 16,
     padding: 16,
-    marginBottom: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: "#c8440a",
+    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: "#1e1e1e",
+    borderLeftWidth: 4,
+    borderLeftColor: "#FFD000",
   },
   orderHeader: {
     flexDirection: "row",
@@ -287,22 +318,23 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   orderIdBadge: {
-    backgroundColor: "rgba(200,68,10,0.15)",
-    borderRadius: 6,
+    backgroundColor: "rgba(255,208,0,0.1)",
+    borderRadius: 8,
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 4,
   },
   orderIdText: {
-    color: "#c8440a",
+    color: "#FFD000",
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: "800",
   },
   timeAgo: {
     color: "#888",
     fontSize: 12,
+    fontWeight: "600",
   },
   orderBody: {
-    gap: 8,
+    gap: 10,
     marginBottom: 14,
   },
   addressRow: {
@@ -314,8 +346,8 @@ const styles = StyleSheet.create({
     paddingTop: 3,
   },
   addressText: {
-    color: "#fff",
-    fontSize: 14,
+    color: "#e0e0e0",
+    fontSize: 15,
     flex: 1,
     lineHeight: 20,
   },
@@ -328,28 +360,29 @@ const styles = StyleSheet.create({
   metaItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: 6,
   },
   metaText: {
-    color: "#888",
-    fontSize: 12,
+    color: "#aaa",
+    fontSize: 13,
+    fontWeight: "500",
   },
   acceptBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    height: 44,
-    backgroundColor: "#4CAF50",
-    borderRadius: 12,
+    height: 48,
+    backgroundColor: "#FFD000",
+    borderRadius: 14,
   },
   acceptBtnDisabled: {
     opacity: 0.6,
   },
   acceptBtnText: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "700",
+    color: "#000",
+    fontSize: 16,
+    fontWeight: "800",
   },
   emptyContainer: {
     flex: 1,
@@ -364,12 +397,13 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
+    fontSize: 18,
+    fontWeight: "800",
   },
   emptySubtitle: {
     color: "#888",
     fontSize: 14,
     textAlign: "center",
+    lineHeight: 20,
   },
 });
