@@ -2,7 +2,7 @@
 import { useMonitorStore } from "@/stores/monitorStore";
 import { useEffect } from "react";
 
-type Tab = "current" | "scheduled" | "exchange" | "map" | "chat" | "system" | "alarms";
+type Tab = "current" | "scheduled" | "exchange" | "map" | "chat" | "system" | "alarms" | "leaderboard";
 
 const TABS: { key: Tab; label: string; countKey?: keyof ReturnType<typeof useMonitorStore.getState>["counts"] }[] = [
   { key: "current",   label: "Текущие заказы",  countKey: "current" },

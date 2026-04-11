@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    const totalSettlements = settlements.reduce((sum: number, s: { amount: number | string }) => sum + Number(s.amount), 0);
+    const totalSettlements = settlements.reduce((sum: number, s: any) => sum + Number(s.amount), 0);
     const netCompanyProfit = companyCommission - siteCommission - totalSettlements;
 
     return NextResponse.json({
