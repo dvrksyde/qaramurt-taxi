@@ -4,14 +4,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkPermission } from "@/lib/permissions";
 
-type Ctx = { params: { id: string } };
+type Ctx = { params: Promise<{ id: string }> };
 
 // PATCH /api/address-book/manage/[id]  — update
 export async function PATCH(req: NextRequest, { params }: Ctx) {
   const { allowed, response } = await checkPermission(["admin"]);
   if (!allowed) return response!;
 
-  const id = parseInt(params.id);
+  const { id: idStr } = await params;
+  const id = parseInt(idStr);
   const body = await req.json();
   const data: Record<string, any> = {};
 
@@ -34,7 +35,8 @@ export async function DELETE(_req: NextRequest, { params }: Ctx) {
   const { allowed, response } = await checkPermission(["admin"]);
   if (!allowed) return response!;
 
-  const id = parseInt(params.id);
+  const { id: idStr } = await params;
+  const id = parseInt(idStr);
   try {
     await prisma.addressBook.delete({ where: { id } });
     return NextResponse.json({ ok: true });
