@@ -17,13 +17,14 @@ interface Props { session: Session; }
  * `requiredPerms: ["admin"]` means only visible for admins or users with "admin" permission.
  */
 const NAV_LINKS = [
-  { href: "/monitor", label: "Монитор", requiredPerms: [] as string[] },
-  { href: "/operators", label: "Операторы", requiredPerms: ["admin"] },
-  { href: "/drivers", label: "Водители", requiredPerms: [] as string[] },
-  { href: "/clients", label: "Клиенты", requiredPerms: ["clients"] },
-  { href: "/journal", label: "Журнал заказов", requiredPerms: ["journal_own", "journal_all"] },
-  { href: "/settings/tariffs-driver", label: "Тарифы", requiredPerms: ["admin"] },
-  { href: "/reports", label: "Отчеты", requiredPerms: ["admin"] },
+  { href: "/monitor",                  label: "Монитор",         requiredPerms: [] as string[] },
+  { href: "/operators",                 label: "Операторы",       requiredPerms: ["admin"] },
+  { href: "/drivers",                   label: "Водители",        requiredPerms: [] as string[] },
+  { href: "/clients",                   label: "Клиенты",         requiredPerms: ["clients"] },
+  { href: "/journal",                   label: "Журнал заказов",  requiredPerms: ["journal_own", "journal_all"] },
+  { href: "/settings/tariffs-driver",   label: "Тарифы",          requiredPerms: ["admin"] },
+  { href: "/settings/address-book",     label: "Адреса",          requiredPerms: ["admin"] },
+  { href: "/reports",                   label: "Отчеты",          requiredPerms: ["admin"] },
 ];
 
 export function TopNav({ session }: Props) {
