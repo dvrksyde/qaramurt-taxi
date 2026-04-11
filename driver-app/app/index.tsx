@@ -10,6 +10,7 @@ import {
   Vibration,
   AppState,
   ActivityIndicator,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -926,7 +927,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  orderActions: { marginBottom: 15 },
+  orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 90, left: 16, right: 16 },
   statusActions: { gap: 12, marginBottom: 16 },
   statusHint: { color: "#666", fontSize: 13, textAlign: "center", marginBottom: 4 },
 
