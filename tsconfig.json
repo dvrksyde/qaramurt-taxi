@@ -30,5 +30,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "driver-app"]
+  "exclude": ["node_modules", "driver-app", "scripts"]
 }
