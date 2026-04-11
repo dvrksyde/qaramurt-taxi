@@ -708,16 +708,18 @@ export default function MainScreen() {
           </View>
         </View>
 
-        <SwipeButton
-          title={loading ? "..." : isOnline ? "Уйти с линии" : "Выйти на линию"}
-          onSwipeComplete={toggleOnline}
-          color={isOnline ? "#cb1111ff" : "#FFD000"}
-          textColor={isOnline ? "#fff" : "#000"}
-          thumbColor={isOnline ? "#fff" : "#000"}
-          iconColor={isOnline ? "#cb1111ff" : "#FFD000"}
-          iconName={isOnline ? "power" : "flash"}
-          disabled={loading}
-        />
+        <View style={styles.homeSwipeContainer}>
+          <SwipeButton
+            title={loading ? "..." : isOnline ? "Уйти с линии" : "Выйти на линию"}
+            onSwipeComplete={toggleOnline}
+            color={isOnline ? "#cb1111ff" : "#FFD000"}
+            textColor={isOnline ? "#fff" : "#000"}
+            thumbColor={isOnline ? "#fff" : "#000"}
+            iconColor={isOnline ? "#cb1111ff" : "#FFD000"}
+            iconName={isOnline ? "power" : "flash"}
+            disabled={loading}
+          />
+        </View>
       </View>
     );
   };
@@ -928,6 +930,7 @@ const styles = StyleSheet.create({
   },
 
   orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 90, left: 16, right: 16 },
+  homeSwipeContainer: { marginTop: "auto", marginBottom: 20 },
   statusActions: { gap: 12, marginBottom: 16 },
   statusHint: { color: "#666", fontSize: 13, textAlign: "center", marginBottom: 4 },
 
