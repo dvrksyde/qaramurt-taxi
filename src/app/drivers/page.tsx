@@ -164,8 +164,32 @@ export default function DriversPage() {
                         {(driver as any).tariffGroup?.name || "Стандарт"}
                       </span>
                     </td>
-                    <td className="text-muted text-sm" style={{ lineHeight: 1.4 }}>
-                      <div style={{ color: "var(--color-primary)" }}>{(driver as any).osVersion || "Android"}</div>
+                    <td className="text-muted text-sm" style={{ lineHeight: 1.4, padding: "8px 12px" }}>
+                      <div style={{ color: "#333", fontSize: "12px", marginBottom: 2 }}>
+                        {driver.osVersion || "Android 14"} <span style={{ color: "red", fontWeight: "bold" }}>(?)</span> <span style={{ color: "red", fontSize: "10px" }}>▼</span>
+                      </div>
+                      <div style={{ display: "flex", gap: "3px", flexWrap: "wrap", marginTop: 2 }}>
+                        {driver.thirdPartyApps?.includes("yandex_pro") && (
+                          <div title="Яндекс Про" style={{ width: 18, height: 18, borderRadius: 3, overflow: "hidden", border: "1px solid #ddd" }}>
+                            <img src="https://play-lh.googleusercontent.com/1-h_9ICpS6kPUpT4Yp2D1h9n_yL_W2_X8_y_y_y_y_y_y_y_y_y_y" style={{ width: "100%", height: "100%" }} alt="Y" />
+                          </div>
+                        )}
+                        {driver.thirdPartyApps?.includes("indrive") && (
+                          <div title="inDrive" style={{ width: 18, height: 18, borderRadius: 3, overflow: "hidden", border: "1px solid #ddd" }}>
+                            <img src="https://play-lh.googleusercontent.com/V7cAnYjntcE37Z1M1_08L_I_0j3z-4tX7g8J9X_3_y_y_y_y_y_y_y_y_y_y" style={{ width: "100%", height: "100%" }} alt="iD" />
+                          </div>
+                        )}
+                        {driver.thirdPartyApps?.includes("taxomet") && (
+                          <div title="Таксомет" style={{ width: 18, height: 18, borderRadius: 3, overflow: "hidden", border: "1px solid #ddd" }}>
+                            <img src="https://play-lh.googleusercontent.com/uCyb95C5z_f_y_y_y_y_y_y_y_y_y_y_y_y_y_y_y_y_y_y_y_y" style={{ width: "100%", height: "100%" }} alt="T" />
+                          </div>
+                        )}
+                        {driver.thirdPartyApps?.includes("salam_taxi") && (
+                          <div title="SalamTaxi" style={{ width: 18, height: 18, borderRadius: 3, overflow: "hidden", border: "1px solid #ddd" }}>
+                            <img src="https://play-lh.googleusercontent.com/Salam_Icon_Example" style={{ width: "100%", height: "100%" }} alt="S" />
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td style={{ textAlign: "center", verticalAlign: "middle" }}>
                       {v?.plate ? <span className="license-plate">{v.plate}</span> : <span className="text-muted text-sm">—</span>}

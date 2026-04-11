@@ -313,7 +313,7 @@ export default function MapTabClient() {
       <div style={{
         position: "absolute",
         top: 10,
-        left: 10,
+        right: 10,
         zIndex: 1000,
         display: "flex",
         gap: 8,
