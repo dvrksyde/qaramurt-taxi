@@ -113,21 +113,8 @@ model VehicleClass {
   @@map("vehicle_classes")
 }
 
-// ─── VEHICLE OPTIONS ─────────────────────────────────────────────────────────
+// Removed VEHICLE OPTIONS ─────────────────────────────────────────────────────────
 
-model VehicleOption {
-  id            Int      @id @default(autoincrement())
-  name          String   @db.VarChar(100)
-  description   String?
-  priceModifier Decimal  @default(0) @db.Decimal(10, 2)
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-
-  vehicles VehicleOptionLink[]
-  orders   OrderOption[]
-
-  @@map("vehicle_options")
-}
 
 // ─── GEOZONES ─────────────────────────────────────────────────────────────────
 
@@ -256,7 +243,6 @@ model Vehicle {
 
   driver   Driver?            @relation(fields: [driverId], references: [id])
   classes  VehicleClassLink[]
-  options  VehicleOptionLink[]
   services VehicleService[]
   orders   Order[]
 
@@ -272,17 +258,6 @@ model VehicleClassLink {
 
   @@id([vehicleId, classId])
   @@map("vehicle_class_links")
-}
-
-model VehicleOptionLink {
-  vehicleId Int
-  optionId  Int
-
-  vehicle Vehicle       @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  option  VehicleOption @relation(fields: [optionId], references: [id])
-
-  @@id([vehicleId, optionId])
-  @@map("vehicle_option_links")
 }
 
 model VehicleService {
@@ -399,7 +374,6 @@ model Order {
   tariff     Tariff?      @relation(fields: [tariffId], references: [id])
   class      VehicleClass? @relation(fields: [classId], references: [id])
   statusLogs OrderStatusLog[]
-  options    OrderOption[]
   transactions CashTransaction[]
 
   @@index([status])
@@ -421,17 +395,6 @@ model OrderStatusLog {
   driver Driver? @relation(fields: [driverId], references: [id])
 
   @@map("order_status_logs")
-}
-
-model OrderOption {
-  orderId  Int
-  optionId Int
-
-  order  Order         @relation(fields: [orderId], references: [id])
-  option VehicleOption @relation(fields: [optionId], references: [id])
-
-  @@id([orderId, optionId])
-  @@map("order_options")
 }
 
 // ─── FINANCIAL ────────────────────────────────────────────────────────────────

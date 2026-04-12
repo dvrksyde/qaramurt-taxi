@@ -106,12 +106,6 @@ export interface VehicleClassGroup {
   classes: VehicleClass[];
 }
 
-export interface VehicleOption {
-  id: number;
-  name: string;
-  description: string | null;
-  priceModifier: number;
-}
 
 export interface Tariff {
   id: number;
@@ -209,7 +203,6 @@ export interface NewOrderFormData {
   useBonuses: boolean;
   estimatedPrice: number | null;
   distributionMethod: DistributionMethod;
-  optionIds: number[];
   printReceipt: boolean;
   pricePerKm: string;
   distanceKm?: number;

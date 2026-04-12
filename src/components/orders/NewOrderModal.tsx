@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useCallback, useRef, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
-import type { NewOrderFormData, TaxiService, VehicleClass, VehicleClassGroup, Tariff, VehicleOption } from "@/types";
+import type { NewOrderFormData, TaxiService, VehicleClass, VehicleClassGroup, Tariff } from "@/types";
 import { haversineKm, estimateMinutes } from "@/lib/pricing";
 import { useSocket } from "@/stores/socketStore";
 import { useMonitorStore } from "@/stores/monitorStore";
@@ -23,7 +23,6 @@ export function NewOrderModal({ onClose }: Props) {
   const [services, setServices] = useState<TaxiService[]>([]);
   const [classGroups, setClassGroups] = useState<VehicleClassGroup[]>([]);
   const [tariffs, setTariffs] = useState<Tariff[]>([]);
-  const [options, setOptions] = useState<VehicleOption[]>([]);
   const [availability, setAvailability] = useState({ total: 1, online: 0, free: 0 });
   const [estimating, setEstimating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -53,7 +52,6 @@ export function NewOrderModal({ onClose }: Props) {
       classId: null,
       tariffId: null,
       cashlessAccountId: null,
-      optionIds: [],
       pricePerKm: "80",
     },
   });
@@ -80,11 +78,9 @@ export function NewOrderModal({ onClose }: Props) {
     Promise.all([
       fetch("/api/services").then((r) => r.json()),
       fetch("/api/vehicle-classes").then((r) => r.json()),
-      fetch("/api/vehicle-options").then((r) => r.json()),
-    ]).then(([svc, cls, opt]) => {
+    ]).then(([svc, cls]) => {
       if (svc.data) setServices(svc.data);
       if (cls.data) setClassGroups(cls.data);
-      if (opt.data) setOptions(opt.data);
     }).catch(console.error);
   }, []);
 

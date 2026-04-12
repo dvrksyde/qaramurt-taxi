@@ -72,20 +72,11 @@ export async function GET() {
       )
     );
 
-    // 5. Options
-    const options = await Promise.all([
-      prisma.vehicleOption.upsert({ where: { id: 1 }, update: {}, create: { name: "Детское кресло", priceModifier: 50 } }),
-      prisma.vehicleOption.upsert({ where: { id: 2 }, update: {}, create: { name: "Животные", priceModifier: 100 } }),
-      prisma.vehicleOption.upsert({ where: { id: 3 }, update: {}, create: { name: "Без запаха", priceModifier: 0 } }),
-      prisma.vehicleOption.upsert({ where: { id: 4 }, update: {}, create: { name: "Кондиционер", priceModifier: 0 } }),
-    ]);
-
     return NextResponse.json({
       message: "Базовые таблицы успешно восстановлены!",
       services: [service, deliveryService],
       classes,
-      tariffs,
-      options
+      tariffs
     });
 
   } catch (error: any) {
