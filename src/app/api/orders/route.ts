@@ -129,9 +129,6 @@ export async function POST(req: NextRequest) {
       pricePerKm: pricePerKm ? parseInt(pricePerKm) : 80,
       distanceKm: distanceKm ?? null,
       status: "pending",
-      options: optionIds?.length
-        ? { create: optionIds.map((id: number) => ({ optionId: id })) }
-        : undefined,
     },
     include: {
       driver: true,

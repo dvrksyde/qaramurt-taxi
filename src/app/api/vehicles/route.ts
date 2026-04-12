@@ -13,7 +13,6 @@ export async function GET(_req: NextRequest) {
     include: {
       driver: { select: { id: true, firstName: true, lastName: true } },
       classes: { include: { class: { include: { group: true } } } },
-      options: { include: { option: true } },
       services: { include: { service: true } },
     },
     orderBy: { id: "desc" },
@@ -27,7 +26,7 @@ export async function POST(req: NextRequest) {
   if (!allowed) return response!;
 
   const body = await req.json();
-  const { plate, make, model, color, year, ownershipType, driverId, classIds, optionIds, serviceIds } = body;
+  const { plate, make, model, color, year, ownershipType, driverId, classIds, serviceIds } = body;
 
   if (!plate || !make || !model) {
     return NextResponse.json({ error: "Гос. номер, марка и модель обязательны" }, { status: 400 });
@@ -44,9 +43,6 @@ export async function POST(req: NextRequest) {
       driverId: driverId ? parseInt(driverId) : null,
       classes: classIds?.length
         ? { create: classIds.map((cId: number) => ({ classId: cId })) }
-        : undefined,
-      options: optionIds?.length
-        ? { create: optionIds.map((oId: number) => ({ optionId: oId })) }
         : undefined,
       services: serviceIds?.length
         ? { create: serviceIds.map((sId: number) => ({ serviceId: sId })) }
