@@ -929,7 +929,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 90, left: 16, right: 16 },
+  orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 22, left: 16, right: 16 },
   homeSwipeContainer: { position: "absolute", bottom: Platform.OS === "ios" ? 100 : 22, left: 16, right: 16 },
   statusActions: { gap: 12, marginBottom: 16 },
   statusHint: { color: "#666", fontSize: 13, textAlign: "center", marginBottom: 4 },

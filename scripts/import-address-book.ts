@@ -35,10 +35,23 @@ async function main() {
     console.log("\nКак получить cookie:");
     console.log("1. Откройте https://qaramurttaxi.onrender.com и войдите как admin");
     console.log("2. DevTools (F12) → Application → Cookies → qaramurttaxi.onrender.com");
-    console.log("3. Скопируйте значение next-auth.session-token");
-    console.log("4. Запустите: $env:PROD_COOKIE='next-auth.session-token=ВАШЕ_ЗНАЧЕНИЕ'; npx ts-node ...");
+    console.log("3. Найдите __Secure-next-auth.session-token (или next-auth.session-token)");
+    console.log("4. Скопируйте ТОЛЬКО ЗНАЧЕНИЕ (не имя!)");
+    console.log('5. Запустите: $env:PROD_COOKIE="ЗНАЧЕНИЕ"; npx ts-node ...');
     process.exit(1);
   }
+
+  // On HTTPS, NextAuth uses __Secure- prefixed cookie
+  const isHttps = PROD_URL.startsWith("https://");
+  const cookieName = isHttps ? "__Secure-next-auth.session-token" : "next-auth.session-token";
+  
+  // If user passed just the token value (no "name=value"), wrap it
+  const cookieHeader = PROD_COOKIE.includes("=")
+    ? PROD_COOKIE  // already "name=value" format
+    : `${cookieName}=${PROD_COOKIE}`;  // just the token value
+
+  console.log(`🍪 Using cookie: ${cookieName}=...`);
+
 
   console.log("📦 Reading local address book...");
   const items = await prisma.addressBook.findMany({ orderBy: { id: "asc" } });
@@ -66,7 +79,7 @@ async function main() {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Cookie": PROD_COOKIE,
+      "Cookie": cookieHeader,
     },
     body: JSON.stringify(payload),
   });
