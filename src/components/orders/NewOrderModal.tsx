@@ -179,26 +179,13 @@ export function NewOrderModal({ onClose }: Props) {
 
   const handleMapClick = useCallback(async (lat: number, lng: number) => {
     try {
-      // 1. Check for nearby landmark first
-      let address = "";
-      try {
-        const landmarkRes = await fetch(`/api/address-book/nearest?lat=${lat}&lng=${lng}`);
-        const landmarkData = await landmarkRes.json();
-        if (landmarkData.data) {
-          address = landmarkData.data.name;
-        }
-      } catch (e) {
-        console.warn("Nearest landmark fetch failed", e);
-      }
-
-      // 2. If no landmark, use server-side geocoding proxy (Yandex key stays on server)
-      if (!address) {
-        const geoRes = await fetch(`/api/geocode?lat=${lat}&lng=${lng}`);
-        const geoData = await geoRes.json();
-        if (geoData.data?.address) {
-          address = geoData.data.address;
-        }
-      }
+      // Single call — server handles priority:
+      // 1. Nearest landmark (100m) → popular name
+      // 2. Yandex street → popular street name from address book + house number
+      // 3. Fallback: official address
+      const geoRes = await fetch(`/api/geocode?lat=${lat}&lng=${lng}`);
+      const geoData = await geoRes.json();
+      const address = geoData.data?.address;
 
       if (address) {
         if (activeField === 'pickup') {
