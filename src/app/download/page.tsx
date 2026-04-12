@@ -6,19 +6,13 @@ export const metadata: Metadata = {
 };
 
 // ⚠️ Update this URL after each new APK build
-const APK_URL = process.env.APK_DOWNLOAD_URL || "#";
+const APK_URL = process.env.APK_DOWNLOAD_URL || "https://drive.google.com/uc?export=download&id=12Tw_t5534bMf1Diz00oMUAGznsGA_cYS";
 const APP_VERSION = process.env.APK_VERSION || "1.0.0";
 
 export default function DownloadPage() {
   return (
-    <html lang="ru">
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet" />
-      </head>
-      <body style={{ margin: 0, fontFamily: "Inter, sans-serif", background: "#0f0f0f", color: "#fff", minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ textAlign: "center", padding: "40px 24px", maxWidth: 480, width: "100%" }}>
+    <div style={{ margin: 0, fontFamily: "Inter, sans-serif", background: "#0f0f0f", color: "#fff", minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ textAlign: "center", padding: "40px 24px", maxWidth: 480, width: "100%" }}>
 
           {/* Logo */}
           <div style={{ marginBottom: 24 }}>
@@ -93,7 +87,6 @@ export default function DownloadPage() {
             © {new Date().getFullYear()} Qaramurt Taxi. v{APP_VERSION}
           </p>
         </div>
-      </body>
-    </html>
+    </div>
   );
 }
