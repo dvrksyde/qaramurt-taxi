@@ -14,7 +14,6 @@ interface Props { onClose: () => void; }
 const DISTRIBUTION_METHODS = [
   { value: "automatic",  label: "автоматически" },
   { value: "broadcast",  label: "показать всем водителям сразу" },
-  { value: "sequential", label: "показать всем водителям по очереди" },
   { value: "map_pick",   label: "выбрать водителя по карте" },
   { value: "list_pick",  label: "выбрать водителя по списку" },
 ] as const;

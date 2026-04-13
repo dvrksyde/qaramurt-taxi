@@ -2,7 +2,7 @@
 
 export type DriverStatus = "free" | "busy" | "offline";
 export type OrderStatus = "pending" | "assigned" | "arrived" | "in_progress" | "completed" | "canceled";
-export type DistributionMethod = "automatic" | "broadcast" | "sequential" | "map_pick" | "list_pick";
+export type DistributionMethod = "automatic" | "broadcast" | "map_pick" | "list_pick";
 export type CallType = "inbound" | "outbound";
 export type CallStatus = "answered" | "missed" | "busy" | "failed";
 export type TransactionType = "payout" | "deposit" | "penalty" | "bonus";
