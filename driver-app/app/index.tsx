@@ -266,20 +266,52 @@ export default function MainScreen() {
     loadDashboard();
   }, [loadDashboard]);
 
+  // Ref to track the offline-on-background timeout
+  const bgOfflineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") {
+    const subscription = AppState.addEventListener("change", (appState) => {
+      if (appState === "active") {
+        // App came back to foreground — cancel any pending offline transition
+        if (bgOfflineTimerRef.current) {
+          clearTimeout(bgOfflineTimerRef.current);
+          bgOfflineTimerRef.current = null;
+        }
         loadDashboard();
+      } else if (appState === "background" || appState === "inactive") {
+        // App went to background or is being closed
+        // Wait 60 seconds — if app doesn't come back, go offline
+        if (bgOfflineTimerRef.current) return; // already scheduled
+        bgOfflineTimerRef.current = setTimeout(async () => {
+          bgOfflineTimerRef.current = null;
+          const storeState = useDriverStore.getState();
+          if (!storeState.isOnline) return; // already offline
+          try {
+            await api("/api/driver/status", {
+              method: "PATCH",
+              body: JSON.stringify({ status: "offline" }),
+            });
+            useDriverStore.getState().setOnline(false);
+          } catch {
+            // ignore — server will clear stale connections via heartbeat
+          }
+        }, 60_000); // 60 seconds
       }
     });
 
     const interval = setInterval(() => {
-      loadDashboard();
+      // Only refresh if app is active
+      if (AppState.currentState === "active") {
+        loadDashboard();
+      }
     }, 15000);
 
     return () => {
       subscription.remove();
       clearInterval(interval);
+      if (bgOfflineTimerRef.current) {
+        clearTimeout(bgOfflineTimerRef.current);
+      }
     };
   }, [loadDashboard]);
 

@@ -11,86 +11,125 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const COMMISSION_PER_ORDER = 5;
-    
-    // Parse query parameters
     const { searchParams } = new URL(req.url);
     const startDateParam = searchParams.get("startDate");
     const endDateParam = searchParams.get("endDate");
 
+    const now = new Date();
     let startDate: Date;
     let endDate: Date;
 
-    const now = new Date();
-    
     if (startDateParam && endDateParam) {
       startDate = new Date(startDateParam);
       endDate = new Date(endDateParam);
-      // Make endDate inclusive of the entire day
       endDate.setHours(23, 59, 59, 999);
     } else {
-      // Default to today
       startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
     }
 
-    // Fetch all completed orders in range to get prices
+    const dateFilter = { gte: startDate, lte: endDate };
+
+    // 1. Completed orders in range — gross revenue
     const orders = await prisma.order.findMany({
-      where: {
-        status: "completed",
-        completedAt: {
-          gte: startDate,
-          lte: endDate,
-        },
-      },
+      where: { status: "completed", completedAt: dateFilter },
       select: {
+        id: true,
         finalPrice: true,
-        estimatedPrice: true
+        estimatedPrice: true,
+        driver: { select: { id: true, firstName: true, lastName: true, callsign: true, tariffGroup: true } }
       }
     });
 
-    const COMPANY_COMMISSION_PERCENT = 10;
     const ordersCount = orders.length;
-
     let grossRevenue = 0;
-    orders.forEach(o => {
-      const price = Number(o.finalPrice || o.estimatedPrice || 0);
-      grossRevenue += price;
-    });
+    orders.forEach(o => { grossRevenue += Number(o.finalPrice || o.estimatedPrice || 0); });
 
-    const companyCommission = grossRevenue * (COMPANY_COMMISSION_PERCENT / 100);
-    const siteCommission = ordersCount * COMMISSION_PER_ORDER;
-
-    // Fetch operator settlements in range
-    const settlements = await prisma.operatorSettlement.findMany({
+    // 2. Real commissions from drivers — from cash_transactions (order_fee type)
+    const commissionTransactions = await prisma.cashTransaction.findMany({
       where: {
-        createdAt: {
-          gte: startDate,
-          lte: endDate,
-        },
+        type: "order_fee",
+        createdAt: dateFilter,
       },
-      select: {
-        amount: true,
+      include: {
+        driver: { select: { id: true, firstName: true, lastName: true, callsign: true, tariffGroup: true } }
       }
     });
 
-    const totalSettlements = settlements.reduce((sum: number, s: any) => sum + Number(s.amount), 0);
-    const netCompanyProfit = companyCommission - siteCommission - totalSettlements;
+    const totalRealCommission = commissionTransactions.reduce(
+      (sum, t) => sum + Number(t.amount), 0
+    );
+
+    // 3. Per-driver breakdown
+    const driverMap = new Map<number, {
+      id: number; name: string; callsign: string | null;
+      ordersCount: number; revenue: number; commission: number; tariffPercent: number;
+    }>();
+
+    orders.forEach(o => {
+      if (!o.driver) return;
+      const existing = driverMap.get(o.driver.id);
+      const price = Number(o.finalPrice || o.estimatedPrice || 0);
+      if (existing) {
+        existing.ordersCount++;
+        existing.revenue += price;
+      } else {
+        driverMap.set(o.driver.id, {
+          id: o.driver.id,
+          name: `${o.driver.lastName} ${o.driver.firstName}`,
+          callsign: o.driver.callsign,
+          ordersCount: 1,
+          revenue: price,
+          commission: 0,
+          tariffPercent: Number((o.driver as any).tariffGroup?.value || 0),
+        });
+      }
+    });
+
+    commissionTransactions.forEach(t => {
+      if (!t.driver) return;
+      const entry = driverMap.get(t.driver.id);
+      if (entry) {
+        entry.commission += Number(t.amount);
+        entry.tariffPercent = Number((t.driver as any).tariffGroup?.value || entry.tariffPercent);
+      }
+    });
+
+    // 4. Operator settlements
+    const settlements = await prisma.operatorSettlement.findMany({
+      where: { createdAt: dateFilter },
+      select: { amount: true }
+    });
+    const totalSettlements = settlements.reduce((sum, s) => sum + Number(s.amount), 0);
+
+    // 5. Penalties from drivers
+    const penalties = await prisma.cashTransaction.findMany({
+      where: { type: "penalty", createdAt: dateFilter },
+      select: { amount: true }
+    });
+    const totalPenalties = penalties.reduce((sum, t) => sum + Number(t.amount), 0);
+
+    const netCompanyProfit = totalRealCommission + totalPenalties - totalSettlements;
 
     return NextResponse.json({
       data: {
         summary: {
           totalOrders: ordersCount,
-          grossRevenue: grossRevenue,
-          companyCommission: Math.round(companyCommission),
-          siteCommission: siteCommission,
+          grossRevenue: Math.round(grossRevenue),
+          // Real commissions collected from drivers
+          companyCommission: Math.round(totalRealCommission),
+          totalPenalties: Math.round(totalPenalties),
           totalSettlements: Math.round(totalSettlements),
           netCompanyProfit: Math.round(netCompanyProfit),
-          siteRate: COMMISSION_PER_ORDER,
-          companyRatePercent: COMPANY_COMMISSION_PERCENT,
           startDate: startDate.toISOString(),
-          endDate: endDate.toISOString()
-        }
+          endDate: endDate.toISOString(),
+        },
+        // Per-driver breakdown with individual tariff rates
+        drivers: Array.from(driverMap.values()).map(d => ({
+          ...d,
+          revenue: Math.round(d.revenue),
+          commission: Math.round(d.commission),
+        })).sort((a, b) => b.revenue - a.revenue),
       },
     });
   } catch (err) {
@@ -98,3 +137,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Failed to load reports" }, { status: 500 });
   }
 }
+
