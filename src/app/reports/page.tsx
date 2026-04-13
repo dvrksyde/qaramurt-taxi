@@ -148,7 +148,7 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="page-content" style={{ padding: 24, backgroundColor: "#f5f6fa", minHeight: "100vh", paddingBottom: 100 }}>
+    <div className="page-content" style={{ padding: 24, minHeight: "100vh", paddingBottom: 100 }}>
       <div style={{ marginBottom: 32, display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
         <div>
           <h1 style={{ margin: 0, color: "#2d3436", fontSize: 28, fontWeight: 700 }}>Финансовая статистика</h1>

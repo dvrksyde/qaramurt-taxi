@@ -12,7 +12,7 @@ const TABS: { key: Tab; label: string; countKey?: keyof ReturnType<typeof useMon
   { key: "system", label: "Системное", countKey: "system" },
 ];
 
-const VALID_TABS = ["current", "scheduled", "exchange", "map", "chat", "system", "alarms", "leaderboard"];
+const VALID_TABS = ["current", "map", "chat", "leaderboard", "system"];
 
 export function MonitorTabs() {
   const { activeTab, setActiveTab, counts } = useMonitorStore();
