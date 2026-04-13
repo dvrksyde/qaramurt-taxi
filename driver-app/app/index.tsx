@@ -18,6 +18,7 @@ import { api, clearToken } from "../services/api";
 import { connectSocket, disconnectSocket, getSocket } from "../services/socket";
 import { useDriverStore } from "../stores/driverStore";
 import * as Location from "expo-location";
+import * as TaskManager from "expo-task-manager";
 import { registerForPushNotifications, showOrderNotification } from "../services/notifications";
 import { DriverHistoryPanel } from "../components/DriverHistoryPanel";
 import { DriverChatPanel } from "../components/DriverChatPanel";
@@ -55,6 +56,43 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+const LOCATION_TASK_NAME = "background-location-task";
+
+TaskManager.defineTask(LOCATION_TASK_NAME, ({ data, error }) => {
+  if (error) {
+    console.error("BG Task Error:", error);
+    return;
+  }
+  if (data) {
+    const { locations } = data as { locations: Location.LocationObject[] };
+    const loc = locations[0];
+    if (!loc) return;
+
+    const { latitude: lat, longitude: lng } = loc.coords;
+    const speed = loc.coords.speed;
+    const isMoving = speed !== null ? speed > 1.0 : true;
+
+    const state = useDriverStore.getState();
+
+    if (state.activeOrder?.status === "in_progress" && state.lastLocation && !state.activeOrder.isFixedPrice) {
+      const d = haversine(state.lastLocation.lat, state.lastLocation.lng, lat, lng);
+      if (d > 0.02 && isMoving) {
+        const newDist = state.tripDistance + d;
+        const newPrice = roundTo5(BASE_FARE + newDist * Number(state.activeOrder.pricePerKm));
+        state.setTripMeter(newDist, newPrice);
+      }
+    }
+
+    state.setLastLocation({ lat, lng });
+
+    // Try posting to API natively in background
+    api("/api/driver/location", {
+      method: "POST",
+      body: JSON.stringify({ lat, lng }),
+    }).catch(() => {});
+  }
+});
+
 export default function MainScreen() {
   const router = useRouter();
   const {
@@ -80,9 +118,14 @@ export default function MainScreen() {
   const [currentCoords, setCurrentCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [refreshingGPS, setRefreshingGPS] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const locationSubRef = useRef<Location.LocationSubscription | null>(null);
-  const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
   const tripDistanceRef = useRef(0);
+
+  const lastLocationState = useDriverStore((s) => s.lastLocation);
+  useEffect(() => {
+    if (lastLocationState) {
+      setCurrentCoords({ latitude: lastLocationState.lat, longitude: lastLocationState.lng });
+    }
+  }, [lastLocationState]);
   const realtimeDriverRef = useRef<number | null>(null);
 
   const refreshCurrentPosition = useCallback(async () => {
@@ -100,7 +143,7 @@ export default function MainScreen() {
         longitude: loc.coords.longitude,
       };
       setCurrentCoords(nextCoords);
-      lastLocationRef.current = { lat: nextCoords.latitude, lng: nextCoords.longitude };
+      useDriverStore.getState().setLastLocation({ lat: nextCoords.latitude, lng: nextCoords.longitude });
 
       // Update server immediately
       api("/api/driver/location", {
@@ -115,57 +158,41 @@ export default function MainScreen() {
   }, []);
 
   const startLocationTracking = useCallback(async (driverId: number) => {
-    if (locationSubRef.current) return;
-
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== "granted") {
+    const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
+    
+    if (fgStatus !== "granted") {
       Alert.alert("GPS", "Нужен доступ к GPS для работы на линии");
       return;
     }
 
     await refreshCurrentPosition();
-    await Location.requestBackgroundPermissionsAsync();
+    const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
 
-    locationSubRef.current = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.High, // Снижаем точность на одну ступень для экономии батареи (High достаточно)
-        distanceInterval: 15, // Обновлять только если авто проехал 15 метров (не срабатывает в пробке просто так)
-        timeInterval: 5000, // И не чаще чем раз в 5 секунд (было 2 сек)
-      },
-      (loc) => {
-        const { latitude: lat, longitude: lng } = loc.coords;
-        const state = useDriverStore.getState();
-
-        // Only recalculate price for non-fixed-price orders (taxi, not delivery)
-        if (state.activeOrder?.status === "in_progress" && lastLocationRef.current && !state.activeOrder.isFixedPrice) {
-          const d = haversine(lastLocationRef.current.lat, lastLocationRef.current.lng, lat, lng);
-          const speed = loc.coords.speed; // speed in m/s
-          const isMoving = speed !== null ? speed > 1.0 : true; // > 3.6 km/h
-
-          // Ignore GPS drift — only count movement > 20 meters and actual speed
-          if (d > 0.02 && isMoving) {
-            tripDistanceRef.current += d;
-            const price = roundTo5(BASE_FARE + tripDistanceRef.current * Number(state.activeOrder.pricePerKm));
-            useDriverStore.getState().setTripMeter(tripDistanceRef.current, price);
-          }
-        }
-
-        lastLocationRef.current = { lat, lng };
-        setCurrentCoords({ latitude: lat, longitude: lng });
-
-        api("/api/driver/location", {
-          method: "POST",
-          body: JSON.stringify({ lat, lng }),
-        });
-      },
-    );
-  }, [refreshCurrentPosition, setTripMeter]);
-
-  const stopLocationTracking = useCallback(() => {
-    if (locationSubRef.current) {
-      locationSubRef.current.remove();
-      locationSubRef.current = null;
+    if (bgStatus !== "granted") {
+      Alert.alert("Фоновый GPS", "Приложение может перестать считать дистанцию при выключенном экране. Разрешите доступ 'Всегда' в настройках.");
     }
+
+    await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+      accuracy: Location.Accuracy.High,
+      distanceInterval: 15,
+      timeInterval: 5000,
+      foregroundService: {
+        notificationTitle: "Таксометр работает",
+        notificationBody: "Дистанция заказа рассчитывается. Не закрывайте приложение.",
+        notificationColor: "#FFD000",
+      },
+      showsBackgroundLocationIndicator: true,
+      pausesUpdatesAutomatically: false,
+    });
+  }, [refreshCurrentPosition]);
+
+  const stopLocationTracking = useCallback(async () => {
+    try {
+      const hasTask = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+      if (hasTask) {
+        await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+      }
+    } catch {}
   }, []);
 
   const logout = useCallback(async () => {
@@ -246,11 +273,17 @@ export default function MainScreen() {
     }
 
     const nextProfile = profileRes.data;
-    const nextOrder = mapOrderToState(orderRes.data);
+    
+    // Игнорируем ошибки сети при получении заказа, чтобы не сбрасывать стейт
+    let nextOrder = useDriverStore.getState().activeOrder;
+    if (!orderRes.error) {
+      nextOrder = mapOrderToState(orderRes.data);
+      setActiveOrder(nextOrder);
+    }
+
     const shouldStayConnected = nextProfile.status !== "offline" || !!nextOrder;
 
     setProfile(nextProfile);
-    setActiveOrder(nextOrder);
     setOnline(shouldStayConnected);
 
     if (shouldStayConnected) {
@@ -405,9 +438,9 @@ export default function MainScreen() {
         : roundTo5(BASE_FARE + finalDist * activeOrder.pricePerKm);
       body.distanceKm = finalDist;
       body.finalPrice = finalPrice;
-      if (lastLocationRef.current) {
-        body.lat = lastLocationRef.current.lat;
-        body.lng = lastLocationRef.current.lng;
+      if (lastLocationState) {
+        body.lat = lastLocationState.lat;
+        body.lng = lastLocationState.lng;
       }
     }
 

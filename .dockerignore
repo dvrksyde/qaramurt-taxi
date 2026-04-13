@@ -1,45 +1,18 @@
-# ── Зависимости (устанавливаются внутри контейнера) ───────────────────────────
 node_modules
-driver-app/node_modules
-
-# ── Секреты (НИКОГДА не должны попадать в образ) ─────────────────────────────
-.env
-.env.*
-!.env.production.example
-
-# ── Build артефакты ───────────────────────────────────────────────────────────
+npm-debug.log
 .next
-out
-build
-
-# ── Git ───────────────────────────────────────────────────────────────────────
 .git
-.gitignore
-
-# ── Логи ─────────────────────────────────────────────────────────────────────
-*.log
-dev.out.log
+.idea
+.planning
+.env
 dev.err.log
-seed_error.txt
-
-# ── Тестовые / отладочные файлы ───────────────────────────────────────────────
+dev.out.log
 deleteScript.js
 test_driver_post.js
-*.test.ts
-*.spec.ts
-
-# ── Dev-конфиги ──────────────────────────────────────────────────────────────
-.planning
-.idea
-.vscode
-
-# ── TypeScript исходники (уже скомпилированы в builder stage) ────────────────
-# server.ts и driverAuth.ts компилируются в builder; в runner нужны только .js
-tsconfig.server.json
-
-# ── Expo / мобильное приложение (не нужно в Docker) ──────────────────────────
-driver-app
-
-# ── OS файлы ─────────────────────────────────────────────────────────────────
-.DS_Store
-Thumbs.db
+seed_error.txt
+import_error.txt
+server.js
+out.txt
+tmp/
+coverage/
+*.md

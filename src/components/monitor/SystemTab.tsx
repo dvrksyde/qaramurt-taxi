@@ -3,8 +3,7 @@
 export function SystemTab() {
   return (
     <div className="empty-state" style={{ height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
-      <div className="empty-state-icon" style={{ fontSize: 48, marginBottom: 16 }}>🚧</div>
-      <div style={{ fontSize: 24, fontWeight: "bold", color: "var(--color-primary)" }}>Coming Soon...</div>
+      <div style={{ fontFamily: "-apple-system", fontSize: 20, fontWeight: "bold", color: "#c20000ff" }}>⌛ Coming Soon...</div>
     </div>
   );
 }

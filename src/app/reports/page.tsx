@@ -32,7 +32,14 @@ export default function ReportsPage() {
   const router = useRouter();
 
   // Date states. Default to today's date formatted as YYYY-MM-DD
-  const todayStr = new Date().toISOString().split("T")[0];
+  const toLocalISOString = (d: Date) => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const todayStr = toLocalISOString(new Date());
   const [startDate, setStartDate] = useState<string>(todayStr);
   const [endDate, setEndDate] = useState<string>(todayStr);
   const [activePreset, setActivePreset] = useState<string | null>("today");
@@ -47,7 +54,7 @@ export default function ReportsPage() {
     let start: Date;
     let end: Date;
 
-    const f = (d: Date) => d.toISOString().split("T")[0];
+    const f = (d: Date) => toLocalISOString(d);
 
     switch (preset) {
       case "today":
