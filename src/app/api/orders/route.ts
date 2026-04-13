@@ -148,15 +148,54 @@ export async function POST(req: NextRequest) {
     io.to("monitor").emit("new_order", order);
     io.to("monitor").emit("order_updated", { orderId: order.id, method: distributionMethod });
 
-    // Broadcast to ALL online drivers — first-come-first-served
-    io.to("drivers").emit("new_order_alert", {
+    const alertData = {
       orderId: order.id,
       phone: order.phone,
       pickupAddress: order.pickupAddress,
       classId: order.classId,
       pricePerKm: order.pricePerKm,
       createdAt: order.createdAt,
-    });
+      method: distributionMethod
+    };
+
+    if (distributionMethod === "automatic" && order.pickupPoint) {
+      // Find drivers in 5km radius
+      try {
+        const parseWkt = (wkt: string) => {
+          const m = wkt.match(/POINT\(([-\d.]+)\s+([-\d.]+)\)/i);
+          return m ? { lng: Number(m[1]), lat: Number(m[2]) } : null;
+        };
+
+        const pickup = parseWkt(order.pickupPoint);
+        const freeDrivers = await prisma.driver.findMany({
+          where: { status: "free", currentLocation: { not: null } },
+          select: { id: true, currentLocation: true }
+        });
+
+        const RADIUS_KM = 5.0; // 5 kilometers radius
+        const nearbyDrivers = freeDrivers.filter((d) => {
+          const loc = parseWkt(d.currentLocation!);
+          if (!pickup || !loc) return false;
+          const dist = haversineKm(pickup.lat, pickup.lng, loc.lat, loc.lng);
+          return dist <= RADIUS_KM;
+        });
+
+        if (nearbyDrivers.length > 0) {
+          nearbyDrivers.forEach(d => {
+            io.to(`driver:${d.id}`).emit("new_order_alert", alertData);
+          });
+        } else {
+          // Fallback: if no one in 5km, just broadcast to everyone so order isn't lost
+          io.to("drivers").emit("new_order_alert", alertData);
+        }
+      } catch (e) {
+        // Fallback on error
+        io.to("drivers").emit("new_order_alert", alertData);
+      }
+    } else if (distributionMethod !== "map_pick" && distributionMethod !== "list_pick") {
+      // Broadcast to ALL online drivers for 'broadcast', 'sequential', or if automatic without pickup point
+      io.to("drivers").emit("new_order_alert", alertData);
+    }
   }
 
   return NextResponse.json({ data: order }, { status: 201 });
