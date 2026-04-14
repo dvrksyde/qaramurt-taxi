@@ -48,7 +48,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Разрешите доступ к GPS для работы на линии"
+          "locationAlwaysAndWhenInUsePermission": "Разрешите доступ к GPS для работы на линии",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       "expo-notifications"

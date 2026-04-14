@@ -7,6 +7,8 @@ interface DriverProfile {
   middleName?: string | null;
   callsign: string | null;
   phone: string;
+  login?: string;
+  tariffGroup?: { name: string; value: number } | null;
   balance: number;
   rating: number;
   ordersCount?: number;

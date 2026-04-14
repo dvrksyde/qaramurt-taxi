@@ -58,7 +58,7 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
 
 const LOCATION_TASK_NAME = "background-location-task";
 
-TaskManager.defineTask(LOCATION_TASK_NAME, ({ data, error }) => {
+TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
   if (error) {
     console.error("BG Task Error:", error);
     return;
