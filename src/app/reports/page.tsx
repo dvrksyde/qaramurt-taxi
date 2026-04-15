@@ -105,7 +105,7 @@ export default function ReportsPage() {
   const fetchReport = useCallback((silent = false) => {
     if (status === "loading" || !session || (session.user as any)?.role !== "admin") return;
     if (!silent) setLoading(true);
-    fetch(`/api/reports?startDate=${startDate}&endDate=${endDate}`)
+    fetch(`/api/reports?startDate=${startDate}T00:00:00&endDate=${endDate}T23:59:59`)
       .then(async (r) => {
         const res = await r.json();
         if (!r.ok) throw new Error(res.error || "Failed to load");

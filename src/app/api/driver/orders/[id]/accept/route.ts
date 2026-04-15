@@ -41,31 +41,34 @@ export async function POST(
   const { id } = await params;
   const orderId = parseInt(id);
 
-  // Atomic: only assign if status is still "pending"
-  // This ensures first-come-first-served — only one driver can grab it
-  const result = await prisma.order.updateMany({
-    where: { id: orderId, status: "pending" },
-    data: {
-      driverId: auth.driverId,
-      status: "assigned",
-      assignedAt: new Date(),
-    },
+  // Atomic: accept order AND set driver to busy in one transaction
+  const result = await prisma.$transaction(async (tx) => {
+    const updated = await tx.order.updateMany({
+      where: { id: orderId, status: "pending" },
+      data: {
+        driverId: auth.driverId,
+        status: "assigned",
+        assignedAt: new Date(),
+      },
+    });
+
+    if (updated.count === 0) return null;
+
+    await tx.driver.update({
+      where: { id: auth.driverId },
+      data: { status: "busy" },
+    });
+
+    await tx.orderStatusLog.create({
+      data: { orderId, driverId: auth.driverId, status: "assigned" },
+    });
+
+    return updated;
   });
 
-  if (result.count === 0) {
+  if (!result) {
     return NextResponse.json({ error: "Заказ уже занят" }, { status: 409 });
   }
-
-  // Update driver status to busy
-  await prisma.driver.update({
-    where: { id: auth.driverId },
-    data: { status: "busy" },
-  });
-
-  // Log status change
-  await prisma.orderStatusLog.create({
-    data: { orderId, driverId: auth.driverId, status: "assigned" },
-  });
 
   // Get full order for response
   const order = await prisma.order.findUnique({

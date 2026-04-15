@@ -60,7 +60,8 @@ export async function PATCH(
       data: updateData,
     });
 
-    const operatorId = 1;
+    // Берём operatorId из заказа, а не хардкодим ID=1
+    const operatorId = updatedOrder.operatorId ?? 1;
 
     if (status === "completed" && updatedOrder.finalPrice) {
       const dTG = await tx.driver.findUnique({

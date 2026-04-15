@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
     if (fromDate) (where.timestamp as Record<string, unknown>).gte = new Date(fromDate);
     if (toDate)   (where.timestamp as Record<string, unknown>).lte = new Date(toDate);
   }
-  if (phone)      where.OR = [{ phoneFrom: { contains: phone } }, { phoneTo: { contains: phone } }];
+  if (phone)      where.AND = [{ OR: [{ phoneFrom: { contains: phone } }, { phoneTo: { contains: phone } }] }];
   if (callType)   where.callType   = callType;
   if (status)     where.status     = status;
   if (operatorId) where.operatorId = parseInt(operatorId);

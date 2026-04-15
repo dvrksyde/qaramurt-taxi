@@ -41,9 +41,11 @@ export async function GET(req: NextRequest) {
   if (operatorIdParam && canSeeAll) where.operatorId = parseInt(operatorIdParam);
   if (phone) where.phone = { contains: phone };
   if (address) {
-    where.OR = [
-      { pickupAddress:  { contains: address, mode: "insensitive" } },
-      { dropoffAddress: { contains: address, mode: "insensitive" } },
+    where.AND = [
+      { OR: [
+        { pickupAddress:  { contains: address, mode: "insensitive" } },
+        { dropoffAddress: { contains: address, mode: "insensitive" } },
+      ]},
     ];
   }
   if (dateFrom || dateTo) {

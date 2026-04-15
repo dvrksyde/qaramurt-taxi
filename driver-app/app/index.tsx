@@ -158,8 +158,11 @@ export default function MainScreen() {
   }, []);
 
   const startLocationTracking = useCallback(async (driverId: number) => {
+    // Если таск уже запущен — не перезапускаем! Иначе сбросится lastLocation
+    const alreadyRunning = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+    if (alreadyRunning) return;
+
     const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
-    
     if (fgStatus !== "granted") {
       Alert.alert("GPS", "Нужен доступ к GPS для работы на линии");
       return;
@@ -169,7 +172,7 @@ export default function MainScreen() {
     const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
 
     if (bgStatus !== "granted") {
-      Alert.alert("Фоновый GPS", "Приложение может перестать считать дистанцию при выключенном экране. Разрешите доступ 'Всегда' в настройках.");
+      Alert.alert("Фоновый GPS", "Разрешите доступ 'Всегда' в настройках для точного подсчёта пути.");
     }
 
     await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
@@ -287,7 +290,12 @@ export default function MainScreen() {
     setOnline(shouldStayConnected);
 
     if (shouldStayConnected) {
-      startSocketAndGPS(nextProfile.id);
+      // Не переподключаем сокеты/GPS если идёт активная поездка — это сбросит lastLocation
+      const currentState = useDriverStore.getState();
+      const isInTrip = currentState.activeOrder?.status === "in_progress";
+      if (!isInTrip) {
+        startSocketAndGPS(nextProfile.id);
+      }
     } else {
       stopLocationTracking();
       disconnectSocket();
@@ -426,13 +434,17 @@ export default function MainScreen() {
 
     if (status === "in_progress") {
       startTrip();
+      // Обнуляем оба счётчика синхронно
       tripDistanceRef.current = 0;
+      useDriverStore.getState().setTripMeter(0, activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : BASE_FARE);
       setTripMeter(0, activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : BASE_FARE);
     }
 
     if (status === "completed") {
-      const finalDist = Math.round(tripDistanceRef.current * 10) / 10;
-      // For fixed-price (delivery) orders, use the pre-calculated estimated price
+      // Берем дистанцию из Zustand — туда пишет фоновый таск (даже с выключенным экраном)
+      const finalDistFromStore = useDriverStore.getState().tripDistance;
+      // Берем максимум из двух источников — на случай если телефон был все время открыт
+      const finalDist = Math.round(Math.max(finalDistFromStore, tripDistanceRef.current) * 10) / 10;
       const finalPrice = activeOrder.isFixedPrice
         ? activeOrder.estimatedPrice!
         : roundTo5(BASE_FARE + finalDist * activeOrder.pricePerKm);
