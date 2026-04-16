@@ -10,7 +10,8 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
-
+.gitignore
+bsD7OLDF1k5ymMFX
 # testing
 /coverage
 /.idea

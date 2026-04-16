@@ -111,7 +111,11 @@ export function DriverChatPanel() {
   );
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView 
+      style={styles.container} 
+      behavior={Platform.OS === "ios" ? "padding" : "padding"} 
+      keyboardVerticalOffset={Platform.OS === "ios" ? 80 : 70}
+    >
       <Text style={styles.title}>Чат с диспетчером</Text>
 
       <FlatList

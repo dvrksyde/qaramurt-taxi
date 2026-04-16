@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrderReadAccess, requireOrderWriteAccess } from "@/lib/operatorAccess";
 
+
 type Params = { params: Promise<{ id: string }> };
 
 // GET /api/orders/[id]
@@ -18,7 +19,6 @@ export async function GET(_req: NextRequest, { params }: Params) {
       class: true,
       operator: true,
       statusLogs: { orderBy: { createdAt: "asc" } },
-      options: { include: { option: true } },
     },
   });
 

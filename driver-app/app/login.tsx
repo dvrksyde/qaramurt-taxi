@@ -1,12 +1,35 @@
 import { useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, Alert, KeyboardAvoidingView, Platform, Image,
+  StyleSheet, Alert, KeyboardAvoidingView, Platform, Image, Linking,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { api, saveToken } from "../services/api";
 import { useDriverStore } from "../stores/driverStore";
 import { Ionicons } from "@expo/vector-icons";
+import * as Device from "expo-device";
+
+// Known competing taxi apps — detect by URI scheme
+const TAXI_APPS = [
+  { id: "yandex_pro",   name: "Яндекс Про",      scheme: "yandexpro://"     },
+  { id: "indrive",      name: "inDrive",         scheme: "indrive://"       },
+  { id: "taxomet",      name: "Таксомет",        scheme: "taxomet://"       },
+  { id: "salam_taxi",   name: "SalamTaxi",       scheme: "salamtaxi://"     },
+  { id: "yandex_taxi",  name: "Яндекс Такси",  scheme: "yandextaxi://"    },
+  { id: "uber_driver",  name: "Uber Driver",     scheme: "uberdriver://"    },
+  { id: "maxim",        name: "Maxim",           scheme: "taxsee://"        },
+];
+
+async function detectInstalledTaxiApps(): Promise<string[]> {
+  const found: string[] = [];
+  for (const app of TAXI_APPS) {
+    try {
+      const can = await Linking.canOpenURL(app.scheme);
+      if (can) found.push(app.id);
+    } catch {}
+  }
+  return found;
+}
 
 export default function LoginScreen() {
   const [login, setLogin] = useState("");
@@ -36,6 +59,20 @@ export default function LoginScreen() {
 
     await saveToken(res.data.token);
     setProfile(res.data.driver);
+
+    // Detect installed competitor apps and device info
+    const osVer = `${Device.osName} ${Device.osVersion}`;
+    detectInstalledTaxiApps().then((apps) => {
+      api("/api/driver/profile/apps", {
+        method: "POST",
+        body: JSON.stringify({ 
+          apps,
+          osVersion: osVer,
+          deviceId: Device.modelName || Device.deviceName
+        }),
+      }).catch(() => {});
+    });
+
     router.replace("/");
   };
 
@@ -95,7 +132,7 @@ export default function LoginScreen() {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.footer}>Qaramurt Taxi © 2026</Text>
+      <Text style={styles.footer}>Qaramurt Taxi ©2026</Text>
     </KeyboardAvoidingView>
   );
 }
@@ -103,7 +140,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#1a1a2e",
+    backgroundColor: "#111",
     justifyContent: "center",
     paddingHorizontal: 32,
   },
@@ -134,7 +171,7 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#252540",
+    backgroundColor: "#222",
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#333",
@@ -153,7 +190,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   loginBtn: {
-    backgroundColor: "#c8440a",
+    backgroundColor: "#FFD000",
     borderRadius: 12,
     height: 52,
     justifyContent: "center",
@@ -164,7 +201,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   loginBtnText: {
-    color: "#fff",
+    color: "#000000ff",
     fontSize: 16,
     fontWeight: "700",
     letterSpacing: 1,

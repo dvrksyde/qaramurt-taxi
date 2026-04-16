@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useCallback, useRef, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
-import type { NewOrderFormData, TaxiService, VehicleClass, VehicleClassGroup, Tariff, VehicleOption } from "@/types";
+import type { NewOrderFormData, TaxiService, VehicleClass, VehicleClassGroup, Tariff } from "@/types";
 import { haversineKm, estimateMinutes } from "@/lib/pricing";
 import { useSocket } from "@/stores/socketStore";
 import { useMonitorStore } from "@/stores/monitorStore";
@@ -14,7 +14,6 @@ interface Props { onClose: () => void; }
 const DISTRIBUTION_METHODS = [
   { value: "automatic",  label: "автоматически" },
   { value: "broadcast",  label: "показать всем водителям сразу" },
-  { value: "sequential", label: "показать всем водителям по очереди" },
   { value: "map_pick",   label: "выбрать водителя по карте" },
   { value: "list_pick",  label: "выбрать водителя по списку" },
 ] as const;
@@ -23,7 +22,6 @@ export function NewOrderModal({ onClose }: Props) {
   const [services, setServices] = useState<TaxiService[]>([]);
   const [classGroups, setClassGroups] = useState<VehicleClassGroup[]>([]);
   const [tariffs, setTariffs] = useState<Tariff[]>([]);
-  const [options, setOptions] = useState<VehicleOption[]>([]);
   const [availability, setAvailability] = useState({ total: 1, online: 0, free: 0 });
   const [estimating, setEstimating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -53,7 +51,6 @@ export function NewOrderModal({ onClose }: Props) {
       classId: null,
       tariffId: null,
       cashlessAccountId: null,
-      optionIds: [],
       pricePerKm: "80",
     },
   });
@@ -80,11 +77,9 @@ export function NewOrderModal({ onClose }: Props) {
     Promise.all([
       fetch("/api/services").then((r) => r.json()),
       fetch("/api/vehicle-classes").then((r) => r.json()),
-      fetch("/api/vehicle-options").then((r) => r.json()),
-    ]).then(([svc, cls, opt]) => {
+    ]).then(([svc, cls]) => {
       if (svc.data) setServices(svc.data);
       if (cls.data) setClassGroups(cls.data);
-      if (opt.data) setOptions(opt.data);
     }).catch(console.error);
   }, []);
 
@@ -178,40 +173,14 @@ export function NewOrderModal({ onClose }: Props) {
   }, [onClose]);
 
   const handleMapClick = useCallback(async (lat: number, lng: number) => {
-    const apiKey = process.env.NEXT_PUBLIC_YANDEX_API_KEY;
-    
     try {
-      const res = await fetch(`https://geocode-maps.yandex.ru/1.x/?apikey=${apiKey}&format=json&geocode=${lng},${lat}&lang=ru_RU`);
-      const json = await res.json();
-      
-      const geoObject = json.response?.GeoObjectCollection?.featureMember?.[0]?.GeoObject;
-      let address = "";
-
-      // 1. Check for nearby landmark (popular name)
-      try {
-        const landmarkRes = await fetch(`/api/address-book/nearest?lat=${lat}&lng=${lng}`);
-        const landmarkData = await landmarkRes.json();
-        if (landmarkData.data) {
-          address = landmarkData.data.name;
-        }
-      } catch (e) {
-        console.warn("Nearest landmark fetch failed", e);
-      }
-
-      // 2. If no landmark, use formal address
-      if (!address && geoObject) {
-        const metaData = geoObject.metaDataProperty.GeocoderMetaData;
-        const components = metaData.Address.Components;
-        
-        const localityRaw = components.find((c: any) => c.kind === "locality")?.name || "Карамурт";
-        const locality = localityRaw.replace(/^[сС]ело\s+/, "");
-        const street = components.find((c: any) => c.kind === "street")?.name;
-        const house = components.find((c: any) => c.kind === "house")?.name;
-
-        address = locality;
-        if (street) address += `, ${street}`;
-        if (house) address += `, ${house}`;
-      }
+      // Single call — server handles priority:
+      // 1. Nearest landmark (100m) → popular name
+      // 2. Yandex street → popular street name from address book + house number
+      // 3. Fallback: official address
+      const geoRes = await fetch(`/api/geocode?lat=${lat}&lng=${lng}`);
+      const geoData = await geoRes.json();
+      const address = geoData.data?.address;
 
       if (address) {
         if (activeField === 'pickup') {
@@ -226,7 +195,9 @@ export function NewOrderModal({ onClose }: Props) {
           setValue("dropoffPoint", [lat, lng]);
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Map click geocoding failed", e);
+    }
   }, [activeField, setValue, isDelivery, setFocus]);
 
   const handleLandmarkSelect = (item: any) => {

@@ -39,18 +39,27 @@ export async function GET(req: NextRequest) {
       const txWhere = { ...where, operatorId: op.id };
       const txs = await prisma.cashTransaction.findMany({ where: txWhere });
 
+      // Выплаты диспетчера парку (инкассация)
       const payouts  = txs.filter((t) => t.type === "payout").reduce((s, t) => s + Number(t.amount), 0);
+      // Пополнения (аванс от парка)
       const deposits = txs.filter((t) => t.type === "deposit").reduce((s, t) => s + Number(t.amount), 0);
+
+      // Комиссии, которые собрала кассира (т.е. наличка, которая осела у оператора)
+      const orderFees = txs.filter((t) => t.type === "order_fee").reduce((s, t) => s + Number(t.amount), 0);
 
       return {
         operatorId: op.id,
         operatorName: op.name,
-        beginTaxiDebt: 0,
-        beginOperatorCash: Number(op.cashBalance),
-        payouts,
-        deposits,
-        endTaxiDebt: 0,
-        endOperatorCash: Number(op.cashBalance) - payouts + deposits,
+        // Текущий остаток у оператора (из базы — актуален)
+        currentCashBalance: Number(op.cashBalance),
+        // За период: сколько собрал комиссий
+        periodOrderFees: Math.round(orderFees),
+        // За период: сколько сдал в кассу
+        periodPayouts: Math.round(payouts),
+        // За период: сколько получил авансом
+        periodDeposits: Math.round(deposits),
+        // Долг = накопленные комиссии минус сданные
+        periodDebt: Math.round(orderFees - payouts + deposits),
       };
     })
   );

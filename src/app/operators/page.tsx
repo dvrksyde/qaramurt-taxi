@@ -28,7 +28,7 @@ export default function OperatorsPage() {
   useEffect(() => {
     fetchOperators();
     // Start heartbeat to keep current user online
-    const heartbeat = () => fetch("/api/operators/heartbeat", { method: "POST" }).catch(() => {});
+    const heartbeat = () => fetch("/api/operators/heartbeat", { method: "POST" }).catch(() => { });
     heartbeat();
     const interval = setInterval(heartbeat, 60_000); // every 60 seconds
     return () => clearInterval(interval);
@@ -94,23 +94,23 @@ export default function OperatorsPage() {
             <thead>
               <tr>
                 <th style={{ width: 30, textAlign: "center" }}></th>
-                 <th style={{ width: 220 }}>Логин</th>
-                 <th style={{ width: "100%", paddingLeft: 30 }}>Имя</th>
-                 <th style={{ paddingLeft: 40, whiteSpace: "nowrap" }}>Действия</th>
+                <th style={{ width: 120 }}>Логин</th>
+                <th style={{ width: "64%", paddingLeft: 40 }}>Имя</th>
+                <th style={{ whiteSpace: "nowrap" }}>Действия</th>
               </tr>
             </thead>
             <tbody>
               {operators.map((op) => (
                 <tr key={op.id}>
-                  <td style={{ textAlign: "center" }}>
+                  <td style={{ textAlign: "center", paddingLeft: 20 }}>
                     <span
                       className={`status-dot ${op.isOnline ? "free" : "offline"}`}
                       title={op.isOnline ? "В сети" : "Не в сети"}
                     />
                   </td>
-                   <td className="text-mono">{op.login}</td>
-                  <td style={{ fontWeight: 500, paddingLeft: 30 }}>{op.name}</td>
-                  <td style={{ paddingLeft: 40, whiteSpace: "nowrap" }}>
+                  <td className="text-mono">{op.login}</td>
+                  <td style={{ fontWeight: 500, paddingLeft: 40 }}>{op.name}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
                     {isAdmin ? (
                       <span className="op-actions">
                         {op.role !== "admin" && (

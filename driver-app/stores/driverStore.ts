@@ -7,6 +7,8 @@ interface DriverProfile {
   middleName?: string | null;
   callsign: string | null;
   phone: string;
+  login?: string;
+  tariffGroup?: { name: string; value: number } | null;
   balance: number;
   rating: number;
   ordersCount?: number;
@@ -53,7 +55,9 @@ interface DriverState {
   tripDistance: number;
   tripPrice: number;
   tripStartTime: number | null;
+  lastLocation: { lat: number; lng: number } | null;
   setTripMeter: (d: number, p: number) => void;
+  setLastLocation: (loc: { lat: number; lng: number } | null) => void;
   resetTrip: () => void;
   startTrip: () => void;
 }
@@ -70,7 +74,9 @@ export const useDriverStore = create<DriverState>((set) => ({
   tripDistance: 0,
   tripPrice: 0,
   tripStartTime: null,
+  lastLocation: null,
   setTripMeter: (tripDistance, tripPrice) => set({ tripDistance, tripPrice }),
-  resetTrip: () => set({ tripDistance: 0, tripPrice: 0, tripStartTime: null }),
-  startTrip: () => set({ tripStartTime: Date.now() }),
+  setLastLocation: (lastLocation) => set({ lastLocation }),
+  resetTrip: () => set({ tripDistance: 0, tripPrice: 0, tripStartTime: null, lastLocation: null }),
+  startTrip: () => set({ tripStartTime: Date.now(), lastLocation: null }),
 }));

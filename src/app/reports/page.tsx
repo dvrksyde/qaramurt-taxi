@@ -10,14 +10,21 @@ interface ReportsData {
     totalOrders: number;
     grossRevenue: number;
     companyCommission: number;
-    siteCommission: number;
+    totalPenalties: number;
     totalSettlements: number;
     netCompanyProfit: number;
-    siteRate: number;
-    companyRatePercent: number;
     startDate: string;
     endDate: string;
   };
+  drivers: Array<{
+    id: number;
+    name: string;
+    callsign: string | null;
+    ordersCount: number;
+    revenue: number;
+    commission: number;
+    tariffPercent: number;
+  }>;
 }
 
 export default function ReportsPage() {
@@ -25,7 +32,14 @@ export default function ReportsPage() {
   const router = useRouter();
 
   // Date states. Default to today's date formatted as YYYY-MM-DD
-  const todayStr = new Date().toISOString().split("T")[0];
+  const toLocalISOString = (d: Date) => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const todayStr = toLocalISOString(new Date());
   const [startDate, setStartDate] = useState<string>(todayStr);
   const [endDate, setEndDate] = useState<string>(todayStr);
   const [activePreset, setActivePreset] = useState<string | null>("today");
@@ -40,7 +54,7 @@ export default function ReportsPage() {
     let start: Date;
     let end: Date;
 
-    const f = (d: Date) => d.toISOString().split("T")[0];
+    const f = (d: Date) => toLocalISOString(d);
 
     switch (preset) {
       case "today":
@@ -91,7 +105,7 @@ export default function ReportsPage() {
   const fetchReport = useCallback((silent = false) => {
     if (status === "loading" || !session || (session.user as any)?.role !== "admin") return;
     if (!silent) setLoading(true);
-    fetch(`/api/reports?startDate=${startDate}&endDate=${endDate}`)
+    fetch(`/api/reports?startDate=${startDate}T00:00:00&endDate=${endDate}T23:59:59`)
       .then(async (r) => {
         const res = await r.json();
         if (!r.ok) throw new Error(res.error || "Failed to load");
@@ -141,12 +155,12 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="page-content" style={{ padding: 24, backgroundColor: "#f5f6fa", minHeight: "100vh" }}>
+    <div className="page-content" style={{ padding: 24, minHeight: "100vh", paddingBottom: 100 }}>
       <div style={{ marginBottom: 32, display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
         <div>
           <h1 style={{ margin: 0, color: "#2d3436", fontSize: 28, fontWeight: 700 }}>Финансовая статистика</h1>
           <p style={{ color: "#636e72", margin: "8px 0 0 0" }}>
-            Выберите период для расчета общей прибыли
+            Реальные доходы по комиссиям
           </p>
         </div>
 
@@ -199,7 +213,7 @@ export default function ReportsPage() {
       {data && !error && (() => {
         const showSalaries = activePreset === 'this_month' || activePreset === 'last_month' || activePreset === null;
         const totalSettlementsRender = showSalaries ? data.summary.totalSettlements : 0;
-        const netProfitRender = data.summary.companyCommission - data.summary.siteCommission - totalSettlementsRender;
+        const netProfitRender = data.summary.companyCommission + data.summary.totalPenalties - totalSettlementsRender;
 
         return (
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
@@ -221,11 +235,15 @@ export default function ReportsPage() {
               </div>
               <div>
                 <div style={{ fontSize: 36, fontWeight: 700, color: "#2d3436", lineHeight: 1 }}>{data.summary.grossRevenue.toLocaleString("ru-RU")} <span style={{fontSize:20}}>тг.</span></div>
-                <div style={{ fontSize: 14, color: "#b2bec3", marginTop: 8 }}>оборот по всем заказам (валовая выручка)</div>
+                <div style={{ fontSize: 14, color: "#b2bec3", marginTop: 8 }}>оборот по всем заказам (выручка водителей)</div>
+              </div>
+              <div style={{ background: "rgba(9, 132, 227, 0.05)", padding: 16, borderRadius: 8, borderLeft: "3px solid #0984e3" }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: "#0984e3", lineHeight: 1 }}>{data.summary.companyCommission.toLocaleString("ru-RU")} <span style={{fontSize:16}}>тг.</span></div>
+                <div style={{ fontSize: 13, color: "#0984e3", marginTop: 6 }}>фактически удержанная комиссия</div>
               </div>
               <div style={{ background: "rgba(238, 82, 83, 0.05)", padding: 16, borderRadius: 8, borderLeft: "3px solid #ff7675" }}>
-                <div style={{ fontSize: 24, fontWeight: 700, color: "#d63031", lineHeight: 1 }}>{data.summary.siteCommission.toLocaleString("ru-RU")} <span style={{fontSize:16}}>тг.</span></div>
-                <div style={{ fontSize: 13, color: "#ff7675", marginTop: 6 }}>комиссия разработчиков сайта (по {data.summary.siteRate} тг/заказ)</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: "#d63031", lineHeight: 1 }}>{data.summary.totalPenalties.toLocaleString("ru-RU")} <span style={{fontSize:16}}>тг.</span></div>
+                <div style={{ fontSize: 13, color: "#ff7675", marginTop: 6 }}>штрафы с водителей</div>
               </div>
               {showSalaries && (
                 <div style={{ background: "rgba(255, 159, 67, 0.05)", padding: 16, borderRadius: 8, borderLeft: "3px solid #ff9f43" }}>
@@ -239,8 +257,9 @@ export default function ReportsPage() {
               <div>
                 <div style={{ fontSize: 16, color: "#00b894", fontWeight: 700, textTransform: "uppercase" }}>Чистая прибыль компании</div>
                 <div style={{ color: "#b2bec3", fontSize: 13, marginTop: 4, maxWidth: 500 }}>
-                  Ставка: <strong>{data.summary.companyRatePercent}%</strong> от стоимости заказов. 
-                  Общий доход составил: <strong>{data.summary.companyCommission.toLocaleString("ru-RU")} тг.</strong> минус комиссии{showSalaries ? " и выплаты зарплат" : ""}.
+                  <p style={{ margin: 0 }}>Удержанные комиссии: <strong>{data.summary.companyCommission.toLocaleString("ru-RU")} тг.</strong></p>
+                  <p style={{ margin: 0 }}>Взысканные штрафы: <strong>{data.summary.totalPenalties.toLocaleString("ru-RU")} тг.</strong></p>
+                  {showSalaries && <p style={{ margin: 0 }}>Зарплаты: <strong>- {totalSettlementsRender.toLocaleString("ru-RU")} тг.</strong></p>}
                 </div>
               </div>
               <div style={{ textAlign: "right" }}>
@@ -248,6 +267,41 @@ export default function ReportsPage() {
               </div>
             </div>
 
+          </div>
+
+          <div style={{ background: "#fff", borderRadius: 12, padding: 32, boxShadow: "0 4px 15px rgba(0,0,0,0.05)" }}>
+             <h3 style={{ margin: "0 0 24px 0", color: "#636e72", fontSize: 16, textTransform: "uppercase", letterSpacing: 1 }}>Разбивка по водителям</h3>
+             
+             {data.drivers.length === 0 ? (
+               <div style={{ textAlign: "center", padding: 40, color: "#b2bec3" }}>Нет данных за этот период</div>
+             ) : (
+               <div className="data-table-wrap">
+                 <table className="data-table">
+                   <thead>
+                     <tr>
+                       <th>Позывной</th>
+                       <th>Имя водителя</th>
+                       <th style={{ textAlign: "center" }}>Заказов</th>
+                       <th style={{ textAlign: "right" }}>Выручка водителя</th>
+                       <th style={{ textAlign: "center" }}>Тариф</th>
+                       <th style={{ textAlign: "right" }}>Комиссия таксопарка</th>
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {data.drivers.map(d => (
+                       <tr key={d.id}>
+                         <td>{d.callsign || '—'}</td>
+                         <td style={{ fontWeight: 500 }}>{d.name}</td>
+                         <td style={{ textAlign: "center", fontWeight: 600 }}>{d.ordersCount}</td>
+                         <td style={{ textAlign: "right" }}>{d.revenue.toLocaleString("ru-RU")} тг</td>
+                         <td style={{ textAlign: "center", color: "#0984e3", fontWeight: 600 }}>{d.tariffPercent}%</td>
+                         <td style={{ textAlign: "right", color: "#00b894", fontWeight: 700 }}>{d.commission.toLocaleString("ru-RU")} тг</td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
+             )}
           </div>
 
         </div>

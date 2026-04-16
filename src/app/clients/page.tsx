@@ -49,10 +49,10 @@ export default function ClientsPage() {
   useEffect(() => {
     if (!socket) return;
     const handleChange = () => fetchClients(true);
-    
+
     socket.on("new_order", handleChange);
     socket.on("order_status_change", handleChange);
-    
+
     return () => {
       socket.off("new_order", handleChange);
       socket.off("order_status_change", handleChange);
@@ -128,10 +128,10 @@ export default function ClientsPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th style={{ width: 60 }}>ID</th>
-                <th>Телефон</th>
-                <th>Имя</th>
-                <th className="sortable-th" onClick={() => toggleSort("firstOrder")}>
+                <th style={{ width: 50, paddingLeft: 30, textAlign: "center" }}>ID</th>
+                <th style={{ textAlign: "center" }}>Телефон</th>
+                <th style={{ textAlign: "center" }}>Имя</th>
+                <th style={{ textAlign: "center" }} className="sortable-th" onClick={() => toggleSort("firstOrder")}>
                   Первый заказ {sortIcon("firstOrder")}
                 </th>
                 <th className="sortable-th" style={{ textAlign: "center" }} onClick={() => toggleSort("total")}>
@@ -148,12 +148,12 @@ export default function ClientsPage() {
             <tbody>
               {clients.map((c) => (
                 <tr key={c.id} className={c.isBlacklisted ? "row-blacklisted" : ""}>
-                  <td className="text-muted text-sm">{c.id}</td>
-                  <td className="text-mono">{c.phone}</td>
-                  <td style={{ fontWeight: c.name ? 500 : 400 }}>
+                  <td style={{ textAlign: "center", paddingLeft: 30 }} className="text-muted text-sm">{c.id}</td>
+                  <td style={{ textAlign: "center" }} className="text-mono">{c.phone}</td>
+                  <td style={{ textAlign: "center", fontWeight: c.name ? 500 : 400 }}>
                     {c.name || <span className="text-muted">—</span>}
                   </td>
-                  <td className="text-muted text-sm">{formatDate(c.firstOrderDate)}</td>
+                  <td style={{ textAlign: "center" }} className="text-muted text-sm">{formatDate(c.firstOrderDate)}</td>
                   <td style={{ textAlign: "center", fontWeight: 600 }}>
                     {c.totalOrders}
                   </td>

@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyDriverToken } from "@/lib/driverAuth";
 
+import { reverseGeocode } from "@/lib/geocoder";
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -37,7 +39,15 @@ export async function PATCH(
     updateData.startedAt = new Date();
   } else if (status === "completed") {
     updateData.completedAt = new Date();
-    if (lat && lng) updateData.dropoffPoint = `POINT(${lng} ${lat})`;
+    if (lat && lng) {
+      updateData.dropoffPoint = `POINT(${lng} ${lat})`;
+      
+      // Вытягиваем читаемый адрес для поля "Куда"
+      const address = await reverseGeocode(lat, lng);
+      if (address) {
+        updateData.dropoffAddress = address;
+      }
+    }
     if (distanceKm !== undefined) updateData.distanceKm = distanceKm;
     if (finalPrice !== undefined) updateData.finalPrice = finalPrice;
   } else if (status === "canceled") {
@@ -50,7 +60,8 @@ export async function PATCH(
       data: updateData,
     });
 
-    const operatorId = 1;
+    // Берём operatorId из заказа, а не хардкодим ID=1
+    const operatorId = updatedOrder.operatorId ?? 1;
 
     if (status === "completed" && updatedOrder.finalPrice) {
       const dTG = await tx.driver.findUnique({

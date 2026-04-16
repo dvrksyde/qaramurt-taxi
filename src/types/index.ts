@@ -2,7 +2,7 @@
 
 export type DriverStatus = "free" | "busy" | "offline";
 export type OrderStatus = "pending" | "assigned" | "arrived" | "in_progress" | "completed" | "canceled";
-export type DistributionMethod = "automatic" | "broadcast" | "sequential" | "map_pick" | "list_pick";
+export type DistributionMethod = "automatic" | "broadcast" | "map_pick" | "list_pick";
 export type CallType = "inbound" | "outbound";
 export type CallStatus = "answered" | "missed" | "busy" | "failed";
 export type TransactionType = "payout" | "deposit" | "penalty" | "bonus";
@@ -29,6 +29,8 @@ export interface Driver {
   deviceId?: string | null;
   ordersCount?: number;
   vehicles?: { id: number; plate: string; make: string; model: string; color: string; classes?: any[] }[];
+  osVersion?: string | null;
+  thirdPartyApps?: string[] | null;
 }
 
 export interface DriverLocation {
@@ -38,6 +40,11 @@ export interface DriverLocation {
   status: DriverStatus;
   callsign?: string | null;
   heading?: number;
+  firstName?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
+  plate?: string | null;
+  vehicleLabel?: string | null;
 }
 
 export interface Order {
@@ -99,12 +106,6 @@ export interface VehicleClassGroup {
   classes: VehicleClass[];
 }
 
-export interface VehicleOption {
-  id: number;
-  name: string;
-  description: string | null;
-  priceModifier: number;
-}
 
 export interface Tariff {
   id: number;
@@ -202,7 +203,6 @@ export interface NewOrderFormData {
   useBonuses: boolean;
   estimatedPrice: number | null;
   distributionMethod: DistributionMethod;
-  optionIds: number[];
   printReceipt: boolean;
   pricePerKm: string;
   distanceKm?: number;

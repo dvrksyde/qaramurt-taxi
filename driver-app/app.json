@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Qaramurt Driver",
-    "slug": "qaramurt-driver",
+    "slug": "qaramurttaxi",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -38,7 +38,10 @@
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ],
       "package": "com.qaramurt.driver"
     },
@@ -48,7 +51,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Разрешите доступ к GPS для работы на линии"
+          "locationAlwaysAndWhenInUsePermission": "Разрешите доступ к GPS для работы на линии",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       "expo-notifications"
@@ -56,9 +61,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "dc460d5a-4d78-40d1-aba3-881c327739cb"
+        "projectId": "8119678c-e78c-430a-827c-1c67b11a8c86"
       }
     },
-    "owner": "dvrksyde"
+    "owner": "qaramurttaxi"
   }
 }
