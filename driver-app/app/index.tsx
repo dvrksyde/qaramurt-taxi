@@ -65,31 +65,36 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
   }
   if (data) {
     const { locations } = data as { locations: Location.LocationObject[] };
-    const loc = locations[0];
-    if (!loc) return;
+    if (!locations || locations.length === 0) return;
 
-    const { latitude: lat, longitude: lng } = loc.coords;
-    const speed = loc.coords.speed;
-    const isMoving = speed !== null ? speed > 1.0 : true;
+    // Обрабатываем ВСЕ точки из пачки, не только первую
+    for (const loc of locations) {
+      const { latitude: lat, longitude: lng } = loc.coords;
 
-    const state = useDriverStore.getState();
+      const state = useDriverStore.getState();
 
-    if (state.activeOrder?.status === "in_progress" && state.lastLocation && !state.activeOrder.isFixedPrice) {
-      const d = haversine(state.lastLocation.lat, state.lastLocation.lng, lat, lng);
-      if (d > 0.02 && isMoving) {
-        const newDist = state.tripDistance + d;
-        const newPrice = roundTo5(BASE_FARE + newDist * Number(state.activeOrder.pricePerKm));
-        state.setTripMeter(newDist, newPrice);
+      if (state.activeOrder?.status === "in_progress" && state.lastLocation && !state.activeOrder.isFixedPrice) {
+        const d = haversine(state.lastLocation.lat, state.lastLocation.lng, lat, lng);
+
+        // Убираем фильтр скорости — он режет медленное движение в пробке.
+        // Защита от GPS-дрейфа на стоянке обеспечена самой ОС (distanceInterval: 15м)
+        // и порогом d > 0.02 км (20 метров).
+        if (d > 0.02) {
+          const newDist = useDriverStore.getState().tripDistance + d;
+          const newPrice = roundTo5(BASE_FARE + newDist * Number(state.activeOrder.pricePerKm));
+          useDriverStore.getState().setTripMeter(newDist, newPrice);
+        }
       }
+
+      // Обновляем lastLocation после каждой точки из пачки
+      useDriverStore.getState().setLastLocation({ lat, lng });
+
+      // Отправляем последнюю точку на сервер
+      api("/api/driver/location", {
+        method: "POST",
+        body: JSON.stringify({ lat, lng }),
+      }).catch(() => {});
     }
-
-    state.setLastLocation({ lat, lng });
-
-    // Try posting to API natively in background
-    api("/api/driver/location", {
-      method: "POST",
-      body: JSON.stringify({ lat, lng }),
-    }).catch(() => {});
   }
 });
 
@@ -469,15 +474,17 @@ export default function MainScreen() {
     }
 
     if (status === "completed" || status === "canceled") {
-      const finalDist = Math.round(tripDistanceRef.current * 10) / 10;
-      const finalPrice = activeOrder.isFixedPrice
+      // Берём те же значения, что и отправили на сервер выше
+      const storeState = useDriverStore.getState();
+      const showDist = Math.round(Math.max(storeState.tripDistance, tripDistanceRef.current) * 10) / 10;
+      const showPrice = activeOrder.isFixedPrice
         ? activeOrder.estimatedPrice!
-        : roundTo5(BASE_FARE + finalDist * activeOrder.pricePerKm);
+        : roundTo5(BASE_FARE + showDist * activeOrder.pricePerKm);
       Alert.alert(
         status === "completed" ? "Поездка завершена" : "Заказ отменен",
         activeOrder.isFixedPrice
-          ? `Итого: ${finalPrice} ₸`
-          : `Расстояние: ${finalDist} км\nИтого: ${finalPrice} ₸`,
+          ? `Итого: ${showPrice} ₸`
+          : `Расстояние: ${showDist} км\nИтого: ${showPrice} ₸`,
       );
       setActiveOrder(null);
       resetTrip();

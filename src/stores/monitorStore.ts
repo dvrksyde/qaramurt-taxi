@@ -175,7 +175,7 @@ export const useMonitorStore = create<MonitorState>((set) => ({
   addSystemLog: (entry) =>
     set((s) => ({
       systemLog: [entry, ...s.systemLog].slice(0, 200),
-      counts: { ...s.counts, system: s.counts.system + 1 },
+      // Убрали инкремент счетчика system: s.counts.system + 1
     })),
 
   alarms: [],

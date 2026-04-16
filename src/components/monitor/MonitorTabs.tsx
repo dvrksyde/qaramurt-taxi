@@ -2,14 +2,14 @@
 import { useMonitorStore } from "@/stores/monitorStore";
 import { useEffect } from "react";
 
-type Tab = "current" | "scheduled" | "exchange" | "map" | "chat" | "system" | "alarms" | "leaderboard";
+type Tab = "current" | "map" | "chat" | "leaderboard" | "system";
 
 const TABS: { key: Tab; label: string; countKey?: keyof ReturnType<typeof useMonitorStore.getState>["counts"] }[] = [
   { key: "current", label: "Текущие заказы", countKey: "current" },
   { key: "map", label: "Карта" },
   { key: "chat", label: "Чат", countKey: "chat" },
   { key: "leaderboard", label: "Рейтинг" },
-  { key: "system", label: "Системное", countKey: "system" },
+  { key: "system", label: "Системное" },
 ];
 
 const VALID_TABS = ["current", "map", "chat", "leaderboard", "system"];
