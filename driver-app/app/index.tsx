@@ -72,15 +72,18 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
       const { latitude: lat, longitude: lng } = loc.coords;
 
       const state = useDriverStore.getState();
+      console.log("status:", state.activeOrder?.status);
+      console.log("lastLocation:", state.lastLocation);
+      console.log("isFixedPrice:", state.activeOrder?.isFixedPrice);
 
       if (state.activeOrder?.status === "in_progress" && state.lastLocation && !state.activeOrder.isFixedPrice) {
         const d = haversine(state.lastLocation.lat, state.lastLocation.lng, lat, lng);
 
         // Убираем фильтр скорости — он режет медленное движение в пробке.
         // Защита от GPS-дрейфа на стоянке обеспечена самой ОС (distanceInterval: 15м)
-        // и порогом d > 0.02 км (20 метров).
-        if (d > 0.02) {
-          const newDist = useDriverStore.getState().tripDistance + d;
+        // и порогом d > 0.005 км (5 метров).
+        if (d > 0.005) {
+          const newDist = state.tripDistance + d;
           const newPrice = roundTo5(BASE_FARE + newDist * Number(state.activeOrder.pricePerKm));
           useDriverStore.getState().setTripMeter(newDist, newPrice);
         }
@@ -93,7 +96,7 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
       api("/api/driver/location", {
         method: "POST",
         body: JSON.stringify({ lat, lng }),
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }
 });
@@ -200,7 +203,7 @@ export default function MainScreen() {
       if (hasTask) {
         await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
       }
-    } catch {}
+    } catch { }
   }, []);
 
   const logout = useCallback(async () => {
@@ -281,7 +284,7 @@ export default function MainScreen() {
     }
 
     const nextProfile = profileRes.data;
-    
+
     // Игнорируем ошибки сети при получении заказа, чтобы не сбрасывать стейт
     let nextOrder = useDriverStore.getState().activeOrder;
     if (!orderRes.error) {
