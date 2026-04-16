@@ -79,10 +79,7 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
       if (state.activeOrder?.status === "in_progress" && state.lastLocation && !state.activeOrder.isFixedPrice) {
         const d = haversine(state.lastLocation.lat, state.lastLocation.lng, lat, lng);
 
-        // Убираем фильтр скорости — он режет медленное движение в пробке.
-        // Защита от GPS-дрейфа на стоянке обеспечена самой ОС (distanceInterval: 15м)
-        // и порогом d > 0.005 км (5 метров).
-        if (d > 0.005) {
+        if (d > 0.015) {
           const newDist = state.tripDistance + d;
           const newPrice = roundTo5(BASE_FARE + newDist * Number(state.activeOrder.pricePerKm));
           useDriverStore.getState().setTripMeter(newDist, newPrice);
@@ -146,6 +143,7 @@ export default function MainScreen() {
       }
 
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+      useDriverStore.getState().setLastLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
       const nextCoords = {
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
@@ -446,6 +444,13 @@ export default function MainScreen() {
       tripDistanceRef.current = 0;
       useDriverStore.getState().setTripMeter(0, activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : BASE_FARE);
       setTripMeter(0, activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : BASE_FARE);
+
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest }).then((loc) => {
+        useDriverStore.getState().setLastLocation({
+          lat: loc.coords.latitude,
+          lng: loc.coords.longitude,
+        });
+      });
     }
 
     if (status === "completed") {
