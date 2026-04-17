@@ -14,6 +14,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "../services/api";
 import { useDriverStore } from "../stores/driverStore";
 import { getSocket } from "../services/socket";
+import { mapOrderToActiveOrder } from "../lib/orderPricing";
+
+const BASE_FARE = 290;
 
 interface AvailableOrder {
   id: number;
@@ -108,12 +111,7 @@ export function ActiveOrdersPanel() {
 
       if (res.data) {
         const order = res.data as any;
-        setActiveOrder({
-          ...order,
-          distanceKm: Number(order.distanceKm) || 0,
-          currentPrice: Number(order.finalPrice) || 290,
-          pricePerKm: Number(order.pricePerKm) || 80,
-        });
+        setActiveOrder(mapOrderToActiveOrder(order, BASE_FARE));
         Alert.alert("Успешно", "Заказ принят!");
       }
     },

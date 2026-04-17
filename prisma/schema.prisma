@@ -64,6 +64,12 @@ enum TariffType {
   unlimited
 }
 
+enum TripSessionStatus {
+  active
+  completed
+  canceled
+}
+
 // ─── TAXI SERVICES ───────────────────────────────────────────────────────────
 
 model TaxiService {
@@ -223,6 +229,7 @@ model Driver {
   transactions  CashTransaction[]
   orderLogs     OrderStatusLog[]
   chatMessages  ChatMessage[]
+  tripSessions  OrderTripSession[]
 
   @@map("drivers")
 }
@@ -375,12 +382,61 @@ model Order {
   class      VehicleClass? @relation(fields: [classId], references: [id])
   statusLogs OrderStatusLog[]
   transactions CashTransaction[]
+  tripSessions OrderTripSession[]
 
   @@index([status])
   @@index([driverId])
   @@index([operatorId])
   @@index([createdAt])
   @@map("orders")
+}
+
+model OrderTripSession {
+  id                   Int               @id @default(autoincrement())
+  orderId              Int
+  driverId             Int?
+  status               TripSessionStatus @default(active)
+  tariffPerKm          Decimal           @db.Decimal(10, 2)
+  baseFare             Decimal           @default(290) @db.Decimal(10, 2)
+  preliminaryDistanceKm Decimal          @default(0) @db.Decimal(10, 3)
+  finalDistanceKm      Decimal?          @db.Decimal(10, 3)
+  finalPrice           Decimal?          @db.Decimal(10, 2)
+  pointsReceived       Int               @default(0)
+  lastSequenceNumber   Int?
+  startedAt            DateTime          @default(now())
+  completedAt          DateTime?
+  lastPointAt          DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  order  Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  driver Driver? @relation(fields: [driverId], references: [id])
+  points OrderTripPoint[]
+
+  @@index([orderId, status])
+  @@index([driverId, status])
+  @@index([status, startedAt])
+  @@map("order_trip_sessions")
+}
+
+model OrderTripPoint {
+  id             Int      @id @default(autoincrement())
+  tripSessionId  Int
+  sequenceNumber Int
+  lat            Decimal  @db.Decimal(10, 7)
+  lng            Decimal  @db.Decimal(10, 7)
+  accuracyM      Decimal? @db.Decimal(8, 2)
+  speedKmh       Decimal? @db.Decimal(8, 2)
+  headingDeg     Decimal? @db.Decimal(8, 2)
+  capturedAt     DateTime
+  receivedAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  tripSession OrderTripSession @relation(fields: [tripSessionId], references: [id], onDelete: Cascade)
+
+  @@unique([tripSessionId, sequenceNumber])
+  @@index([tripSessionId, capturedAt])
+  @@map("order_trip_points")
 }
 
 model OrderStatusLog {

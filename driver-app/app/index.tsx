@@ -25,6 +25,8 @@ import { DriverChatPanel } from "../components/DriverChatPanel";
 import { DriverProfilePanel } from "../components/DriverProfilePanel";
 import { ActiveOrdersPanel } from "../components/ActiveOrdersPanel";
 import { SwipeButton } from "../components/SwipeButton";
+import { mapOrderToActiveOrder } from "../lib/orderPricing";
+import { clearTripSync, flushTripPoints, queueTripPoint, startTripSync } from "../services/tripSync";
 
 const BASE_FARE = 290;
 type DriverTab = "home" | "orders" | "history" | "chat" | "profile";
@@ -90,6 +92,23 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
       useDriverStore.getState().setLastLocation({ lat, lng });
 
       // Отправляем последнюю точку на сервер
+      if (state.activeOrder?.status === "in_progress" && !state.activeOrder.isFixedPrice) {
+        void queueTripPoint(state.activeOrder.id, {
+          lat,
+          lng,
+          capturedAt: new Date(loc.timestamp).toISOString(),
+          accuracyM: typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : null,
+          speedKmh:
+            typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed)
+              ? loc.coords.speed * 3.6
+              : null,
+          headingDeg:
+            typeof loc.coords.heading === "number" && Number.isFinite(loc.coords.heading)
+              ? loc.coords.heading
+              : null,
+        });
+      }
+
       api("/api/driver/location", {
         method: "POST",
         body: JSON.stringify({ lat, lng }),
@@ -216,16 +235,7 @@ export default function MainScreen() {
 
   const mapOrderToState = useCallback((order: any) => {
     if (!order) return null;
-    const estimated = Number(order.estimatedPrice) || 0;
-    const hasFixedPrice = estimated > 0;
-    return {
-      ...order,
-      distanceKm: Number(order.distanceKm) || 0,
-      currentPrice: hasFixedPrice ? estimated : (Number(order.finalPrice) || BASE_FARE),
-      estimatedPrice: hasFixedPrice ? estimated : null,
-      isFixedPrice: hasFixedPrice,
-      pricePerKm: Number(order.pricePerKm) || 80,
-    };
+    return mapOrderToActiveOrder(order, BASE_FARE);
   }, []);
 
   const refreshProfileRank = useCallback(async () => {
@@ -312,6 +322,14 @@ export default function MainScreen() {
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
+
+  useEffect(() => {
+    if (!activeOrder || activeOrder.status !== "in_progress" || activeOrder.isFixedPrice) {
+      return;
+    }
+
+    void startTripSync(activeOrder.id).then(() => flushTripPoints(activeOrder.id));
+  }, [activeOrder]);
 
   // Ref to track the offline-on-background timeout
   const bgOfflineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -454,15 +472,24 @@ export default function MainScreen() {
     }
 
     if (status === "completed") {
-      // Берем дистанцию из Zustand — туда пишет фоновый таск (даже с выключенным экраном)
-      const finalDistFromStore = useDriverStore.getState().tripDistance;
-      // Берем максимум из двух источников — на случай если телефон был все время открыт
-      const finalDist = Math.round(Math.max(finalDistFromStore, tripDistanceRef.current) * 10) / 10;
-      const finalPrice = activeOrder.isFixedPrice
-        ? activeOrder.estimatedPrice!
-        : roundTo5(BASE_FARE + finalDist * activeOrder.pricePerKm);
-      body.distanceKm = finalDist;
-      body.finalPrice = finalPrice;
+      if (!activeOrder.isFixedPrice) {
+        // Сначала сбрасываем очередь точек на сервер, чтобы все точки были там
+        await flushTripPoints(activeOrder.id);
+
+        // Резервные значения с телефона — сервер использует их только если
+        // GPS-сессии нет или точек оказалось меньше 2 (плохой GPS / короткая поездка)
+        const fallbackDist =
+          Math.round(Math.max(useDriverStore.getState().tripDistance, tripDistanceRef.current) * 10) / 10;
+        body.clientDistanceKm = fallbackDist;
+        body.clientFinalPrice = roundTo5(BASE_FARE + fallbackDist * activeOrder.pricePerKm);
+      } else {
+        // Fixed-price: явно передаём цену
+        if (activeOrder.distanceKm > 0) {
+          body.distanceKm = activeOrder.distanceKm;
+        }
+        body.finalPrice = activeOrder.estimatedPrice ?? activeOrder.currentPrice;
+      }
+      // Передаём текущие координаты для обратного геокодирования точки выгрузки
       if (lastLocationState) {
         body.lat = lastLocationState.lat;
         body.lng = lastLocationState.lng;
@@ -482,24 +509,68 @@ export default function MainScreen() {
     }
 
     if (status === "completed" || status === "canceled") {
-      // Берём те же значения, что и отправили на сервер выше
-      const storeState = useDriverStore.getState();
-      const showDist = Math.round(Math.max(storeState.tripDistance, tripDistanceRef.current) * 10) / 10;
-      const showPrice = activeOrder.isFixedPrice
-        ? activeOrder.estimatedPrice!
-        : roundTo5(BASE_FARE + showDist * activeOrder.pricePerKm);
-      Alert.alert(
-        status === "completed" ? "Поездка завершена" : "Заказ отменен",
-        activeOrder.isFixedPrice
-          ? `Итого: ${showPrice} ₸`
-          : `Расстояние: ${showDist} км\nИтого: ${showPrice} ₸`,
-      );
+      // Используем данные, рассчитанные сервером и возвращённые в ответе
+      const serverDist = res.data?.distanceKm != null ? Number(res.data.distanceKm) : null;
+      const serverPrice = res.data?.finalPrice != null ? Number(res.data.finalPrice) : null;
+
+      if (activeOrder.isFixedPrice) {
+        Alert.alert(
+          status === "completed" ? "Поездка завершена" : "Заказ отменен",
+          `Итого: ${serverPrice ?? activeOrder.estimatedPrice} ₸`,
+        );
+      } else if (status === "completed") {
+        // Сервер вернул точные данные по GPS
+        if (serverDist !== null && serverPrice !== null) {
+          Alert.alert(
+            "Поездка завершена",
+            `Расстояние: ${serverDist.toFixed(1)} км\nИтого: ${serverPrice} ₸`,
+          );
+        } else {
+          // Резервный показ из предварительного счётчика
+          const fallbackDist = Math.round(Math.max(useDriverStore.getState().tripDistance, tripDistanceRef.current) * 10) / 10;
+          const fallbackPrice = roundTo5(BASE_FARE + fallbackDist * activeOrder.pricePerKm);
+          Alert.alert(
+            "Поездка завершена",
+            `Расстояние: ~${fallbackDist} км\nПримерная сумма: ~${fallbackPrice} ₸`,
+          );
+        }
+      } else {
+        Alert.alert("Заказ отменен", "");
+      }
+
       setActiveOrder(null);
       resetTrip();
+      await clearTripSync(activeOrder.id);
       setProfile(profile ? { ...profile, status: "free" } : null);
       loadDashboard();
     } else {
       setActiveOrder({ ...activeOrder, status });
+      if (status === "in_progress" && !activeOrder.isFixedPrice) {
+        void (async () => {
+          await startTripSync(activeOrder.id);
+          try {
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+            const seedPoint = {
+              lat: loc.coords.latitude,
+              lng: loc.coords.longitude,
+              capturedAt: new Date(loc.timestamp).toISOString(),
+              accuracyM: typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : null,
+              speedKmh:
+                typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed)
+                  ? loc.coords.speed * 3.6
+                  : null,
+              headingDeg:
+                typeof loc.coords.heading === "number" && Number.isFinite(loc.coords.heading)
+                  ? loc.coords.heading
+                  : null,
+            };
+            useDriverStore.getState().setLastLocation({ lat: seedPoint.lat, lng: seedPoint.lng });
+            await queueTripPoint(activeOrder.id, seedPoint);
+          } catch {
+            // Ignore seed GPS errors — background tracking will continue.
+          }
+        })();
+      }
     }
   };
 
@@ -665,7 +736,7 @@ export default function MainScreen() {
             </View>
           </View>
 
-          {/* Meter strip — single row */}
+          {/* Meter strip — single row (preliminary / approximate values) */}
           {activeOrder.status === "in_progress" && (
             <View style={styles.meterStrip}>
               {activeOrder.isFixedPrice ? (
@@ -677,13 +748,14 @@ export default function MainScreen() {
                 <>
                   <View style={styles.meterStripItem}>
                     <Ionicons name="speedometer-outline" size={14} color="#888" />
-                    <Text style={styles.meterStripValue}>{tripDistance.toFixed(1)} км</Text>
+                    {/* '~' indicates preliminary — server will calculate the exact figure */}
+                    <Text style={styles.meterStripValue}>~{tripDistance.toFixed(1)} км</Text>
                   </View>
                   <View style={styles.meterStripItem}>
                     <Ionicons name="time-outline" size={14} color="#888" />
                     <Text style={styles.meterStripValue}>{tripElapsed} мин</Text>
                   </View>
-                  <Text style={styles.meterStripPrice}>{tripPrice} ₸</Text>
+                  <Text style={styles.meterStripPrice}>~{tripPrice} ₸</Text>
                 </>
               )}
             </View>

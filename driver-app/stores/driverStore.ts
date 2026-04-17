@@ -30,6 +30,8 @@ interface OrderAlert {
 interface ActiveOrder {
   id: number;
   phone: string;
+  serviceId?: number | null;
+  service?: { id: number; name: string } | null;
   pickupAddress: string | null;
   dropoffAddress: string | null;
   pickupPoint?: string | null;
