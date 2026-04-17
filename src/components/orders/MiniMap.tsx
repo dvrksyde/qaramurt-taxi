@@ -1,5 +1,6 @@
 "use client";
-import { MapContainer, TileLayer, Marker, Polyline, useMapEvents } from "react-leaflet";
+import React from "react";
+import { MapContainer, TileLayer, Marker, Polyline, useMapEvents, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -27,6 +28,17 @@ function MapEvents({ onMapClick }: { onMapClick?: (lat: number, lng: number) => 
   return null;
 }
 
+function FitBounds({ points }: { points: [number, number][] }) {
+  const map = useMap();
+  React.useEffect(() => {
+    if (points.length > 0) {
+      const bounds = L.latLngBounds(points);
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+    }
+  }, [map, points]);
+  return null;
+}
+
 interface MiniMapProps {
   pickup?: [number, number] | null;
   dropoff?: [number, number] | null;
@@ -36,10 +48,17 @@ interface MiniMapProps {
 }
 
 export function MiniMap({ pickup, dropoff, driverLocation, route, onMapClick }: MiniMapProps) {
+  // Collect all points to fit map bounds
+  const allPoints: [number, number][] = [];
+  if (pickup) allPoints.push(pickup);
+  if (dropoff) allPoints.push(dropoff);
+  if (driverLocation) allPoints.push(driverLocation);
+  if (route && route.length > 0) allPoints.push(...route);
+
   return (
     <MapContainer
-      center={[42.309, 69.969]}
-      zoom={15}
+      center={allPoints.length > 0 ? allPoints[0] : [42.309, 69.969]}
+      zoom={allPoints.length > 0 ? undefined : 15}
       style={{ width: "100%", height: "100%" }}
       zoomControl={true}
       attributionControl={false}
@@ -49,15 +68,16 @@ export function MiniMap({ pickup, dropoff, driverLocation, route, onMapClick }: 
         subdomains={[""]}
       />
       <MapEvents onMapClick={onMapClick} />
+      <FitBounds points={allPoints} />
       {pickup && <Marker position={pickup} icon={pickupIcon} />}
       {dropoff && <Marker position={dropoff} icon={dropoffIcon} />}
       {driverLocation && <Marker position={driverLocation} icon={driverIcon} />}
       {route && route.length > 0 && (
         <Polyline 
           positions={route} 
-          color="#4177f6" 
+          color="#FFD000" 
           weight={6} 
-          opacity={0.8} 
+          opacity={0.9} 
         />
       )}
     </MapContainer>

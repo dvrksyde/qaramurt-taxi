@@ -17,6 +17,8 @@ const STATUS_LABELS: Record<string, string> = {
 
 export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClose: () => void }) {
   const [order, setOrder] = useState<any>(null);
+  const [track, setTrack] = useState<[number, number][]>([]);
+  const [trackPointsCount, setTrackPointsCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const { updateOrder } = useMonitorStore();
 
@@ -27,6 +29,20 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
       const data = await res.json();
       if (data.data) {
         setOrder(data.data);
+        
+        // Load GPS track if order is active or completed
+        if (data.data.status === "in_progress" || data.data.status === "completed") {
+          try {
+            const trackRes = await fetch(`/api/orders/${orderId}/trip`);
+            const trackData = await trackRes.json();
+            if (trackData.data && trackData.data.length > 0) {
+              setTrack(trackData.data.map((p: any) => [p.lat, p.lng]));
+              setTrackPointsCount(trackData.data.length);
+            }
+          } catch (e) {
+            console.error("Failed to load track", e);
+          }
+        }
       }
     } catch (err) {
       console.error("Failed to load order info", err);
@@ -112,6 +128,7 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
                 pickup={pickup}
                 dropoff={dropoff}
                 driverLocation={driverPos}
+                route={track}
               />
             </div>
 
@@ -133,6 +150,25 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
                 </div>
               </div>
             </div>
+
+            {/* Track Info */}
+            {(order.status === "in_progress" || order.status === "completed") && (
+              <div className="details-card" style={{ marginTop: -4 }}>
+                <div className="card-label">Трек поездки</div>
+                <div style={{ marginTop: 8, fontSize: 13, color: "#333", display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div className="flex-row" style={{ justifyContent: "space-between" }}>
+                    <span style={{ color: "#666" }}>GPS точек:</span>
+                    <strong>{trackPointsCount} шт.</strong>
+                  </div>
+                  {order.distanceKm && (
+                    <div className="flex-row" style={{ justifyContent: "space-between" }}>
+                      <span style={{ color: "#666" }}>Дистанция:</span>
+                      <strong>{Number(order.distanceKm).toFixed(1)} км</strong>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Right Column: Order/Driver Info & Status */}

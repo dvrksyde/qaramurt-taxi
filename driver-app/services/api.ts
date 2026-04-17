@@ -44,7 +44,7 @@ export async function api<T = any>(
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+    const timeout = setTimeout(() => controller.abort(), 25000); // 25s timeout (order completion involves GPS calc + DB writes)
 
     console.log(`[API] ${options.method || "GET"} ${API_BASE}${path}`);
 

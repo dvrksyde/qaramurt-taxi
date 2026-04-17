@@ -58,13 +58,23 @@ export async function PATCH(
   } else if (status === "completed") {
     updateData.completedAt = new Date();
 
-    // Save dropoff coordinates if provided
+    // Save dropoff coordinates immediately (without waiting for geocoding)
     if (typeof lat === "number" && typeof lng === "number") {
       updateData.dropoffPoint = `POINT(${lng} ${lat})`;
-      const address = await reverseGeocode(lat, lng);
-      if (address) {
-        updateData.dropoffAddress = address;
-      }
+      // reverseGeocode runs in the background — does NOT block the response
+      void (async () => {
+        try {
+          const address = await reverseGeocode(lat, lng);
+          if (address) {
+            await prisma.order.update({
+              where: { id: orderId },
+              data: { dropoffAddress: address },
+            });
+          }
+        } catch {
+          // Non-critical — ignore geocoding failures
+        }
+      })();
     }
 
     if (fixedPriceOrder) {
