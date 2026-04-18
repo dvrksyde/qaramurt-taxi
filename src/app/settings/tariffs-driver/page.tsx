@@ -135,7 +135,7 @@ export default function TariffsDriverPage() {
 
         {/* Form side */}
         <div style={{ flex: 1 }}>
-          <div style={{ background: "#fff", padding: 20, border: "1px solid var(--color-border-2)", borderRadius: 6 }}>
+          <div style={{ background: "var(--color-surface)", padding: 20, border: "1px solid var(--color-border-2)", borderRadius: 6 }}>
             <h4 style={{ margin: "0 0 16px", fontSize: 15 }}>{editId ? "Редактировать тариф" : "Добавить тариф"}</h4>
             
             <div style={{ marginBottom: 12 }}>

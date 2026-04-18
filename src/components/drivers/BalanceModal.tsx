@@ -76,11 +76,11 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
         <div className="modal-body" style={{ padding: 24 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: 32, alignItems: "start" }}>
             {/* Left: Form */}
-            <div style={{ background: "#fff", padding: 20, borderRadius: 10, border: "1px solid var(--color-border-2)" }}>
+            <div style={{ background: "var(--color-surface)", padding: 20, borderRadius: 10, border: "1px solid var(--color-border-2)" }}>
               <h4 style={{ marginBottom: 16, fontSize: 16, fontWeight: 600, color: "var(--color-text)" }}>Новая операция</h4>
               <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", alignItems: "center", gap: 12 }}>
-                  <label style={{ fontSize: 13, color: "#666" }}>Тип:</label>
+                  <label style={{ fontSize: 13, color: "var(--color-text-2)" }}>Тип:</label>
                   <select
                     className="form-select"
                     value={type}
@@ -129,8 +129,8 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
             </div>
 
             {/* Right: Summary */}
-            <div style={{ background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)", padding: 24, borderRadius: 10, border: "1px solid var(--color-border-2)", textAlign: "center" }}>
-              <div style={{ fontSize: 14, color: "#666", marginBottom: 8 }}>Текущий баланс:</div>
+            <div style={{ background: "var(--color-surface-2)", padding: 24, borderRadius: 10, border: "1px solid var(--color-border-2)", textAlign: "center" }}>
+              <div style={{ fontSize: 14, color: "var(--color-text-2)", marginBottom: 8 }}>Текущий баланс:</div>
               <div style={{
                 fontSize: 30,
                 fontWeight: 800,

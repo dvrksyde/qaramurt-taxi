@@ -99,7 +99,7 @@ export default function ReportsPage() {
     if (activePreset === preset) {
       return { background: "rgba(9, 132, 227, 0.1)", color: "#0984e3", fontSize: 13, padding: "6px 16px", borderRadius: 20, fontWeight: 600, border: "none" };
     }
-    return { background: "#f5f6fa", color: "#636e72", fontSize: 13, padding: "6px 16px", borderRadius: 20, border: "none" };
+    return { background: "var(--color-surface-2)", color: "var(--color-text-2)", fontSize: 13, padding: "6px 16px", borderRadius: 20, border: "none" };
   };
 
   const fetchReport = useCallback((silent = false) => {
@@ -158,17 +158,17 @@ export default function ReportsPage() {
     <div className="page-content" style={{ padding: 24, minHeight: "100vh", paddingBottom: 100 }}>
       <div style={{ marginBottom: 32, display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
         <div>
-          <h1 style={{ margin: 0, color: "#2d3436", fontSize: 28, fontWeight: 700 }}>Финансовая статистика</h1>
-          <p style={{ color: "#636e72", margin: "8px 0 0 0" }}>
+          <h1 style={{ margin: 0, color: "var(--color-text)", fontSize: 28, fontWeight: 700 }}>Финансовая статистика</h1>
+          <p style={{ color: "var(--color-text-2)", margin: "8px 0 0 0" }}>
             Реальные доходы по комиссиям
           </p>
         </div>
 
         {/* Date Controls */}
-        <div style={{ background: "#fff", padding: "20px", borderRadius: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.03)", display: "flex", flexDirection: "column", gap: 16, border: "1px solid #f1f2f6" }}>
+        <div style={{ background: "var(--color-surface)", padding: "20px", borderRadius: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.03)", display: "flex", flexDirection: "column", gap: 16, border: "1px solid var(--color-border)" }}>
           
           {/* Quick Presets */}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", paddingBottom: 16, borderBottom: "1px solid #f1f2f6" }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", paddingBottom: 16, borderBottom: "1px solid var(--color-border-2)" }}>
             <button onClick={() => setPreset("today")} className="btn btn-ghost btn-sm" style={getPresetStyle("today")}>Сегодня</button>
             <button onClick={() => setPreset("yesterday")} className="btn btn-ghost btn-sm" style={getPresetStyle("yesterday")}>Вчера</button>
             <button onClick={() => setPreset("this_week")} className="btn btn-ghost btn-sm" style={getPresetStyle("this_week")}>Эта неделя</button>
@@ -179,20 +179,20 @@ export default function ReportsPage() {
 
           {/* Custom Date Picker */}
           <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 13, color: "#b2bec3", fontWeight: 600 }}>ИЛИ ВРУЧНУЮ:</span>
+            <span style={{ fontSize: 13, color: "var(--color-text-3)", fontWeight: 600 }}>ИЛИ ВРУЧНУЮ:</span>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input 
                 type="date" 
                 value={startDate} 
                 onChange={(e) => { setStartDate(e.target.value); setActivePreset(null); }} 
-                style={{ padding: "8px 14px", border: "1px solid #dfe6e9", borderRadius: 8, fontFamily: "inherit", color: "#2d3436", background: "#fafbfc", outline: "none", fontSize: 14 }}
+                style={{ padding: "8px 14px", border: "1px solid var(--color-border)", borderRadius: 8, fontFamily: "inherit", color: "var(--color-text)", background: "var(--color-surface-2)", outline: "none", fontSize: 14 }}
               />
-              <span style={{ color: "#b2bec3", fontWeight: 500 }}>до</span>
+              <span style={{ color: "var(--color-text-2)", fontWeight: 500 }}>до</span>
               <input 
                 type="date" 
                 value={endDate} 
                 onChange={(e) => { setEndDate(e.target.value); setActivePreset(null); }} 
-                style={{ padding: "8px 14px", border: "1px solid #dfe6e9", borderRadius: 8, fontFamily: "inherit", color: "#2d3436", background: "#fafbfc", outline: "none", fontSize: 14 }}
+                style={{ padding: "8px 14px", border: "1px solid var(--color-border)", borderRadius: 8, fontFamily: "inherit", color: "var(--color-text)", background: "var(--color-surface-2)", outline: "none", fontSize: 14 }}
               />
             </div>
           </div>
@@ -219,23 +219,23 @@ export default function ReportsPage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           
           {/* Main Results Card */}
-          <div style={{ background: "#fff", borderRadius: 12, padding: 32, boxShadow: "0 4px 15px rgba(0,0,0,0.05)", borderTop: "4px solid #0984e3", opacity: loading ? 0.6 : 1, transition: "opacity 0.2s" }}>
+          <div style={{ background: "var(--color-surface)", borderRadius: 12, padding: 32, boxShadow: "0 4px 15px rgba(0,0,0,0.05)", borderTop: "4px solid #0984e3", opacity: loading ? 0.6 : 1, transition: "opacity 0.2s" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
-              <h3 style={{ margin: 0, color: "#636e72", fontSize: 16, textTransform: "uppercase", letterSpacing: 1 }}>Финансовые итоги</h3>
-              <div style={{ fontSize: 13, background: "#f1f2f6", padding: "6px 16px", borderRadius: 20, color: "#2d3436", fontWeight: 600, display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ color: "#b2bec3", fontWeight: 500 }}>Период:</span>
+              <h3 style={{ margin: 0, color: "var(--color-text-2)", fontSize: 16, textTransform: "uppercase", letterSpacing: 1 }}>Финансовые итоги</h3>
+              <div style={{ fontSize: 13, background: "var(--color-surface-2)", padding: "6px 16px", borderRadius: 20, color: "var(--color-text)", fontWeight: 600, display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ color: "var(--color-text-2)", fontWeight: 500 }}>Период:</span>
                 {new Date(data.summary.startDate).toLocaleDateString("ru-RU")} — {new Date(data.summary.endDate).toLocaleDateString("ru-RU")}
               </div>
             </div>
             
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 32, borderBottom: "1px solid #f1f2f6", paddingBottom: 24 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 32, borderBottom: "1px solid var(--color-border-2)", paddingBottom: 24 }}>
               <div>
-                <div style={{ fontSize: 36, fontWeight: 800, color: "#2d3436", lineHeight: 1 }}>{data.summary.totalOrders}</div>
-                <div style={{ fontSize: 14, color: "#b2bec3", marginTop: 8 }}>успешных заказов</div>
+                <div style={{ fontSize: 36, fontWeight: 800, color: "var(--color-text)", lineHeight: 1 }}>{data.summary.totalOrders}</div>
+                <div style={{ fontSize: 14, color: "var(--color-text-2)", marginTop: 8 }}>успешных заказов</div>
               </div>
               <div>
-                <div style={{ fontSize: 36, fontWeight: 700, color: "#2d3436", lineHeight: 1 }}>{data.summary.grossRevenue.toLocaleString("ru-RU")} <span style={{fontSize:20}}>тг.</span></div>
-                <div style={{ fontSize: 14, color: "#b2bec3", marginTop: 8 }}>оборот по всем заказам (выручка водителей)</div>
+                <div style={{ fontSize: 36, fontWeight: 700, color: "var(--color-text)", lineHeight: 1 }}>{data.summary.grossRevenue.toLocaleString("ru-RU")} <span style={{fontSize:20}}>тг.</span></div>
+                <div style={{ fontSize: 14, color: "var(--color-text-2)", marginTop: 8 }}>оборот по всем заказам (выручка водителей)</div>
               </div>
               <div style={{ background: "rgba(9, 132, 227, 0.05)", padding: 16, borderRadius: 8, borderLeft: "3px solid #0984e3" }}>
                 <div style={{ fontSize: 24, fontWeight: 700, color: "#0984e3", lineHeight: 1 }}>{data.summary.companyCommission.toLocaleString("ru-RU")} <span style={{fontSize:16}}>тг.</span></div>
@@ -269,11 +269,11 @@ export default function ReportsPage() {
 
           </div>
 
-          <div style={{ background: "#fff", borderRadius: 12, padding: 32, boxShadow: "0 4px 15px rgba(0,0,0,0.05)" }}>
-             <h3 style={{ margin: "0 0 24px 0", color: "#636e72", fontSize: 16, textTransform: "uppercase", letterSpacing: 1 }}>Разбивка по водителям</h3>
+          <div style={{ background: "var(--color-surface)", borderRadius: 12, padding: 32, boxShadow: "0 4px 15px rgba(0,0,0,0.05)" }}>
+             <h3 style={{ margin: "0 0 24px 0", color: "var(--color-text-2)", fontSize: 16, textTransform: "uppercase", letterSpacing: 1 }}>Разбивка по водителям</h3>
              
              {data.drivers.length === 0 ? (
-               <div style={{ textAlign: "center", padding: 40, color: "#b2bec3" }}>Нет данных за этот период</div>
+               <div style={{ textAlign: "center", padding: 40, color: "var(--color-text-3)" }}>Нет данных за этот период</div>
              ) : (
                <div className="data-table-wrap">
                  <table className="data-table">

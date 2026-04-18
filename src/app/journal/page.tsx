@@ -209,7 +209,7 @@ export default function JournalPage() {
                     padding: "4px 12px",
                     borderRadius: "14px",
                     border: "1px solid var(--color-border)",
-                    background: "#f9fafb",
+                    background: "var(--color-surface-2)",
                     fontSize: 11,
                     cursor: "pointer",
                     whiteSpace: "nowrap",
@@ -221,13 +221,13 @@ export default function JournalPage() {
                   onMouseEnter={(e) => {
                     e.currentTarget.style.borderColor = "var(--color-primary)";
                     e.currentTarget.style.color = "var(--color-primary)";
-                    e.currentTarget.style.background = "#fff";
+                    e.currentTarget.style.background = "var(--color-surface)";
                     e.currentTarget.style.boxShadow = "0 2px 4px rgba(0,0,0,0.1)";
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.borderColor = "var(--color-border)";
                     e.currentTarget.style.color = "var(--color-text-2)";
-                    e.currentTarget.style.background = "#f9fafb";
+                    e.currentTarget.style.background = "var(--color-surface-2)";
                     e.currentTarget.style.boxShadow = "0 1px 2px rgba(0,0,0,0.05)";
                   }}
                 >
@@ -356,7 +356,7 @@ export default function JournalPage() {
                         {expandedDriverId === o.id && (
                           <div style={{
                             position: "absolute", zIndex: 100, top: "100%", left: 0,
-                            background: "#fff", padding: 10, borderRadius: 8,
+                            background: "var(--color-surface)", padding: 10, borderRadius: 8,
                             boxShadow: "0 4px 12px rgba(0,0,0,0.15)", minWidth: 180,
                             border: "1px solid var(--color-border)"
                           }}>
@@ -367,7 +367,7 @@ export default function JournalPage() {
                               📞 <strong>{o.driver.phone || "—"}</strong>
                             </div>
                             {o.driver.vehicles?.[0] && (
-                              <div style={{ fontSize: 11, color: "#666", lineHeight: 1.4 }}>
+                              <div style={{ fontSize: 11, color: "var(--color-text-2)", lineHeight: 1.4 }}>
                                 🚗 {o.driver.vehicles[0].color} {o.driver.vehicles[0].make} {o.driver.vehicles[0].model}<br />
                                 <span className="license-plate" style={{ fontSize: 13, padding: "1px 5px" }}>{o.driver.vehicles[0].plate}</span>
                               </div>
@@ -390,9 +390,9 @@ export default function JournalPage() {
                       const price = Number(o.finalPrice || o.estimatedPrice || 0);
                       return (
                         <>
-                          <div style={{ color: "#444" }}>Оплачено: <strong style={{ color: "#000" }}>{price.toLocaleString()}</strong></div>
-                          <div style={{ color: "#666" }}>Комиссия: <strong>{(price * 0.1).toFixed(0)}</strong></div>
-                          <div style={{ color: "#666" }}>Водителю: <strong>{(price * 0.9).toFixed(0)}</strong></div>
+                          <div style={{ color: "var(--color-text-2)" }}>Оплачено: <strong style={{ color: "var(--color-text)" }}>{price.toLocaleString()}</strong></div>
+                          <div style={{ color: "var(--color-text-3)" }}>Комиссия: <strong>{(price * 0.1).toFixed(0)}</strong></div>
+                          <div style={{ color: "var(--color-text-3)" }}>Водителю: <strong>{(price * 0.9).toFixed(0)}</strong></div>
                         </>
                       );
                     })()}

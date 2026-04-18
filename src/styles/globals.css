@@ -59,21 +59,21 @@
 }
 
 [data-theme='dark'] {
-  --color-bg:         #1a1a1a;
-  --color-surface:    #222222;
-  --color-surface-2:  #2d2d2d;
-  --color-border:     #3f3f3f;
-  --color-border-2:   #4f4f4f;
+  --color-bg:         #0f172a; /* Slate 900 */
+  --color-surface:    #1e293b; /* Slate 800 */
+  --color-surface-2:  #334155; /* Slate 700 */
+  --color-border:     #334155;
+  --color-border-2:   #475569;
 
-  --color-text:       #e0e0e0;
-  --color-text-2:     #a0a0a0;
-  --color-text-3:     #777777;
+  --color-text:       #f1f5f9; /* Slate 100 */
+  --color-text-2:     #94a3b8; /* Slate 400 */
+  --color-text-3:     #64748b; /* Slate 500 */
 
-  --color-primary-bg: #401802;
-  --color-yellow-bg:  #4d3e00;
+  --color-primary-bg: #431407; /* Orange tint for primary */
+  --color-yellow-bg:  #422006; /* Dark amber tint instead of ugly yellowish brown */
 
-  --color-nav-bg:     #121212;
-  --color-sidebar-bg: #151515;
+  --color-nav-bg:     #020617; /* Slate 950 */
+  --color-sidebar-bg: #0f172a; /* Slate 900 */
 }
 
 /* ─── RESET ─────────────────────────────────────────────────────────────── */
