@@ -56,7 +56,15 @@
           "isAndroidForegroundServiceEnabled": true
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "architectures": ["armeabi-v7a", "arm64-v8a"]
+          }
+        }
+      ]
     ],
     "extra": {
       "router": {},

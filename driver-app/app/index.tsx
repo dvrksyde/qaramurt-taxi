@@ -451,6 +451,32 @@ export default function MainScreen() {
     setOrderAlert(null);
   };
 
+  const handleCurbsideOrder = async () => {
+    setLoading(true);
+    const res = await api(`/api/driver/orders/curbside`, {
+      method: "POST",
+    });
+    setLoading(false);
+
+    if (res.error) {
+      Alert.alert("Ошибка", res.error);
+      return;
+    }
+
+    setActiveOrder(mapOrderToState(res.data));
+    resetTrip();
+    startTrip();
+    tripDistanceRef.current = 0;
+    useDriverStore.getState().setTripMeter(0, 290); // BASE_FARE
+    setTripMeter(0, 290);
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest }).then((loc) => {
+      useDriverStore.getState().setLastLocation({
+        lat: loc.coords.latitude,
+        lng: loc.coords.longitude,
+      });
+    });
+  };
+
   const updateOrderStatus = async (status: string) => {
     if (!activeOrder) return;
 
@@ -870,6 +896,19 @@ export default function MainScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+          
+          {/* Curbside Button */}
+          {isOnline && profile?.status === "free" && (
+            <TouchableOpacity 
+              style={styles.curbsideButton} 
+              onPress={handleCurbsideOrder}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="car-sport" size={24} color="#000" />
+              <Text style={styles.curbsideButtonText}>Пассажир с бордюра</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.homeSwipeContainer}>
@@ -1093,7 +1132,30 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 22, left: 16, right: 16 },
+  orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 22, left: 16, right: 16  },
+  curbsideButton: {
+    backgroundColor: "#FFD000",
+    borderRadius: 16,
+    paddingVertical: 18,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 20,
+    marginHorizontal: 16,
+    shadowColor: "#FFD000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  curbsideButtonText: {
+    color: "#000",
+    fontSize: 18,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
   homeSwipeContainer: { position: "absolute", bottom: Platform.OS === "ios" ? 100 : 22, left: 16, right: 16 },
   statusActions: { gap: 12, marginBottom: 16 },
   statusHint: { color: "#666", fontSize: 13, textAlign: "center", marginBottom: 4 },

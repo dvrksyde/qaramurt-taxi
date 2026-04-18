@@ -169,7 +169,9 @@ export async function PATCH(
         where: { id: auth.driverId },
         include: { tariffGroup: true }
       });
-      const commPercent = Number(dTG?.tariffGroup?.value || 15);
+      
+      const isCurbside = updatedOrder.pickupAddress === "С бордюра" || updatedOrder.comment === "Заказ с бордюра";
+      const commPercent = isCurbside ? 10 : Number(dTG?.tariffGroup?.value || 15);
       const commission = Number(updatedOrder.finalPrice) * (commPercent / 100);
 
       if (commission > 0) {
@@ -184,7 +186,9 @@ export async function PATCH(
             orderId,
             amount: commission,
             type: "order_fee",
-            description: `Комиссия ${commPercent}% за заказ #${orderId}`,
+            description: isCurbside 
+              ? `Комиссия ${commPercent}% (С бордюра) за заказ #${orderId}`
+              : `Комиссия ${commPercent}% за заказ #${orderId}`,
           },
         });
       }
