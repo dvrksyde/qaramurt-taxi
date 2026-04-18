@@ -531,7 +531,7 @@ export default function MainScreen() {
           const fallbackPrice = roundTo5(BASE_FARE + fallbackDist * activeOrder.pricePerKm);
           Alert.alert(
             "Поездка завершена",
-            `Расстояние: ~${fallbackDist} км\nПримерная сумма: ~${fallbackPrice} ₸`,
+            `Расстояние: ${fallbackDist} км\nПримерная сумма: ${fallbackPrice} ₸`,
           );
         }
       } else {
