@@ -382,12 +382,12 @@ code { font-family: var(--font-mono); font-size: 12px; }
   font-size: 11px;
   font-weight: 600;
 }
-.status-badge.pending    { background: #fff8dc; color: #b8860b; }
-.status-badge.assigned   { background: #e8f4fd; color: #2980b9; }
-.status-badge.arrived    { background: #f3e6ff; color: #7d3c98; }
-.status-badge.in_progress{ background: #e8f8f0; color: #1e8449; }
-.status-badge.completed  { background: #f0f0f0; color: #5d6d7e; }
-.status-badge.canceled   { background: #fdecea; color: #c0392b; }
+.status-badge.pending    { background: rgba(245, 197, 24, 0.15);  color: var(--status-pending); }
+.status-badge.assigned   { background: rgba(74, 159, 245, 0.15);  color: var(--status-assigned); }
+.status-badge.arrived    { background: rgba(155, 89, 182, 0.15);  color: var(--status-arrived); }
+.status-badge.in_progress{ background: rgba(39, 174, 96, 0.15);   color: var(--status-in-progress); }
+.status-badge.completed  { background: rgba(127, 140, 141, 0.15); color: var(--status-completed); }
+.status-badge.canceled   { background: rgba(231, 76, 60, 0.15);   color: var(--status-canceled); }
 
 /* ─── DATA TABLE ─────────────────────────────────────────────────────────── */
 .data-table-wrap {
@@ -572,7 +572,7 @@ code { font-family: var(--font-mono); font-size: 12px; }
 .tabs-bar {
   display: flex;
   align-items: center;
-  background: var(--color-yellow-bg);
+  background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   overflow-x: auto;
   scrollbar-width: none;
@@ -617,7 +617,7 @@ code { font-family: var(--font-mono); font-size: 12px; }
   align-items: center;
   justify-content: center;
 }
-.tab-count.zero { background: #ccc; }
+.tab-count.zero { background: var(--color-border-2); color: var(--color-text-2); }
 
 /* ─── EMPTY STATE ────────────────────────────────────────────────────────── */
 .empty-state {
@@ -659,8 +659,8 @@ code { font-family: var(--font-mono); font-size: 12px; }
 /* ─── SCROLLBARS ─────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #aaa; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-border-2); }
 
 /* ─── JOURNAL FILTERS ────────────────────────────────────────────────────── */
 .journal-filters {
@@ -879,7 +879,7 @@ code { font-family: var(--font-mono); font-size: 12px; }
   align-items: center;
   justify-content: center;
   background: #ffffff;
-  border: 1px solid #1a1a1a;
+  border: 2px solid #1a1a1a;
   border-radius: 4px;
   padding: 2px 6px;
   font-family: Arial, Helvetica, sans-serif;
@@ -890,4 +890,11 @@ code { font-family: var(--font-mono); font-size: 12px; }
   letter-spacing: 0.5px;
   box-shadow: 1px 1px 2px rgba(0,0,0,0.2);
   line-height: 1.1;
+}
+
+[data-theme='dark'] .license-plate {
+  background: #1e293b;
+  border-color: #94a3b8;
+  color: #f1f5f9;
+  box-shadow: none;
 }
