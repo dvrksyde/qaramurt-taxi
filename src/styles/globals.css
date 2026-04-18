@@ -58,6 +58,24 @@
   --font-mono:  'JetBrains Mono', monospace;
 }
 
+[data-theme='dark'] {
+  --color-bg:         #1a1a1a;
+  --color-surface:    #222222;
+  --color-surface-2:  #2d2d2d;
+  --color-border:     #3f3f3f;
+  --color-border-2:   #4f4f4f;
+
+  --color-text:       #e0e0e0;
+  --color-text-2:     #a0a0a0;
+  --color-text-3:     #777777;
+
+  --color-primary-bg: #401802;
+  --color-yellow-bg:  #4d3e00;
+
+  --color-nav-bg:     #121212;
+  --color-sidebar-bg: #151515;
+}
+
 /* ─── RESET ─────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -387,7 +405,7 @@ code { font-family: var(--font-mono); font-size: 12px; }
 .data-table th {
   position: sticky;
   top: 0;
-  background: linear-gradient(180deg, #f9f9f6 0%, #f2f2ee 100%);
+  background: var(--color-surface-2);
   color: var(--color-text-2);
   font-size: 11px;
   font-weight: 600;

@@ -23,6 +23,13 @@ function getPrisma() {
 // Also export a lazy proxy for convenience
 exports.prisma = new Proxy({}, {
     get(_target, prop) {
-        return getPrisma()[prop];
+        const client = getPrisma();
+        if (typeof prop === "string" && !prop.startsWith("_") && !(prop in client)) {
+            // If the property is missing and it's not a private member, 
+            // the schema might have changed. Clear singleton to force reload.
+            global.__prisma = undefined;
+            return getPrisma()[prop];
+        }
+        return client[prop];
     },
 });
