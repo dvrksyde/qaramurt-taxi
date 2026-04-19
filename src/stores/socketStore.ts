@@ -19,8 +19,11 @@ export function useSocket() {
 
     const socket = io({
       path: "/api/socket",
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
+      transports: ["polling", "websocket"],   // polling first — works behind Render's proxy
+      reconnectionAttempts: Infinity,          // keep trying forever
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 10000,
+      timeout: 20000,
     });
 
     socketInstance = socket;

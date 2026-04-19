@@ -775,13 +775,13 @@ export default function MainScreen() {
                   <View style={styles.meterStripItem}>
                     <Ionicons name="speedometer-outline" size={14} color="#888" />
                     {/* '~' indicates preliminary — server will calculate the exact figure */}
-                    <Text style={styles.meterStripValue}>~{tripDistance.toFixed(1)} км</Text>
+                    <Text style={styles.meterStripValue}>{tripDistance.toFixed(1)} км</Text>
                   </View>
                   <View style={styles.meterStripItem}>
                     <Ionicons name="time-outline" size={14} color="#888" />
                     <Text style={styles.meterStripValue}>{tripElapsed} мин</Text>
                   </View>
-                  <Text style={styles.meterStripPrice}>~{tripPrice} ₸</Text>
+                  <Text style={styles.meterStripPrice}>{tripPrice}₸</Text>
                 </>
               )}
             </View>
@@ -896,11 +896,11 @@ export default function MainScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-          
+
           {/* Curbside Button */}
           {isOnline && profile?.status === "free" && (
-            <TouchableOpacity 
-              style={styles.curbsideButton} 
+            <TouchableOpacity
+              style={styles.curbsideButton}
               onPress={handleCurbsideOrder}
               disabled={loading}
               activeOpacity={0.8}
@@ -1132,7 +1132,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 22, left: 16, right: 16  },
+  orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 22, left: 16, right: 16 },
   curbsideButton: {
     backgroundColor: "#FFD000",
     borderRadius: 16,

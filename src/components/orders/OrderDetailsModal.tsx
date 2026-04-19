@@ -110,7 +110,7 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
       <div className="modal order-details-modal" style={{ width: 800, maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <div className="modal-header">
           <div className="flex-row">
-            <span className="status-badge" style={{ background: "var(--color-bg-2)", color: "var(--color-text-1)" }}>#{order.id}</span>
+            <span className="status-badge" style={{ background: "var(--color-border)", color: "var(--color-text-2)" }}>#{order.id}</span>
             <h3 style={{ margin: 0 }}>Информация о заказе</h3>
           </div>
           <div className="flex-row">
@@ -138,15 +138,15 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
                 <div style={{ padding: "4px 0" }}>🔵</div>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{order.pickupAddress || "Не указан"}</div>
-                  <div style={{ fontSize: 11, color: "#666" }}>Точка А</div>
+                  <div style={{ fontSize: 11, color: "var(--color-text-3)" }}>Точка А</div>
                 </div>
               </div>
-              <div style={{ borderLeft: "2px dashed #ddd", marginLeft: 8, height: 20, margin: "4px 8px" }}></div>
+              <div style={{ borderLeft: "2px dashed var(--color-border)", marginLeft: 8, height: 20, margin: "4px 8px" }}></div>
               <div className="flex-row" style={{ alignItems: "flex-start", gap: 12 }}>
                 <div style={{ padding: "4px 0" }}>🔴</div>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{order.dropoffAddress || "Не указан"}</div>
-                  <div style={{ fontSize: 11, color: "#666" }}>Точка Б</div>
+                  <div style={{ fontSize: 11, color: "var(--color-text-3)" }}>Точка Б</div>
                 </div>
               </div>
             </div>
@@ -155,14 +155,14 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
             {(order.status === "in_progress" || order.status === "completed") && (
               <div className="details-card" style={{ marginTop: -4 }}>
                 <div className="card-label">Трек поездки</div>
-                <div style={{ marginTop: 8, fontSize: 13, color: "#333", display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ marginTop: 8, fontSize: 13, display: "flex", flexDirection: "column", gap: 4 }}>
                   <div className="flex-row" style={{ justifyContent: "space-between" }}>
-                    <span style={{ color: "#666" }}>GPS точек:</span>
+                    <span style={{ color: "var(--color-text-2)" }}>GPS точек:</span>
                     <strong>{trackPointsCount} шт.</strong>
                   </div>
                   {order.distanceKm && (
                     <div className="flex-row" style={{ justifyContent: "space-between" }}>
-                      <span style={{ color: "#666" }}>Дистанция:</span>
+                      <span style={{ color: "var(--color-text-2)" }}>Дистанция:</span>
                       <strong>{Number(order.distanceKm).toFixed(1)} км</strong>
                     </div>
                   )}
@@ -216,7 +216,7 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
                         className="btn btn-ghost btn-sm" 
                         disabled={currentRank >= 5}
                         onClick={() => handleStatusChange("completed")} 
-                        style={{ color: currentRank >= 5 ? "#ccc" : "var(--status-free)" }}
+                        style={{ color: currentRank >= 5 ? "var(--color-text-3)" : "var(--status-free)" }}
                       >
                         Завершить
                       </button>
@@ -224,7 +224,7 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
                         className="btn btn-ghost btn-sm" 
                         disabled={currentRank >= 5}
                         onClick={() => handleStatusChange("canceled")} 
-                        style={{ color: currentRank >= 5 ? "#ccc" : "var(--status-offline)", gridColumn: "span 2" }}
+                        style={{ color: currentRank >= 5 ? "var(--color-text-3)" : "var(--status-offline)", gridColumn: "span 2" }}
                       >
                         Отменить заказ
                       </button>
@@ -243,12 +243,12 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
                     {order.driver.callsign && <span className="callsign-tag" style={{ marginRight: 8 }}>{order.driver.callsign}</span>}
                     {order.driver.lastName} {order.driver.firstName}
                   </div>
-                  <div style={{ fontSize: 13, color: "#666", marginTop: 4 }}>
+                  <div style={{ fontSize: 13, color: "var(--color-text-2)", marginTop: 4 }}>
                     {order.driver.phone}
                   </div>
                 </div>
               ) : (
-                <div style={{ padding: "12px 0", color: "#999", fontStyle: "italic" }}>Водитель не назначен</div>
+                <div style={{ padding: "12px 0", color: "var(--color-text-3)", fontStyle: "italic" }}>Водитель не назначен</div>
               )}
             </div>
 
@@ -260,12 +260,12 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
                   <div style={{ fontSize: 15, fontWeight: 600 }}>
                     {order.vehicle.color} {order.vehicle.make} {order.vehicle.model}
                   </div>
-                  <div style={{ display: "inline-block", background: "#eee", padding: "4px 8px", borderRadius: 4, fontWeight: 700, marginTop: 6, border: "1px solid #ccc", fontSize: 16, color: "#333" }}>
+                  <span className="license-plate" style={{ marginTop: 8, display: "inline-block" }}>
                     {order.vehicle.plate}
-                  </div>
+                  </span>
                 </div>
               ) : (
-                <div style={{ padding: "12px 0", color: "#999", fontStyle: "italic" }}>Данные об авто отсутствуют</div>
+                <div style={{ padding: "12px 0", color: "var(--color-text-3)", fontStyle: "italic" }}>Данные об авто отсутствуют</div>
               )}
             </div>
 
@@ -286,26 +286,27 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
 
       <style jsx>{`
         .order-details-modal {
-          background: white;
+          background: var(--color-surface);
           border-radius: 16px;
-          box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+          box-shadow: 0 20px 40px rgba(0,0,0,0.35);
+          border: 1px solid var(--color-border);
         }
         .details-card {
           padding: 16px;
-          background: #f8f9fa;
+          background: var(--color-surface-2);
           border-radius: 12px;
-          border: 1px solid #eee;
+          border: 1px solid var(--color-border);
         }
         .card-label {
           font-size: 11px;
           text-transform: uppercase;
           letter-spacing: 0.5px;
-          color: #999;
+          color: var(--color-text-3);
           font-weight: 700;
         }
         .callsign-tag {
-          background: #333;
-          color: white;
+          background: var(--color-border-2);
+          color: var(--color-text);
           padding: 2px 6px;
           border-radius: 4px;
           font-size: 13px;
