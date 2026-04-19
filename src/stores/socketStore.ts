@@ -106,8 +106,13 @@ export function useSocket() {
       store.addChatMessage(msg);
     });
 
-    socket.on("driver_alarm", (data) => {
-      store.addAlarm(data);
+    socket.on("driver_alarm", (data: any) => {
+      store.addSystemLog({
+        id: Date.now().toString(),
+        message: `⚠️ Тревога! Водитель #${data.driverId} нажал кнопку тревоги`,
+        level: "error",
+        timestamp: new Date().toISOString(),
+      });
     });
 
     socket.on("tab_counts", (counts) => {

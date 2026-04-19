@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "Qaramurt Driver",
+    "name": "QaramurtTaxi Driver",
     "slug": "qaramurttaxi",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "scheme": "qaramurt-driver",
+    "scheme": "qaramurttaxi-driver",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -61,7 +61,10 @@
         "expo-build-properties",
         {
           "android": {
-            "architectures": ["armeabi-v7a", "arm64-v8a"]
+            "architectures": [
+              "armeabi-v7a",
+              "arm64-v8a"
+            ]
           }
         }
       ]
