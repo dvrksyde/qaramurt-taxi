@@ -162,7 +162,11 @@ export async function PATCH(
       data: updateData,
     });
 
-    const operatorId = updatedOrder.operatorId ?? 1;
+    let operatorId = updatedOrder.operatorId;
+    if (!operatorId) {
+      const defaultOp = await tx.operator.findFirst({ orderBy: { id: 'asc' } });
+      operatorId = defaultOp?.id ?? 1;
+    }
 
     if (status === "completed" && updatedOrder.finalPrice) {
       const dTG = await tx.driver.findUnique({

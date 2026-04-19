@@ -475,6 +475,23 @@ export default function MainScreen() {
         lng: loc.coords.longitude,
       });
     });
+
+    void (async () => {
+      await startTripSync(res.data.id);
+      try {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+        const seedPoint = {
+          lat: loc.coords.latitude,
+          lng: loc.coords.longitude,
+          capturedAt: new Date(loc.timestamp).toISOString(),
+          accuracyM: typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : null,
+          speedKmh: typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed) ? loc.coords.speed * 3.6 : null,
+          headingDeg: typeof loc.coords.heading === "number" && Number.isFinite(loc.coords.heading) ? loc.coords.heading : null,
+        };
+        useDriverStore.getState().setLastLocation({ lat: seedPoint.lat, lng: seedPoint.lng });
+        await queueTripPoint(res.data.id, seedPoint);
+      } catch {}
+    })();
   };
 
   const updateOrderStatus = async (status: string) => {
