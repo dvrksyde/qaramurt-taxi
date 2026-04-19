@@ -6,7 +6,7 @@ export const metadata: Metadata = {
 };
 
 // ⚠️ Update this URL after each new APK build
-const APK_URL = process.env.APK_DOWNLOAD_URL || "https://drive.google.com/file/d/1VQsoM3cyj_3AqXahA2eNrj4f-rXdaUfE/view?usp=sharing";
+const APK_URL = process.env.APK_DOWNLOAD_URL || "https://drive.google.com/file/d/1jFIQZ6BLSPizJaggMkdLrUQA8HckLiV2/view?usp=sharing";
 const APP_VERSION = process.env.APK_VERSION || "1.3.3";
 
 export default function DownloadPage() {
