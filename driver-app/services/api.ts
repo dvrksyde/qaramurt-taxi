@@ -5,8 +5,8 @@ import Constants from "expo-constants";
 // const host = "10.188.157.221"; // Ваш IP адрес компьютера (для локальных тестов)
 // export const API_BASE = `http://${host}:3000`; // Локальный сервер
 
-// БОЕВОЙ СЕРВЕР RENDER
-export const API_BASE = "https://qaramurttaxi.onrender.com";
+// БОЕВОЙ СЕРВЕР RENDER -> HETZNER
+export const API_BASE = "https://taxi.azizpro.online";
 
 let token: string | null = null;
 

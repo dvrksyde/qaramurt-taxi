@@ -349,7 +349,7 @@ export function DriverForm({ driver, onClose }: Props) {
                         onClick={() => {
                           const phone = savedCreds.phone.replace(/\D/g, "");
                           const msg = encodeURIComponent(
-                            `Assalomu alaykum! Qaramurt Taxi ilovasiga xush kelibsiz 🚗\n\nLoginingiz: ${savedCreds.login}\nParolingiz: ${savedCreds.password}\n\nIlovani yuklab oling:\nhttps://qaramurttaxi.onrender.com/download`
+                            `Assalomu alaykum! Qaramurt Taxi ilovasiga xush kelibsiz 🚗\n\nLoginingiz: ${savedCreds.login}\nParolingiz: ${savedCreds.password}\n\nIlovani yuklab oling:\nhttps://taxi.azizpro.online/download`
                           );
                           window.open(`https://wa.me/${phone}?text=${msg}`, "_blank");
                         }}
@@ -375,7 +375,7 @@ export function DriverForm({ driver, onClose }: Props) {
                           const phone = (watch("phone") || "").replace(/\D/g, "");
                           const login = watch("login") || "";
                           const msg = encodeURIComponent(
-                            `Assalomu alaykum! Qaramurt Taxi ilovasiga xush kelibsiz 🚗\n\nLoginingiz: ${login}\n\nIlovani yuklab oling:\nhttps://qaramurttaxi.onrender.com/download`
+                            `Assalomu alaykum! Qaramurt Taxi ilovasiga xush kelibsiz 🚗\n\nLoginingiz: ${login}\n\nIlovani yuklab oling:\nhttps://taxi.azizpro.online/download`
                           );
                           window.open(`https://wa.me/${phone}?text=${msg}`, "_blank");
                         }}
