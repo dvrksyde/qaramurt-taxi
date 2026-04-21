@@ -1,128 +1,49 @@
-/**
- * Refined import script using Prisma custom adapter for compatibility.
- */
-import { PrismaClient } from "@prisma/client";
-import { Pool } from "pg";
-import { PrismaPg } from "@prisma/adapter-pg";
-import fs from "fs";
-import path from "path";
-import dotenv from "dotenv";
+import 'dotenv/config';
+import { getPrisma } from "../src/lib/prisma";
+import * as fs from 'fs';
 
-dotenv.config();
-
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  console.error("DATABASE_URL is missing in .env");
-  process.exit(1);
-}
-
-const pool = new Pool({ connectionString });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
-
-/**
- * Reliable CSV parser that handles quoted fields with commas.
- */
-function parseCsvLine(line: string): string[] {
-  const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === "," && !inQuotes) {
-      result.push(current.trim());
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-  result.push(current.trim());
-  return result;
-}
+const prisma = getPrisma();
 
 async function main() {
-  const csvPath = path.join(process.cwd(), "adresses.csv");
-  if (!fs.existsSync(csvPath)) {
-    console.error(`Error: File not found at ${csvPath}`);
+  if (!fs.existsSync('prisma/addresses.json')) {
+    console.log("Файл prisma/addresses.json не найден!");
     process.exit(1);
   }
 
-  console.log("Reading adresses.csv...");
-  const content = fs.readFileSync(csvPath, "utf-8");
-  const lines = content.split(/\r?\n/);
-  
-  // Skip header "название,официальное название,координаты"
-  const dataLines = lines.slice(1).filter(l => l.trim() !== "");
+  const fileData = fs.readFileSync('prisma/addresses.json', 'utf8');
+  const addresses = JSON.parse(fileData);
 
-  console.log(`Processing ${dataLines.length} addresses...`);
+  console.log(`Найдено ${addresses.length} адресов для импорта. Очистка и импорт...`);
+
+  // Clear existing
+  await prisma.$executeRawUnsafe(`TRUNCATE TABLE address_book RESTART IDENTITY CASCADE`);
 
   let count = 0;
-  for (const line of dataLines) {
-    const parts = parseCsvLine(line);
-    if (parts.length < 3) {
-      console.warn(`Skipping invalid line: ${line}`);
-      continue;
-    }
-
-    const name = parts[0];
-    const fullNameRaw = parts[1];
-    const coordsRaw = parts[2];
-    
-    const fullName = fullNameRaw === "-" ? "" : fullNameRaw;
-    const [latStr, lngStr] = coordsRaw.split(",").map(s => s.trim());
-    const lat = parseFloat(latStr);
-    const lng = parseFloat(lngStr);
-
-    if (isNaN(lat) || isNaN(lng)) {
-      console.warn(`Skipping line with invalid coordinates: ${line}`);
-      continue;
-    }
-
+  for (const item of addresses) {
     try {
-      // Find existing record by name
-      const existing = await prisma.addressBook.findFirst({
-        where: { name: name }
+      await prisma.addressBook.create({
+        data: {
+          name: item.name,
+          fullName: item.fullName,
+          latitude: parseFloat(item.latitude),
+          longitude: parseFloat(item.longitude),
+          isActive: item.isActive !== false,
+        }
       });
-
-      if (existing) {
-        await prisma.addressBook.update({
-          where: { id: existing.id },
-          data: {
-            fullName,
-            latitude: lat,
-            longitude: lng,
-          }
-        });
-        console.log(`Updated: ${name}`);
-      } else {
-        await prisma.addressBook.create({
-          data: {
-            name,
-            fullName,
-            latitude: lat,
-            longitude: lng,
-          }
-        });
-        console.log(`Created: ${name}`);
-      }
       count++;
-    } catch (error) {
-      console.error(`Error processing "${name}":`, error);
+    } catch(e) {
+      console.error(`Ошибка при добавлении ${item.name}:`, e);
     }
   }
 
-  console.log(`\nImport finished! Processed ${count} records.`);
+  console.log(`✅ Успешно добавлено ${count} адресов в новую базу данных!`);
 }
 
 main()
-  .catch(e => {
-    console.error(e);
+  .catch((e) => {
+    console.error("Ошибка при импорте:", e);
     process.exit(1);
   })
   .finally(async () => {
     await prisma.$disconnect();
-    await pool.end();
   });
