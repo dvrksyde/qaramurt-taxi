@@ -322,7 +322,7 @@ app.prepare().then(async () => {
       const auth = socket.data.auth as SocketAuth | undefined;
       if (auth?.kind !== "operator") return;
 
-      socket.emit("tab_counts", { current: 0, scheduled: 0, exchange: 0, chat: 0, system: 0, alarms: 0 });
+      socket.emit("tab_counts", { current: 0, chat: 0, system: 0 });
     });
 
     socket.on("disconnect", () => {

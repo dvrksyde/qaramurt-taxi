@@ -3,11 +3,12 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { Session } from "next-auth";
 import { Sidebar } from "./Sidebar";
 import { useMonitorStore } from "@/stores/monitorStore";
 import { useSocket } from "@/stores/socketStore";
+import { useTheme } from "next-themes";
 
 interface Props { session: Session; }
 
@@ -44,6 +45,13 @@ export function TopNav({ session }: Props) {
     if (requiredPerms.length === 0) return true;
     return requiredPerms.some((p) => permissions.includes(p));
   };
+
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   return (
     <>
@@ -82,6 +90,18 @@ export function TopNav({ session }: Props) {
           <span className={`nav-online-badge ${isConnected ? "" : "offline"}`}>
             {isConnected ? "ONLINE" : "OFFLINE"}
           </span>
+
+          {mounted && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              title="Переключить тему"
+              style={{ fontSize: 16, padding: "0 6px" }}
+            >
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+          )}
+
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => signOut({ callbackUrl: "/login" })}

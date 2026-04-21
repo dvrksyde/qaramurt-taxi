@@ -3,8 +3,15 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyDriverToken } from "@/lib/driverAuth";
-
 import { reverseGeocode } from "@/lib/geocoder";
+import { isDeliveryOrder } from "@/lib/orderPricing";
+import { calculateSessionDistance, completeSession } from "@/lib/tripDistance";
+
+const BASE_FARE = 290;
+
+function roundTo5(n: number): number {
+  return Math.round(n / 5) * 5;
+}
 
 export async function PATCH(
   req: NextRequest,
@@ -15,7 +22,17 @@ export async function PATCH(
 
   const { id } = await params;
   const orderId = parseInt(id, 10);
-  const { status, lat, lng, distanceKm, finalPrice } = await req.json();
+
+  const body = await req.json();
+  const { status, lat, lng } = body;
+
+  // Fixed-price orders send distanceKm + finalPrice directly.
+  // Non-fixed orders send clientDistanceKm + clientFinalPrice as a BACKUP
+  // (server will prefer GPS calculation; falls back to these if < 2 points).
+  const clientDistanceKm: number | undefined =
+    body.clientDistanceKm ?? body.distanceKm;
+  const clientFinalPrice: number | undefined =
+    body.clientFinalPrice ?? body.finalPrice;
 
   const validStatuses = ["arrived", "in_progress", "completed", "canceled"];
   if (!validStatuses.includes(status)) {
@@ -32,6 +49,7 @@ export async function PATCH(
   }
 
   const updateData: Record<string, unknown> = { status };
+  const fixedPriceOrder = isDeliveryOrder(order);
 
   if (status === "arrived") {
     updateData.arrivedAt = new Date();
@@ -39,19 +57,103 @@ export async function PATCH(
     updateData.startedAt = new Date();
   } else if (status === "completed") {
     updateData.completedAt = new Date();
-    if (lat && lng) {
+
+    // Save dropoff coordinates immediately (without waiting for geocoding)
+    if (typeof lat === "number" && typeof lng === "number") {
       updateData.dropoffPoint = `POINT(${lng} ${lat})`;
-      
-      // Вытягиваем читаемый адрес для поля "Куда"
-      const address = await reverseGeocode(lat, lng);
-      if (address) {
-        updateData.dropoffAddress = address;
-      }
+      // reverseGeocode runs in the background — does NOT block the response
+      void (async () => {
+        try {
+          const address = await reverseGeocode(lat, lng);
+          if (address) {
+            await prisma.order.update({
+              where: { id: orderId },
+              data: { dropoffAddress: address },
+            });
+          }
+        } catch {
+          // Non-critical — ignore geocoding failures
+        }
+      })();
     }
-    if (distanceKm !== undefined) updateData.distanceKm = distanceKm;
-    if (finalPrice !== undefined) updateData.finalPrice = finalPrice;
+
+    if (fixedPriceOrder) {
+      // Fixed-price orders: use pre-set estimatedPrice from operator
+      if (order.distanceKm !== null && order.distanceKm !== undefined) {
+        updateData.distanceKm = order.distanceKm;
+      } else if (clientDistanceKm !== undefined) {
+        updateData.distanceKm = clientDistanceKm;
+      }
+      const fixedPrice =
+        order.estimatedPrice !== null && order.estimatedPrice !== undefined
+          ? Number(order.estimatedPrice)
+          : clientFinalPrice;
+      if (fixedPrice !== undefined) {
+        updateData.finalPrice = fixedPrice;
+      }
+    } else {
+      // ── SERVER-SIDE DISTANCE CALCULATION ────────────────────────────────────
+      // Find the active trip session for this order to compute real distance
+      const activeSession = await prisma.orderTripSession.findFirst({
+        where: {
+          orderId,
+          driverId: auth.driverId,
+          status: "active",
+        },
+        orderBy: { startedAt: "desc" },
+      });
+
+      if (activeSession) {
+        try {
+          const calc = await calculateSessionDistance(activeSession.id);
+
+          if (calc.distanceKm > 0) {
+            // GPS session has enough points — use server calculation
+            await completeSession(activeSession.id, calc.distanceKm, calc.finalPrice);
+            updateData.distanceKm = calc.distanceKm;
+            updateData.finalPrice = calc.finalPrice;
+          } else {
+            // < 2 GPS points (bad GPS / very short trip) — use client backup
+            console.warn(`[trip/complete] Session ${activeSession.id} has < 2 points; using client fallback`);
+            await completeSession(
+              activeSession.id,
+              clientDistanceKm ?? 0,
+              clientFinalPrice ?? roundTo5(BASE_FARE)
+            );
+            if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
+            updateData.finalPrice =
+              clientFinalPrice ??
+              roundTo5(BASE_FARE + Number(clientDistanceKm ?? 0) * Number(order.pricePerKm));
+          }
+        } catch (err) {
+          console.error("[trip/complete] Server calc failed:", err);
+          // Graceful fallback: use client values if server calc throws
+          if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
+          updateData.finalPrice =
+            clientFinalPrice ??
+            (clientDistanceKm !== undefined
+              ? roundTo5(BASE_FARE + Number(clientDistanceKm) * Number(order.pricePerKm))
+              : undefined);
+        }
+      } else {
+        // No GPS session — fall back to client-reported values
+        if (clientDistanceKm !== undefined) {
+          updateData.distanceKm = clientDistanceKm;
+          updateData.finalPrice = roundTo5(BASE_FARE + Number(clientDistanceKm) * Number(order.pricePerKm));
+        } else if (clientFinalPrice !== undefined) {
+          updateData.finalPrice = clientFinalPrice;
+        }
+      }
+      // ────────────────────────────────────────────────────────────────────────
+    }
   } else if (status === "canceled") {
     updateData.canceledAt = new Date();
+
+    // Also cancel any active trip session
+    await prisma.orderTripSession.updateMany({
+      where: { orderId, driverId: auth.driverId, status: "active" },
+      data: { status: "canceled", completedAt: new Date() },
+    });
   }
 
   await prisma.$transaction(async (tx) => {
@@ -60,15 +162,20 @@ export async function PATCH(
       data: updateData,
     });
 
-    // Берём operatorId из заказа, а не хардкодим ID=1
-    const operatorId = updatedOrder.operatorId ?? 1;
+    let operatorId = updatedOrder.operatorId;
+    if (!operatorId) {
+      const defaultOp = await tx.operator.findFirst({ orderBy: { id: 'asc' } });
+      operatorId = defaultOp?.id ?? 1;
+    }
 
     if (status === "completed" && updatedOrder.finalPrice) {
       const dTG = await tx.driver.findUnique({
         where: { id: auth.driverId },
         include: { tariffGroup: true }
       });
-      const commPercent = Number(dTG?.tariffGroup?.value || 15);
+      
+      const isCurbside = updatedOrder.pickupAddress === "С бордюра" || updatedOrder.comment === "Заказ с бордюра";
+      const commPercent = isCurbside ? 10 : Number(dTG?.tariffGroup?.value || 15);
       const commission = Number(updatedOrder.finalPrice) * (commPercent / 100);
 
       if (commission > 0) {
@@ -83,7 +190,9 @@ export async function PATCH(
             orderId,
             amount: commission,
             type: "order_fee",
-            description: `Комиссия ${commPercent}% за заказ #${orderId}`,
+            description: isCurbside 
+              ? `Комиссия ${commPercent}% (С бордюра) за заказ #${orderId}`
+              : `Комиссия ${commPercent}% за заказ #${orderId}`,
           },
         });
       }
@@ -119,14 +228,20 @@ export async function PATCH(
     data: { orderId, driverId: auth.driverId, status },
   });
 
+  // Read back the final values to return to the driver app
+  const finalOrder = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { distanceKm: true, finalPrice: true },
+  });
+
   const io = (global as Record<string, unknown>).socketIO as any;
   if (io) {
     io.to("monitor").emit("order_status_change", {
       orderId,
       status,
       driverId: auth.driverId,
-      distanceKm,
-      finalPrice,
+      distanceKm: finalOrder?.distanceKm,
+      finalPrice: finalOrder?.finalPrice,
     });
 
     if (status === "completed") {
@@ -136,5 +251,12 @@ export async function PATCH(
     }
   }
 
-  return NextResponse.json({ data: { orderId, status } });
+  return NextResponse.json({
+    data: {
+      orderId,
+      status,
+      distanceKm: finalOrder?.distanceKm ?? null,
+      finalPrice: finalOrder?.finalPrice ?? null,
+    },
+  });
 }

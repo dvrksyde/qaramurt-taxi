@@ -132,11 +132,11 @@ export function ChatTab() {
             padding: "10px 12px",
             border: "none",
             borderBottom: "1px solid var(--color-border)",
-            background: selectedDriverId === "all" ? "#fff3e0" : "transparent",
+            background: selectedDriverId === "all" ? "var(--color-border)" : "transparent",
             cursor: "pointer",
             fontWeight: 700,
             fontSize: 13,
-            color: "#c8440a",
+            color: "var(--color-primary)",
           }}
         >
           Написать всем водителям
@@ -166,9 +166,10 @@ export function ChatTab() {
                 padding: "8px 12px",
                 cursor: "pointer",
                 borderBottom: "1px solid var(--color-border)",
-                background: selectedDriverId === driver.driverId ? "#fff3e0" : "transparent",
+                background: selectedDriverId === driver.driverId ? "var(--color-border)" : "transparent",
                 fontSize: 12,
                 fontWeight: selectedDriverId === driver.driverId ? 600 : 400,
+                color: selectedDriverId === driver.driverId ? "var(--color-primary)" : "var(--color-text)",
               }}
             >
               <span style={{
@@ -205,7 +206,7 @@ export function ChatTab() {
         })}
 
         {driverList.length === 0 && (
-          <div style={{ padding: 20, textAlign: "center", color: "#999", fontSize: 12 }}>
+          <div style={{ padding: 20, textAlign: "center", color: "var(--color-text-2)", fontSize: 12 }}>
             Загрузка водителей...
           </div>
         )}
@@ -216,7 +217,7 @@ export function ChatTab() {
         {selectedDriverId === null ? (
           <div style={{
             flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#999", fontSize: 14, background: "#f5f5f0",
+            color: "var(--color-text-2)", fontSize: 14, background: "var(--color-bg)",
           }}>
             Выберите водителя для начала переписки
           </div>
@@ -240,9 +241,9 @@ export function ChatTab() {
               {selectedDriverName}
             </div>
 
-            <div style={{ flex: 1, overflowY: "auto", padding: 10, background: "#f0f0ea" }}>
+            <div style={{ flex: 1, overflowY: "auto", padding: 10, background: "var(--color-bg)" }}>
               {filteredMessages.length === 0 ? (
-                <div style={{ textAlign: "center", color: "#999", marginTop: 40, fontSize: 13 }}>
+                <div style={{ textAlign: "center", color: "var(--color-text-2)", marginTop: 40, fontSize: 13 }}>
                   Нет сообщений
                 </div>
               ) : (
@@ -252,8 +253,9 @@ export function ChatTab() {
                     flexDirection: msg.direction === "outbound" ? "row-reverse" : "row", gap: 8,
                   }}>
                     <div style={{
-                      background: msg.direction === "outbound" ? "#c8440a" : "#fff",
-                      color: msg.direction === "outbound" ? "#fff" : "#1a1a18",
+                      background: msg.direction === "outbound" ? "var(--color-primary)" : "var(--color-surface)",
+                      color: msg.direction === "outbound" ? "#000" : "var(--color-text)",
+                      border: msg.direction === "inbound" ? "1px solid var(--color-border)" : "none",
                       borderRadius: 8, padding: "6px 10px", maxWidth: "70%",
                       fontSize: 12, boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
                     }}>

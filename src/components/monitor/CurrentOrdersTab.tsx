@@ -93,7 +93,7 @@ function OrderRow({ order }: { order: Order }) {
               <img src="/icons/user.png" alt="Manual" width="16" height="16" style={{ objectFit: "contain" }} />
             )}
 
-            <span style={{ fontSize: 13, color: "#2d3436" }}>
+            <span style={{ fontSize: 13, color: "var(--color-text)" }}>
               {statusLabels[order.status] || order.status}
             </span>
           </div>

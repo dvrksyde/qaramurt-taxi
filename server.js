@@ -109,7 +109,7 @@ app.prepare().then(async () => {
         cors: {
             origin: process.env.SOCKET_CORS_ORIGIN
                 ? process.env.SOCKET_CORS_ORIGIN.split(",")
-                : (process.env.NEXTAUTH_URL || "http://localhost:3000"),
+                : "*",
             methods: ["GET", "POST"],
         },
     });

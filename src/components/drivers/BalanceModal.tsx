@@ -68,19 +68,19 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 680, borderRadius: 12, boxShadow: "0 20px 40px rgba(0,0,0,0.2)" }}>
-        <div className="modal-header" style={{ background: "var(--color-primary)", color: "#fff", borderTopLeftRadius: 12, borderTopRightRadius: 12 }}>
+        <div className="modal-header" style={{ background: "var(--color-surface-2)", color: "var(--color-text)", borderTopLeftRadius: 12, borderTopRightRadius: 12, borderBottom: "1px solid var(--color-border)" }}>
           Баланс: {driver.lastName} {driver.firstName}
-          <button className="modal-close" onClick={onClose} style={{ color: "#fff" }}>×</button>
+          <button className="modal-close" onClick={onClose} style={{ color: "var(--color-text-2)" }}>×</button>
         </div>
 
         <div className="modal-body" style={{ padding: 24 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1.2fr 0.8fr", gap: 32, alignItems: "start" }}>
             {/* Left: Form */}
-            <div style={{ background: "#fff", padding: 20, borderRadius: 10, border: "1px solid var(--color-border-2)" }}>
+            <div style={{ background: "var(--color-surface)", padding: 20, borderRadius: 10, border: "1px solid var(--color-border-2)" }}>
               <h4 style={{ marginBottom: 16, fontSize: 16, fontWeight: 600, color: "var(--color-text)" }}>Новая операция</h4>
               <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", alignItems: "center", gap: 12 }}>
-                  <label style={{ fontSize: 13, color: "#666" }}>Тип:</label>
+                  <label style={{ fontSize: 13, color: "var(--color-text-2)" }}>Тип:</label>
                   <select
                     className="form-select"
                     value={type}
@@ -94,7 +94,7 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", alignItems: "center", gap: 12 }}>
-                  <label style={{ fontSize: 13, color: "#666" }}>Сумма (₸):</label>
+                  <label style={{ fontSize: 13, color: "var(--color-text-2)" }}>Сумма (₸):</label>
                   <div style={{ position: "relative" }}>
                     <input
                       type="number"
@@ -109,7 +109,7 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "100px 1fr", alignItems: "start", gap: 12 }}>
-                  <label style={{ fontSize: 13, color: "#666", marginTop: 8 }}>Инфо:</label>
+                  <label style={{ fontSize: 13, color: "var(--color-text-2)", marginTop: 8 }}>Инфо:</label>
                   <textarea
                     className="form-input"
                     value={description}
@@ -129,8 +129,8 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
             </div>
 
             {/* Right: Summary */}
-            <div style={{ background: "linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)", padding: 24, borderRadius: 10, border: "1px solid var(--color-border-2)", textAlign: "center" }}>
-              <div style={{ fontSize: 14, color: "#666", marginBottom: 8 }}>Текущий баланс:</div>
+            <div style={{ background: "var(--color-surface-2)", padding: 24, borderRadius: 10, border: "1px solid var(--color-border-2)", textAlign: "center" }}>
+              <div style={{ fontSize: 14, color: "var(--color-text-2)", marginBottom: 8 }}>Текущий баланс:</div>
               <div style={{
                 fontSize: 30,
                 fontWeight: 800,
@@ -145,8 +145,8 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
                 padding: "6px 12px",
                 borderRadius: 20,
                 display: "inline-block",
-                background: Number(driver.balance) < 100 ? "#fff0f0" : "#f0fdf4",
-                color: Number(driver.balance) < 100 ? "#e03131" : "#099268",
+                background: "transparent",
+                color: Number(driver.balance) < 100 ? "var(--status-offline)" : "var(--status-free)",
                 fontWeight: 600,
                 border: "1px solid currentColor"
               }}>
@@ -157,12 +157,12 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
 
           <hr style={{ margin: "20px 0", border: "0", borderTop: "1px solid var(--color-border)" }} />
 
-          <h4 style={{ marginBottom: 12, fontSize: 14, fontWeight: 600, color: "#444", display: "flex", alignItems: "center", gap: 8 }}>
+          <h4 style={{ marginBottom: 12, fontSize: 14, fontWeight: 600, color: "var(--color-text)", display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 18 }}>🕒</span> История операций (последние 50)
           </h4>
           <div className="data-table-wrap" style={{ maxHeight: 260, overflowY: "auto", border: "1px solid var(--color-border-2)", borderRadius: 8 }}>
             <table className="data-table small" style={{ border: "none" }}>
-              <thead style={{ position: "sticky", top: 0, zIndex: 1, background: "#f1f3f5" }}>
+              <thead style={{ position: "sticky", top: 0, zIndex: 1, background: "var(--color-surface-2)" }}>
                 <tr>
                   <th style={{ background: "transparent", borderBottom: "1px solid var(--color-border-2)" }}>Дата</th>
                   <th style={{ background: "transparent", borderBottom: "1px solid var(--color-border-2)" }}>Тип</th>
@@ -175,26 +175,26 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
                 {loading ? (
                   <tr><td colSpan={5} style={{ textAlign: "center", padding: 20 }}>Загрузка...</td></tr>
                 ) : history.length === 0 ? (
-                  <tr><td colSpan={5} style={{ textAlign: "center", padding: 20, color: "#999" }}>Записей пока нет</td></tr>
+                  <tr><td colSpan={5} style={{ textAlign: "center", padding: 20, color: "var(--color-text-3)" }}>Записей пока нет</td></tr>
                 ) : (
                   history.map(tx => {
                     const isPositive = ["deposit", "bonus"].includes(tx.type);
                     return (
                       <tr key={tx.id}>
-                        <td style={{ fontSize: 11, color: "#666" }}>
+                        <td style={{ fontSize: 11, color: "var(--color-text-2)" }}>
                           {new Date(tx.createdAt).toLocaleDateString()}<br />
-                          <span style={{ color: "#999" }}>{new Date(tx.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          <span style={{ color: "var(--color-text-3)" }}>{new Date(tx.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </td>
                         <td style={{ fontSize: 11, fontWeight: 500 }}>{TYPE_LABELS[tx.type] || tx.type}</td>
                         <td style={{
                           fontWeight: 700,
                           fontSize: 13,
-                          color: isPositive ? "#2b8a3e" : "#c92a2a"
+                          color: isPositive ? "var(--status-free)" : "var(--status-offline)"
                         }}>
                           {isPositive ? "+" : "−"}{Number(tx.amount).toLocaleString()}
                         </td>
-                        <td style={{ fontSize: 11, color: "#444" }}>{tx.operator?.name || "Система"}</td>
-                        <td style={{ fontSize: 10, color: "#666", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={tx.description || (tx.orderId ? `Заказ #${tx.orderId}` : "")}>
+                        <td style={{ fontSize: 11, color: "var(--color-text)" }}>{tx.operator?.name || "Система"}</td>
+                        <td style={{ fontSize: 10, color: "var(--color-text-2)", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={tx.description || (tx.orderId ? `Заказ #${tx.orderId}` : "")}>
                           {tx.description || (tx.orderId ? `Заказ #${tx.orderId}` : "-")}
                         </td>
                       </tr>

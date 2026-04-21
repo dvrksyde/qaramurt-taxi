@@ -25,6 +25,8 @@ import { DriverChatPanel } from "../components/DriverChatPanel";
 import { DriverProfilePanel } from "../components/DriverProfilePanel";
 import { ActiveOrdersPanel } from "../components/ActiveOrdersPanel";
 import { SwipeButton } from "../components/SwipeButton";
+import { mapOrderToActiveOrder } from "../lib/orderPricing";
+import { clearTripSync, flushTripPoints, queueTripPoint, startTripSync } from "../services/tripSync";
 
 const BASE_FARE = 290;
 type DriverTab = "home" | "orders" | "history" | "chat" | "profile";
@@ -72,15 +74,15 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
       const { latitude: lat, longitude: lng } = loc.coords;
 
       const state = useDriverStore.getState();
+      console.log("status:", state.activeOrder?.status);
+      console.log("lastLocation:", state.lastLocation);
+      console.log("isFixedPrice:", state.activeOrder?.isFixedPrice);
 
       if (state.activeOrder?.status === "in_progress" && state.lastLocation && !state.activeOrder.isFixedPrice) {
         const d = haversine(state.lastLocation.lat, state.lastLocation.lng, lat, lng);
 
-        // Убираем фильтр скорости — он режет медленное движение в пробке.
-        // Защита от GPS-дрейфа на стоянке обеспечена самой ОС (distanceInterval: 15м)
-        // и порогом d > 0.02 км (20 метров).
-        if (d > 0.02) {
-          const newDist = useDriverStore.getState().tripDistance + d;
+        if (d > 0.015) {
+          const newDist = state.tripDistance + d;
           const newPrice = roundTo5(BASE_FARE + newDist * Number(state.activeOrder.pricePerKm));
           useDriverStore.getState().setTripMeter(newDist, newPrice);
         }
@@ -90,10 +92,27 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
       useDriverStore.getState().setLastLocation({ lat, lng });
 
       // Отправляем последнюю точку на сервер
+      if (state.activeOrder?.status === "in_progress" && !state.activeOrder.isFixedPrice) {
+        void queueTripPoint(state.activeOrder.id, {
+          lat,
+          lng,
+          capturedAt: new Date(loc.timestamp).toISOString(),
+          accuracyM: typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : null,
+          speedKmh:
+            typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed)
+              ? loc.coords.speed * 3.6
+              : null,
+          headingDeg:
+            typeof loc.coords.heading === "number" && Number.isFinite(loc.coords.heading)
+              ? loc.coords.heading
+              : null,
+        });
+      }
+
       api("/api/driver/location", {
         method: "POST",
         body: JSON.stringify({ lat, lng }),
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }
 });
@@ -143,6 +162,7 @@ export default function MainScreen() {
       }
 
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+      useDriverStore.getState().setLastLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
       const nextCoords = {
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
@@ -200,7 +220,7 @@ export default function MainScreen() {
       if (hasTask) {
         await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
       }
-    } catch {}
+    } catch { }
   }, []);
 
   const logout = useCallback(async () => {
@@ -215,16 +235,7 @@ export default function MainScreen() {
 
   const mapOrderToState = useCallback((order: any) => {
     if (!order) return null;
-    const estimated = Number(order.estimatedPrice) || 0;
-    const hasFixedPrice = estimated > 0;
-    return {
-      ...order,
-      distanceKm: Number(order.distanceKm) || 0,
-      currentPrice: hasFixedPrice ? estimated : (Number(order.finalPrice) || BASE_FARE),
-      estimatedPrice: hasFixedPrice ? estimated : null,
-      isFixedPrice: hasFixedPrice,
-      pricePerKm: Number(order.pricePerKm) || 80,
-    };
+    return mapOrderToActiveOrder(order, BASE_FARE);
   }, []);
 
   const refreshProfileRank = useCallback(async () => {
@@ -281,7 +292,7 @@ export default function MainScreen() {
     }
 
     const nextProfile = profileRes.data;
-    
+
     // Игнорируем ошибки сети при получении заказа, чтобы не сбрасывать стейт
     let nextOrder = useDriverStore.getState().activeOrder;
     if (!orderRes.error) {
@@ -311,6 +322,14 @@ export default function MainScreen() {
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
+
+  useEffect(() => {
+    if (!activeOrder || activeOrder.status !== "in_progress" || activeOrder.isFixedPrice) {
+      return;
+    }
+
+    void startTripSync(activeOrder.id).then(() => flushTripPoints(activeOrder.id));
+  }, [activeOrder]);
 
   // Ref to track the offline-on-background timeout
   const bgOfflineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -432,6 +451,49 @@ export default function MainScreen() {
     setOrderAlert(null);
   };
 
+  const handleCurbsideOrder = async () => {
+    setLoading(true);
+    const res = await api(`/api/driver/orders/curbside`, {
+      method: "POST",
+    });
+    setLoading(false);
+
+    if (res.error) {
+      Alert.alert("Ошибка", res.error);
+      return;
+    }
+
+    setActiveOrder(mapOrderToState(res.data));
+    resetTrip();
+    startTrip();
+    tripDistanceRef.current = 0;
+    useDriverStore.getState().setTripMeter(0, 290); // BASE_FARE
+    setTripMeter(0, 290);
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest }).then((loc) => {
+      useDriverStore.getState().setLastLocation({
+        lat: loc.coords.latitude,
+        lng: loc.coords.longitude,
+      });
+    });
+
+    void (async () => {
+      await startTripSync(res.data.id);
+      try {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+        const seedPoint = {
+          lat: loc.coords.latitude,
+          lng: loc.coords.longitude,
+          capturedAt: new Date(loc.timestamp).toISOString(),
+          accuracyM: typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : null,
+          speedKmh: typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed) ? loc.coords.speed * 3.6 : null,
+          headingDeg: typeof loc.coords.heading === "number" && Number.isFinite(loc.coords.heading) ? loc.coords.heading : null,
+        };
+        useDriverStore.getState().setLastLocation({ lat: seedPoint.lat, lng: seedPoint.lng });
+        await queueTripPoint(res.data.id, seedPoint);
+      } catch {}
+    })();
+  };
+
   const updateOrderStatus = async (status: string) => {
     if (!activeOrder) return;
 
@@ -443,18 +505,34 @@ export default function MainScreen() {
       tripDistanceRef.current = 0;
       useDriverStore.getState().setTripMeter(0, activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : BASE_FARE);
       setTripMeter(0, activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : BASE_FARE);
+
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest }).then((loc) => {
+        useDriverStore.getState().setLastLocation({
+          lat: loc.coords.latitude,
+          lng: loc.coords.longitude,
+        });
+      });
     }
 
     if (status === "completed") {
-      // Берем дистанцию из Zustand — туда пишет фоновый таск (даже с выключенным экраном)
-      const finalDistFromStore = useDriverStore.getState().tripDistance;
-      // Берем максимум из двух источников — на случай если телефон был все время открыт
-      const finalDist = Math.round(Math.max(finalDistFromStore, tripDistanceRef.current) * 10) / 10;
-      const finalPrice = activeOrder.isFixedPrice
-        ? activeOrder.estimatedPrice!
-        : roundTo5(BASE_FARE + finalDist * activeOrder.pricePerKm);
-      body.distanceKm = finalDist;
-      body.finalPrice = finalPrice;
+      if (!activeOrder.isFixedPrice) {
+        // Сначала сбрасываем очередь точек на сервер, чтобы все точки были там
+        await flushTripPoints(activeOrder.id);
+
+        // Резервные значения с телефона — сервер использует их только если
+        // GPS-сессии нет или точек оказалось меньше 2 (плохой GPS / короткая поездка)
+        const fallbackDist =
+          Math.round(Math.max(useDriverStore.getState().tripDistance, tripDistanceRef.current) * 10) / 10;
+        body.clientDistanceKm = fallbackDist;
+        body.clientFinalPrice = roundTo5(BASE_FARE + fallbackDist * activeOrder.pricePerKm);
+      } else {
+        // Fixed-price: явно передаём цену
+        if (activeOrder.distanceKm > 0) {
+          body.distanceKm = activeOrder.distanceKm;
+        }
+        body.finalPrice = activeOrder.estimatedPrice ?? activeOrder.currentPrice;
+      }
+      // Передаём текущие координаты для обратного геокодирования точки выгрузки
       if (lastLocationState) {
         body.lat = lastLocationState.lat;
         body.lng = lastLocationState.lng;
@@ -474,24 +552,68 @@ export default function MainScreen() {
     }
 
     if (status === "completed" || status === "canceled") {
-      // Берём те же значения, что и отправили на сервер выше
-      const storeState = useDriverStore.getState();
-      const showDist = Math.round(Math.max(storeState.tripDistance, tripDistanceRef.current) * 10) / 10;
-      const showPrice = activeOrder.isFixedPrice
-        ? activeOrder.estimatedPrice!
-        : roundTo5(BASE_FARE + showDist * activeOrder.pricePerKm);
-      Alert.alert(
-        status === "completed" ? "Поездка завершена" : "Заказ отменен",
-        activeOrder.isFixedPrice
-          ? `Итого: ${showPrice} ₸`
-          : `Расстояние: ${showDist} км\nИтого: ${showPrice} ₸`,
-      );
+      // Используем данные, рассчитанные сервером и возвращённые в ответе
+      const serverDist = res.data?.distanceKm != null ? Number(res.data.distanceKm) : null;
+      const serverPrice = res.data?.finalPrice != null ? Number(res.data.finalPrice) : null;
+
+      if (activeOrder.isFixedPrice) {
+        Alert.alert(
+          status === "completed" ? "Поездка завершена" : "Заказ отменен",
+          `Итого: ${serverPrice ?? activeOrder.estimatedPrice} ₸`,
+        );
+      } else if (status === "completed") {
+        // Сервер вернул точные данные по GPS
+        if (serverDist !== null && serverPrice !== null) {
+          Alert.alert(
+            "Поездка завершена",
+            `Расстояние: ${serverDist.toFixed(1)} км\nИтого: ${serverPrice} ₸`,
+          );
+        } else {
+          // Резервный показ из предварительного счётчика
+          const fallbackDist = Math.round(Math.max(useDriverStore.getState().tripDistance, tripDistanceRef.current) * 10) / 10;
+          const fallbackPrice = roundTo5(BASE_FARE + fallbackDist * activeOrder.pricePerKm);
+          Alert.alert(
+            "Поездка завершена",
+            `Расстояние: ${fallbackDist} км\nПримерная сумма: ${fallbackPrice} ₸`,
+          );
+        }
+      } else {
+        Alert.alert("Заказ отменен", "");
+      }
+
       setActiveOrder(null);
       resetTrip();
+      await clearTripSync(activeOrder.id);
       setProfile(profile ? { ...profile, status: "free" } : null);
       loadDashboard();
     } else {
       setActiveOrder({ ...activeOrder, status });
+      if (status === "in_progress" && !activeOrder.isFixedPrice) {
+        void (async () => {
+          await startTripSync(activeOrder.id);
+          try {
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+            const seedPoint = {
+              lat: loc.coords.latitude,
+              lng: loc.coords.longitude,
+              capturedAt: new Date(loc.timestamp).toISOString(),
+              accuracyM: typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : null,
+              speedKmh:
+                typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed)
+                  ? loc.coords.speed * 3.6
+                  : null,
+              headingDeg:
+                typeof loc.coords.heading === "number" && Number.isFinite(loc.coords.heading)
+                  ? loc.coords.heading
+                  : null,
+            };
+            useDriverStore.getState().setLastLocation({ lat: seedPoint.lat, lng: seedPoint.lng });
+            await queueTripPoint(activeOrder.id, seedPoint);
+          } catch {
+            // Ignore seed GPS errors — background tracking will continue.
+          }
+        })();
+      }
     }
   };
 
@@ -657,7 +779,7 @@ export default function MainScreen() {
             </View>
           </View>
 
-          {/* Meter strip — single row */}
+          {/* Meter strip — single row (preliminary / approximate values) */}
           {activeOrder.status === "in_progress" && (
             <View style={styles.meterStrip}>
               {activeOrder.isFixedPrice ? (
@@ -669,13 +791,14 @@ export default function MainScreen() {
                 <>
                   <View style={styles.meterStripItem}>
                     <Ionicons name="speedometer-outline" size={14} color="#888" />
+                    {/* '~' indicates preliminary — server will calculate the exact figure */}
                     <Text style={styles.meterStripValue}>{tripDistance.toFixed(1)} км</Text>
                   </View>
                   <View style={styles.meterStripItem}>
                     <Ionicons name="time-outline" size={14} color="#888" />
                     <Text style={styles.meterStripValue}>{tripElapsed} мин</Text>
                   </View>
-                  <Text style={styles.meterStripPrice}>{tripPrice} ₸</Text>
+                  <Text style={styles.meterStripPrice}>{tripPrice}₸</Text>
                 </>
               )}
             </View>
@@ -790,6 +913,19 @@ export default function MainScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+
+          {/* Curbside Button */}
+          {isOnline && profile?.status === "free" && (
+            <TouchableOpacity
+              style={styles.curbsideButton}
+              onPress={handleCurbsideOrder}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="car-sport" size={24} color="#000" />
+              <Text style={styles.curbsideButtonText}>Пассажир с бордюра</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.homeSwipeContainer}>
@@ -1014,6 +1150,29 @@ const styles = StyleSheet.create({
   },
 
   orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 22, left: 16, right: 16 },
+  curbsideButton: {
+    backgroundColor: "#FFD000",
+    borderRadius: 16,
+    paddingVertical: 18,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 20,
+    marginHorizontal: 16,
+    shadowColor: "#FFD000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  curbsideButtonText: {
+    color: "#000",
+    fontSize: 18,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
   homeSwipeContainer: { position: "absolute", bottom: Platform.OS === "ios" ? 100 : 22, left: 16, right: 16 },
   statusActions: { gap: 12, marginBottom: 16 },
   statusHint: { color: "#666", fontSize: 13, textAlign: "center", marginBottom: 4 },

@@ -19,8 +19,11 @@ export function useSocket() {
 
     const socket = io({
       path: "/api/socket",
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
+      transports: ["polling", "websocket"],   // polling first — works behind Render's proxy
+      reconnectionAttempts: Infinity,          // keep trying forever
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 10000,
+      timeout: 20000,
     });
 
     socketInstance = socket;
@@ -106,8 +109,13 @@ export function useSocket() {
       store.addChatMessage(msg);
     });
 
-    socket.on("driver_alarm", (data) => {
-      store.addAlarm(data);
+    socket.on("driver_alarm", (data: any) => {
+      store.addSystemLog({
+        id: Date.now().toString(),
+        message: `⚠️ Тревога! Водитель #${data.driverId} нажал кнопку тревоги`,
+        level: "error",
+        timestamp: new Date().toISOString(),
+      });
     });
 
     socket.on("tab_counts", (counts) => {

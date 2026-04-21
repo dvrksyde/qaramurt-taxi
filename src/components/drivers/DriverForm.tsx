@@ -110,7 +110,7 @@ function SearchableCarSelect({
             right: 0,
             maxHeight: 220,
             overflowY: "auto",
-            background: "#fff",
+            background: "var(--color-surface)",
             border: "1px solid var(--color-border)",
             borderTop: "none",
             borderRadius: "0 0 4px 4px",
@@ -265,7 +265,7 @@ export function DriverForm({ driver, onClose }: Props) {
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <div className="modal-body" style={{ background: "#fff", padding: "24px", overflowY: "auto", flexGrow: 1 }}>
+          <div className="modal-body" style={{ background: "var(--color-surface)", padding: "24px", overflowY: "auto", flexGrow: 1 }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
 
               {/* Left Column: Personal info */}
@@ -433,7 +433,7 @@ export function DriverForm({ driver, onClose }: Props) {
                     <div style={{ padding: "6px 12px", background: "var(--color-surface-2)", fontSize: 13, fontStyle: "italic", color: "var(--color-primary)", borderBottom: "1px solid var(--color-border-2)" }}>
                       {g.name}
                     </div>
-                    <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 8, background: "#f5f5f5" }}>
+                    <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 8, background: "var(--color-bg)" }}>
                       {g.classes.map((c: any) => (
                         <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
                           <input
@@ -453,12 +453,12 @@ export function DriverForm({ driver, onClose }: Props) {
             </div>
           </div>
 
-          <div className="modal-footer" style={{ borderTop: "1px solid #eee", background: "#f9f9f9", padding: "16px 20px" }}>
+          <div className="modal-footer" style={{ borderTop: "1px solid var(--color-border-2)", background: "var(--color-surface-2)", padding: "16px 20px" }}>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, width: "100%" }}>
               <button type="submit" className="btn btn-primary" style={{ background: "#d35400", borderColor: "#d35400", color: "white", padding: "0 24px" }} disabled={submitting} id="btn-save-driver">
                 {submitting ? "Сохранение..." : "Сохранить"}
               </button>
-              <button type="button" className="btn btn-ghost" style={{ background: "#fff", border: "1px solid #ccc", color: "#333", padding: "0 24px" }} onClick={onClose}>Отмена</button>
+              <button type="button" className="btn btn-ghost" style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text)", padding: "0 24px" }} onClick={onClose}>Отмена</button>
             </div>
           </div>
         </form>

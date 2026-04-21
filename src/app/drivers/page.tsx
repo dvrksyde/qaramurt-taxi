@@ -110,8 +110,8 @@ export default function DriversPage() {
             <tbody>
               {drivers.map((driver) => {
                 let statusColor = "var(--status-offline)";
-                if (driver.status === "free") statusColor = "#00ff00";
-                else if (driver.status === "busy") statusColor = "#ffd700";
+                if (driver.status === "free") statusColor = "var(--status-free)";
+                else if (driver.status === "busy") statusColor = "var(--status-busy)";
 
                 const v = driver.vehicles?.[0];
                 const isLowBalance = Number(driver.balance) < 100;
@@ -125,16 +125,16 @@ export default function DriversPage() {
                     <td className="text-mono text-sm">{driver.login}</td>
                     <td style={{ fontWeight: 500 }}>{driver.lastName} {driver.firstName}</td>
                     <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                      <span style={{ color: "#f39c12", marginRight: 4 }}>🏆</span>
-                      <strong style={{ color: "#2d3436" }}>{driver.rating}</strong>
-                      <span style={{ color: "#b2bec3", fontSize: 12, marginLeft: 6 }}>({driver.ordersCount || 0} зкз.)</span>
+                      <span style={{ marginRight: 4 }}>🏆</span>
+                      <strong style={{ color: "var(--color-text)" }}>{driver.rating}</strong>
+                      <span style={{ color: "var(--color-text-3)", fontSize: 12, marginLeft: 6 }}>({driver.ordersCount || 0} поездок)</span>
                     </td>
                     <td style={{ verticalAlign: "middle" }}>
                       <button
                         onClick={() => setBalanceDriver(driver)}
                         style={{
-                          background: isLowBalance ? "#fff5f5" : "#f0fdf4",
-                          color: isLowBalance ? "#e03131" : "#099268",
+                          background: "transparent",
+                          color: isLowBalance ? "var(--status-offline)" : "var(--status-free)",
                           padding: "4px 10px",
                           borderRadius: "16px",
                           fontSize: "13px",
@@ -143,16 +143,14 @@ export default function DriversPage() {
                           display: "flex",
                           alignItems: "center",
                           gap: "5px",
-                          border: `1px solid ${isLowBalance ? "#ffc9c9" : "#bbf7d0"}`,
+                          border: `1px solid ${isLowBalance ? "var(--status-offline)" : "var(--status-free)"}`,
                           transition: "all 0.2s ease",
                         }}
                         onMouseOver={(e) => {
-                          e.currentTarget.style.transform = "translateY(-1px)";
-                          e.currentTarget.style.boxShadow = "0 3px 6px rgba(0,0,0,0.1)";
+                          e.currentTarget.style.background = isLowBalance ? "rgba(232, 70, 70, 0.1)" : "rgba(61, 184, 74, 0.1)";
                         }}
                         onMouseOut={(e) => {
-                          e.currentTarget.style.transform = "none";
-                          e.currentTarget.style.boxShadow = "none";
+                          e.currentTarget.style.background = "transparent";
                         }}
                       >
                         {isLowBalance && <span style={{ fontSize: "14px" }}>⚠️</span>}
@@ -165,8 +163,8 @@ export default function DriversPage() {
                       </span>
                     </td>
                     <td className="text-muted text-sm" style={{ lineHeight: 1.4, padding: "8px 12px" }}>
-                      <div style={{ color: "#333", fontSize: "12px", marginBottom: 2 }}>
-                        {driver.osVersion || "Android 14"} <span style={{ color: "red", fontWeight: "bold" }}>(?)</span> <span style={{ color: "red", fontSize: "10px" }}>▼</span>
+                      <div style={{ color: "var(--color-text)", fontSize: "12px", marginBottom: 4 }}>
+                        {driver.osVersion || "Android 14"}
                       </div>
                       <div style={{ display: "flex", gap: "3px", flexWrap: "wrap", marginTop: 2 }}>
                         {driver.thirdPartyApps?.includes("yandex_pro") && (
