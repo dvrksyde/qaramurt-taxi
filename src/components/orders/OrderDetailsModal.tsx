@@ -20,6 +20,7 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
   const [track, setTrack] = useState<[number, number][]>([]);
   const [trackPointsCount, setTrackPointsCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [mapFitKey, setMapFitKey] = useState(0);
   const { updateOrder } = useMonitorStore();
 
   const loadOrder = async () => {
@@ -114,7 +115,7 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
             <h3 style={{ margin: 0 }}>Информация о заказе</h3>
           </div>
           <div className="flex-row">
-            <button className="btn btn-ghost" onClick={loadOrder} title="Обновить">🔄</button>
+            <button className="btn btn-ghost" onClick={() => { loadOrder(); setMapFitKey(k => k + 1); }} title="Обновить">🔄</button>
             <button className="btn btn-ghost" onClick={onClose}>✕</button>
           </div>
         </div>
@@ -129,6 +130,7 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
                 dropoff={dropoff}
                 driverLocation={driverPos}
                 route={track}
+                fitKey={mapFitKey}
               />
             </div>
 

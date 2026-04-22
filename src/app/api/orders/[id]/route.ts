@@ -23,9 +23,41 @@ export async function GET(_req: NextRequest, { params }: Params) {
   });
 
   if (!order) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  // Fetch unsupported geometry fields
+  const rawOrder = await prisma.$queryRaw`
+    SELECT 
+      ST_AsText("pickupPoint") as "pickupPoint", 
+      ST_AsText("dropoffPoint") as "dropoffPoint" 
+    FROM "Order" 
+    WHERE id = ${order.id}
+  ` as any[];
+
+  let driverPos = null;
+  if (order.driverId) {
+    const rawDriver = await prisma.$queryRaw`
+      SELECT ST_AsText("currentLocation") as "currentLocation"
+      FROM "Driver"
+      WHERE id = ${order.driverId}
+    ` as any[];
+    if (rawDriver[0]?.currentLocation) {
+      driverPos = rawDriver[0].currentLocation;
+    }
+  }
+
+  const enrichedOrder = {
+    ...order,
+    pickupPoint: rawOrder[0]?.pickupPoint || null,
+    dropoffPoint: rawOrder[0]?.dropoffPoint || null,
+  };
+  
+  if (enrichedOrder.driver) {
+    enrichedOrder.driver.currentLocation = driverPos;
+  }
+
   const access = await requireOrderReadAccess(order.operatorId);
   if (!access.allowed) return access.response!;
-  return NextResponse.json({ data: order });
+  return NextResponse.json({ data: enrichedOrder });
 }
 
 // PATCH /api/orders/[id] — update status or fields

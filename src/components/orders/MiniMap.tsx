@@ -4,20 +4,31 @@ import { MapContainer, TileLayer, Marker, Polyline, useMapEvents, useMap } from 
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-// Fix Leaflet icons (next.js standard problem)
-const pickupIcon = new L.Icon({
-  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png",
-  iconSize: [25, 41], iconAnchor: [12, 41],
-});
-const dropoffIcon = new L.Icon({
-  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png",
-  iconSize: [25, 41], iconAnchor: [12, 41],
-});
+const createMarkerIcon = (color: string, emoji: string) => {
+  return new L.divIcon({
+    className: "custom-map-marker",
+    html: `<div style="
+      background-color: ${color};
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50% 50% 50% 0;
+      transform: rotate(-45deg);
+      border: 2px solid white;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.3);
+    ">
+      <span style="transform: rotate(45deg); font-size: 16px;">${emoji}</span>
+    </div>`,
+    iconSize: [32, 32],
+    iconAnchor: [16, 32],
+  });
+};
 
-const driverIcon = new L.Icon({
-  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-yellow.png",
-  iconSize: [25, 41], iconAnchor: [12, 41],
-});
+const pickupIcon = createMarkerIcon("#3b82f6", "А");
+const dropoffIcon = createMarkerIcon("#ef4444", "Б");
+const driverIcon = createMarkerIcon("#eab308", "🚕");
 
 function MapEvents({ onMapClick }: { onMapClick?: (lat: number, lng: number) => void }) {
   useMapEvents({
@@ -28,14 +39,23 @@ function MapEvents({ onMapClick }: { onMapClick?: (lat: number, lng: number) => 
   return null;
 }
 
-function FitBounds({ points }: { points: [number, number][] }) {
+function FitBounds({ points, fitKey }: { points: [number, number][], fitKey?: number }) {
   const map = useMap();
+  const hasFitted = React.useRef(false);
+  const prevFitKey = React.useRef(fitKey);
+
   React.useEffect(() => {
-    if (points.length > 0) {
+    const forceFit = fitKey !== prevFitKey.current;
+    if (forceFit) {
+      prevFitKey.current = fitKey;
+    }
+
+    if (points.length > 0 && (!hasFitted.current || forceFit)) {
       const bounds = L.latLngBounds(points);
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+      hasFitted.current = true;
     }
-  }, [map, points]);
+  }, [map, points, fitKey]);
   return null;
 }
 
@@ -45,9 +65,10 @@ interface MiniMapProps {
   driverLocation?: [number, number] | null;
   route?: [number, number][];
   onMapClick?: (lat: number, lng: number) => void;
+  fitKey?: number;
 }
 
-export function MiniMap({ pickup, dropoff, driverLocation, route, onMapClick }: MiniMapProps) {
+export function MiniMap({ pickup, dropoff, driverLocation, route, onMapClick, fitKey }: MiniMapProps) {
   // Collect all points to fit map bounds
   const allPoints: [number, number][] = [];
   if (pickup) allPoints.push(pickup);
@@ -68,14 +89,14 @@ export function MiniMap({ pickup, dropoff, driverLocation, route, onMapClick }: 
         subdomains={[""]}
       />
       <MapEvents onMapClick={onMapClick} />
-      <FitBounds points={allPoints} />
+      <FitBounds points={allPoints} fitKey={fitKey} />
       {pickup && <Marker position={pickup} icon={pickupIcon} />}
       {dropoff && <Marker position={dropoff} icon={dropoffIcon} />}
       {driverLocation && <Marker position={driverLocation} icon={driverIcon} />}
       {route && route.length > 0 && (
         <Polyline 
           positions={route} 
-          color="#FFD000" 
+          color="#3b82f6" 
           weight={6} 
           opacity={0.9} 
         />
