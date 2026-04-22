@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
   const status = searchParams.get("status");
   const search = searchParams.get("search");
 
-  const where: Record<string, unknown> = { isActive: true };
+  const where: Record<string, unknown> = {};
   if (status) where.status = status;
   if (search) {
     where.OR = [
@@ -39,6 +39,11 @@ export async function GET(req: NextRequest) {
     ];
   }
 
+  const sortBy = searchParams.get("sortBy") || "status";
+  const sortDir = searchParams.get("sortDir") || "asc";
+
+  const dbOrderBy: any = sortBy === "id" ? { id: sortDir } : [{ status: "asc" }, { lastName: "asc" }];
+
   const drivers = await prisma.driver.findMany({
     where,
     include: {
@@ -46,7 +51,7 @@ export async function GET(req: NextRequest) {
       vehicles: { select: { id: true, plate: true, make: true, model: true, color: true, classes: true } },
       _count: { select: { orders: { where: { status: "completed", completedAt: { gte: getStartOfWeek() } } } } },
     },
-    orderBy: [{ status: "asc" }, { lastName: "asc" }],
+    orderBy: dbOrderBy,
   });
 
   const rankMap = buildDriverRankMap(
@@ -60,6 +65,16 @@ export async function GET(req: NextRequest) {
     const rankEntry = rankMap.get(driver.id) || { rank: 0, ordersCount: 0 };
     return serializeDriver(driver, rankEntry.rank, rankEntry.ordersCount);
   });
+
+  if (sortBy === "rating") {
+    serialized.sort((a, b) => (sortDir === "asc" ? a.rating - b.rating : b.rating - a.rating));
+  } else if (sortBy === "plate") {
+    serialized.sort((a, b) => {
+      const pa = a.vehicles?.[0]?.plate || "";
+      const pb = b.vehicles?.[0]?.plate || "";
+      return sortDir === "asc" ? pa.localeCompare(pb) : pb.localeCompare(pa);
+    });
+  }
 
   return NextResponse.json({ data: serialized });
 }

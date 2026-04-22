@@ -14,6 +14,11 @@ export default function DriversPage() {
   const [editDriver, setEditDriver] = useState<Driver | null>(null);
   const [balanceDriver, setBalanceDriver] = useState<Driver | null>(null);
 
+  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [sortBy, setSortBy] = useState("status");
+  const [sortDir, setSortDir] = useState("asc");
+
   const user = session?.user as any;
   const role: string = user?.role || "operator";
   const permissions: string[] = user?.permissions || [];
@@ -26,14 +31,19 @@ export default function DriversPage() {
 
   const loadDrivers = useCallback((silent = false) => {
     if (!silent) setLoading(true);
-    fetch(`/api/drivers`)
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    params.set("sortBy", sortBy);
+    params.set("sortDir", sortDir);
+
+    fetch(`/api/drivers?${params}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.data) setDrivers(d.data);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [search, sortBy, sortDir]);
 
   useEffect(() => {
     loadDrivers();
@@ -60,6 +70,25 @@ export default function DriversPage() {
     };
   }, [socket, loadDrivers]);
 
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSearch(searchInput);
+  };
+
+  const toggleSort = (field: string) => {
+    if (sortBy === field) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(field);
+      setSortDir("desc");
+    }
+  };
+
+  const sortIcon = (field: string) => {
+    if (sortBy !== field) return <span className="sort-icon inactive">⇅</span>;
+    return <span className="sort-icon">{sortDir === "asc" ? "▲" : "▼"}</span>;
+  };
+
   return (
     <div className="page-content">
       <div style={{ padding: "8px 14px", marginBottom: 0, fontSize: 12, background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
@@ -75,6 +104,32 @@ export default function DriversPage() {
             + Добавить водителя
           </button>
         )}
+      </div>
+
+      {/* Search filter */}
+      <div className="filter-bar" style={{ padding: "12px 14px", background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)" }}>
+        <form onSubmit={handleSearch} style={{ display: "flex", gap: 8, alignItems: "center", width: "100%" }}>
+          <input
+            className="form-input"
+            placeholder="Поиск по имени, телефону или логину..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            style={{ maxWidth: 340 }}
+          />
+          <button type="submit" className="btn btn-primary btn-sm">Найти</button>
+          {search && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => { setSearchInput(""); setSearch(""); }}
+            >
+              Сбросить
+            </button>
+          )}
+          <span className="text-muted" style={{ marginLeft: "auto", fontSize: 12 }}>
+            Всего: {drivers.length}
+          </span>
+        </form>
       </div>
 
       <div className="data-table-wrap">
@@ -94,7 +149,9 @@ export default function DriversPage() {
                 <th rowSpan={2}>ID</th>
                 <th rowSpan={2}>Логин</th>
                 <th rowSpan={2}>Имя</th>
-                <th rowSpan={2} style={{ textAlign: "center" }}>Рейтинг</th>
+                <th rowSpan={2} style={{ textAlign: "center", cursor: "pointer" }} className="sortable-th" onClick={() => toggleSort("rating")}>
+                  Рейтинг {sortIcon("rating")}
+                </th>
                 <th rowSpan={2}>Баланс</th>
                 <th rowSpan={2}>Тариф</th>
                 <th rowSpan={2}>Устройство</th>
@@ -102,7 +159,9 @@ export default function DriversPage() {
                 {(canEdit || canDelete) && <th rowSpan={2} style={{ textAlign: "center", width: 80 }}>Действия</th>}
               </tr>
               <tr>
-                <th style={{ textAlign: "center", borderLeft: "1px solid var(--color-border-2)", borderRight: "1px solid var(--color-border-2)" }}>г/н</th>
+                <th style={{ textAlign: "center", borderLeft: "1px solid var(--color-border-2)", borderRight: "1px solid var(--color-border-2)", cursor: "pointer" }} className="sortable-th" onClick={() => toggleSort("plate")}>
+                  г/н {sortIcon("plate")}
+                </th>
                 <th style={{ borderRight: "1px solid var(--color-border-2)" }}>Марка</th>
                 <th style={{ borderRight: "1px solid var(--color-border-2)" }}>Цвет</th>
               </tr>
@@ -117,7 +176,7 @@ export default function DriversPage() {
                 const isLowBalance = Number(driver.balance) < 100;
 
                 return (
-                  <tr key={driver.id}>
+                  <tr key={driver.id} style={{ opacity: driver.isActive === false ? 0.5 : 1 }}>
                     <td style={{ textAlign: "center" }}>
                       <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: statusColor }} />
                     </td>
@@ -197,6 +256,24 @@ export default function DriversPage() {
                     {(canEdit || canDelete) && (
                       <td style={{ textAlign: "center" }}>
                         <div className="flex-row">
+                          {canEdit && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              title={driver.isActive === false ? "Разблокировать" : "Заблокировать"}
+                              onClick={async () => {
+                                if (confirm(driver.isActive === false ? "Разблокировать водителя?" : "Заблокировать водителя? Он не сможет входить в приложение.")) {
+                                  await fetch(`/api/drivers/${driver.id}`, {
+                                    method: "PATCH",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ isActive: !driver.isActive })
+                                  });
+                                  loadDrivers();
+                                }
+                              }}
+                            >
+                              {driver.isActive === false ? "✅" : "🚫"}
+                            </button>
+                          )}
                           {canEdit && (
                             <button className="btn btn-ghost btn-sm" title="Редактировать" onClick={() => { setEditDriver(driver); setShowForm(true); }}>✏️</button>
                           )}
