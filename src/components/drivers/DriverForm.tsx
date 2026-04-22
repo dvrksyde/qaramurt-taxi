@@ -186,7 +186,16 @@ export function DriverForm({ driver, onClose }: Props) {
     fetch("/api/vehicle-classes")
       .then((r) => r.json())
       .then((d) => {
-        if (d.data) setVehicleGroups(d.data);
+        if (d.data) {
+          setVehicleGroups(d.data);
+          // Set Эконом as default for new drivers
+          if (!driver) {
+            const econom = d.data.flatMap((g: any) => g.classes || []).find((c: any) => c.name === "Эконом");
+            if (econom) {
+              setValue("carClassIds", [String(econom.id)]);
+            }
+          }
+        }
       })
       .catch(console.error);
 
@@ -434,7 +443,9 @@ export function DriverForm({ driver, onClose }: Props) {
                       {g.name}
                     </div>
                     <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 8, background: "var(--color-bg)" }}>
-                      {g.classes.map((c: any) => (
+                      {g.classes
+                        .filter((c: any) => ["Эконом", "Комфорт"].includes(c.name))
+                        .map((c: any) => (
                         <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
                           <input
                             type="checkbox"

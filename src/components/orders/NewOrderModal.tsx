@@ -494,7 +494,7 @@ export function NewOrderModal({ onClose }: Props) {
                 <span className="form-label">Класс:</span>
                 <select {...register("classId")} className="form-select">
                   <option value="">Любой</option>
-                  {allClasses.map((c) => (
+                  {allClasses.filter(c => ["Эконом", "Комфорт"].includes(c.name)).map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>

@@ -25,7 +25,7 @@ const NAV_LINKS = [
   { href: "/journal",                   label: "Журнал заказов",  requiredPerms: ["journal_own", "journal_all"] },
   { href: "/settings/tariffs-driver",   label: "Тарифы",          requiredPerms: ["admin"] },
   { href: "/settings/address-book",     label: "Адреса",          requiredPerms: ["admin"] },
-  { href: "/reports",                   label: "Отчеты",          requiredPerms: ["admin"] },
+  { href: "/reports",                   label: "Отчеты",          requiredPerms: ["admin", "kassa_report_all"] },
 ];
 
 export function TopNav({ session }: Props) {
