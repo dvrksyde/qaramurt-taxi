@@ -210,10 +210,10 @@ export function NewOrderModal({ onClose }: Props) {
     const isComfort = classGroups.flatMap(g => g.classes ?? []).find(c => c.id === Number(watchedClass))?.name === "Комфорт";
     if (isComfort) {
       if (watchedPricePerKm === "80") setValue("pricePerKm", "100");
-      if (watchedPricePerKm === "110") setValue("pricePerKm", "130");
+      if (watchedPricePerKm === "120") setValue("pricePerKm", "140");
     } else {
       if (watchedPricePerKm === "100") setValue("pricePerKm", "80");
-      if (watchedPricePerKm === "130") setValue("pricePerKm", "110");
+      if (watchedPricePerKm === "140") setValue("pricePerKm", "120");
     }
   }, [watchedClass, watchedPricePerKm, classGroups, setValue]);
 
@@ -505,7 +505,7 @@ export function NewOrderModal({ onClose }: Props) {
                 {(() => {
                   const isComfort = classGroups.flatMap(g => g.classes ?? []).find(c => c.id === Number(watchedClass))?.name === "Комфорт";
                   const cityPrice = isComfort ? "100" : "80";
-                  const subPrice = isComfort ? "130" : "110";
+                  const subPrice = isComfort ? "140" : "120";
                   return (
                     <>
                       <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer" }}>

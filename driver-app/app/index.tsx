@@ -17,6 +17,7 @@ import { useRouter } from "expo-router";
 import { api, clearToken } from "../services/api";
 import { connectSocket, disconnectSocket, getSocket } from "../services/socket";
 import { useDriverStore } from "../stores/driverStore";
+import { Audio } from "expo-av";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import { registerForPushNotifications, showOrderNotification } from "../services/notifications";
@@ -147,6 +148,44 @@ export default function MainScreen() {
   const tripDistanceRef = useRef(0);
   const insets = useSafeAreaInsets();
 
+  useEffect(() => {
+    Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    }).catch(console.warn);
+  }, []);
+
+  const playAppSound = async (type: 'new_order' | 'welcome' | 'trip_completed') => {
+    try {
+      let source;
+      switch (type) {
+        case 'new_order':
+          source = require('../assets/sounds/new_order.mp4');
+          break;
+        case 'welcome':
+          source = require('../assets/sounds/welcome.mp4');
+          break;
+        case 'trip_completed':
+          source = require('../assets/sounds/trip_completed.mp4');
+          break;
+      }
+      
+      const { sound } = await Audio.Sound.createAsync(source);
+      await sound.playAsync();
+      
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          sound.unloadAsync();
+        }
+      });
+    } catch (err) {
+      console.warn("Failed to play sound", err);
+    }
+  };
+
   const lastLocationState = useDriverStore((s) => s.lastLocation);
   useEffect(() => {
     if (lastLocationState) {
@@ -263,6 +302,7 @@ export default function MainScreen() {
         if (!hasClass) return;
       }
       Vibration.vibrate([0, 500, 200, 500]);
+      playAppSound('new_order');
       showOrderNotification(data.pickupAddress, data.pricePerKm || 80);
       setOrderAlert(data);
       setAlertTimer(30);
@@ -509,6 +549,7 @@ export default function MainScreen() {
     const body: any = { status };
 
     if (status === "in_progress") {
+      playAppSound('welcome');
       startTrip();
 
       const currentBaseFare = activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE;
@@ -536,6 +577,7 @@ export default function MainScreen() {
     }
 
     if (status === "completed") {
+      playAppSound('trip_completed');
       if (!activeOrder.isFixedPrice) {
         // Сначала сбрасываем очередь точек на сервер, чтобы все точки были там
         await flushTripPoints(activeOrder.id);

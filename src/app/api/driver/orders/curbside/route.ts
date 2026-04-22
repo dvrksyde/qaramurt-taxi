@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
 
   if (isComfort) {
     if (pricePerKm === 80) pricePerKm = 100;
-    else if (pricePerKm === 110) pricePerKm = 130;
+    else if (pricePerKm === 120) pricePerKm = 140;
   }
 
   try {
