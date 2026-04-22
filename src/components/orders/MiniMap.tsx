@@ -5,7 +5,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 const createMarkerIcon = (color: string, emoji: string) => {
-  return new L.divIcon({
+  return L.divIcon({
     className: "custom-map-marker",
     html: `<div style="
       background-color: ${color};
