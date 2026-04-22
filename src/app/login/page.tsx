@@ -74,7 +74,7 @@ export default function LoginPage() {
         </form>
 
         <div className={styles.loginFooter}>
-          © Qaramurt Taxi, 2024–2026
+          Qaramurt Taxi ©2026
         </div>
       </div>
     </div>
