@@ -206,6 +206,9 @@ export interface NewOrderFormData {
   printReceipt: boolean;
   pricePerKm: string;
   distanceKm?: number;
+  hasLuggage?: boolean;
+  hasRoofLuggage?: boolean;
+  hasConditioner?: boolean;
 }
 
 // ─── SOCKET EVENTS ────────────────────────────────────────────────────────────

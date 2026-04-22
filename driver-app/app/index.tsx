@@ -20,6 +20,7 @@ import { useDriverStore } from "../stores/driverStore";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import { registerForPushNotifications, showOrderNotification } from "../services/notifications";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DriverHistoryPanel } from "../components/DriverHistoryPanel";
 import { DriverChatPanel } from "../components/DriverChatPanel";
 import { DriverProfilePanel } from "../components/DriverProfilePanel";
@@ -83,7 +84,8 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
 
         if (d > 0.015) {
           const newDist = state.tripDistance + d;
-          const newPrice = roundTo5(BASE_FARE + newDist * Number(state.activeOrder.pricePerKm));
+          const currentBaseFare = state.activeOrder?.class?.name === "Комфорт" ? 390 : BASE_FARE;
+          const newPrice = roundTo5(currentBaseFare + newDist * Number(state.activeOrder.pricePerKm));
           useDriverStore.getState().setTripMeter(newDist, newPrice);
         }
       }
@@ -143,6 +145,7 @@ export default function MainScreen() {
   const [refreshingGPS, setRefreshingGPS] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tripDistanceRef = useRef(0);
+  const insets = useSafeAreaInsets();
 
   const lastLocationState = useDriverStore((s) => s.lastLocation);
   useEffect(() => {
@@ -235,7 +238,8 @@ export default function MainScreen() {
 
   const mapOrderToState = useCallback((order: any) => {
     if (!order) return null;
-    return mapOrderToActiveOrder(order, BASE_FARE);
+    const currentBaseFare = order.class?.name === "Комфорт" ? 390 : BASE_FARE;
+    return mapOrderToActiveOrder(order, currentBaseFare);
   }, []);
 
   const refreshProfileRank = useCallback(async () => {
@@ -253,6 +257,11 @@ export default function MainScreen() {
     sock.off("driver_ratings_updated");
 
     sock.on("new_order_alert", (data: any) => {
+      if (data.classId) {
+        const p = useDriverStore.getState().profile;
+        const hasClass = p?.vehicle?.classes?.some((c: any) => c.classId === data.classId);
+        if (!hasClass) return;
+      }
       Vibration.vibrate([0, 500, 200, 500]);
       showOrderNotification(data.pickupAddress, data.pricePerKm || 80);
       setOrderAlert(data);
@@ -490,7 +499,7 @@ export default function MainScreen() {
         };
         useDriverStore.getState().setLastLocation({ lat: seedPoint.lat, lng: seedPoint.lng });
         await queueTripPoint(res.data.id, seedPoint);
-      } catch {}
+      } catch { }
     })();
   };
 
@@ -501,10 +510,22 @@ export default function MainScreen() {
 
     if (status === "in_progress") {
       startTrip();
+
+      const currentBaseFare = activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE;
+      let baseTripFare = activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : currentBaseFare;
+      if (activeOrder.arrivedAt) {
+        // Calculate waiting fee locally for the UI (server matches this logic)
+        const waitMs = Date.now() - new Date(activeOrder.arrivedAt).getTime();
+        const waitMins = Math.floor(waitMs / 60000);
+        if (waitMins > 3) {
+          baseTripFare += (waitMins - 3) * 20;
+        }
+      }
+
       // Обнуляем оба счётчика синхронно
       tripDistanceRef.current = 0;
-      useDriverStore.getState().setTripMeter(0, activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : BASE_FARE);
-      setTripMeter(0, activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : BASE_FARE);
+      useDriverStore.getState().setTripMeter(0, baseTripFare);
+      setTripMeter(0, baseTripFare);
 
       Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest }).then((loc) => {
         useDriverStore.getState().setLastLocation({
@@ -523,8 +544,9 @@ export default function MainScreen() {
         // GPS-сессии нет или точек оказалось меньше 2 (плохой GPS / короткая поездка)
         const fallbackDist =
           Math.round(Math.max(useDriverStore.getState().tripDistance, tripDistanceRef.current) * 10) / 10;
+        const currentBaseFare = activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE;
         body.clientDistanceKm = fallbackDist;
-        body.clientFinalPrice = roundTo5(BASE_FARE + fallbackDist * activeOrder.pricePerKm);
+        body.clientFinalPrice = roundTo5(currentBaseFare + fallbackDist * activeOrder.pricePerKm) + 10;
       } else {
         // Fixed-price: явно передаём цену
         if (activeOrder.distanceKm > 0) {
@@ -571,10 +593,11 @@ export default function MainScreen() {
         } else {
           // Резервный показ из предварительного счётчика
           const fallbackDist = Math.round(Math.max(useDriverStore.getState().tripDistance, tripDistanceRef.current) * 10) / 10;
-          const fallbackPrice = roundTo5(BASE_FARE + fallbackDist * activeOrder.pricePerKm);
+          const currentBaseFare = activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE;
+          const fallbackPrice = roundTo5(currentBaseFare + fallbackDist * activeOrder.pricePerKm) + 10;
           Alert.alert(
             "Поездка завершена",
-            `Расстояние: ${fallbackDist} км\nПримерная сумма: ${fallbackPrice} ₸`,
+            `Расстояние: ${fallbackDist} км\nСумма: ${fallbackPrice} ₸`,
           );
         }
       } else {
@@ -666,6 +689,25 @@ export default function MainScreen() {
   const pickupCoords = parseWktPoint(activeOrder?.pickupPoint);
   const dropoffCoords = parseWktPoint(activeOrder?.dropoffPoint);
 
+  const [waitingElapsed, setWaitingElapsed] = useState(0);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (activeOrder && activeOrder.status === "arrived") {
+      interval = setInterval(() => {
+        if (activeOrder.arrivedAt) {
+          const elapsed = Math.floor((Date.now() - new Date(activeOrder.arrivedAt).getTime()) / 1000);
+          setWaitingElapsed(Math.max(0, elapsed));
+        } else {
+          setWaitingElapsed((prev) => prev + 1);
+        }
+      }, 1000);
+    } else {
+      setWaitingElapsed(0);
+    }
+    return () => clearInterval(interval);
+  }, [activeOrder]);
+
   const renderHome = () => {
     if (!profile) {
       return (
@@ -741,6 +783,30 @@ export default function MainScreen() {
               </Text>
             </TouchableOpacity>
 
+            {/* Display Options if present */}
+            {activeOrder.options && activeOrder.options.length > 0 && (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4, marginLeft: 22 }}>
+                {activeOrder.options.includes("luggage") && (
+                  <View style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                    <Ionicons name="briefcase" size={12} color="#fff" />
+                    <Text style={{ fontSize: 10, color: "#fff", fontWeight: "bold" }}>Багаж (+100)</Text>
+                  </View>
+                )}
+                {activeOrder.options.includes("roof_luggage") && (
+                  <View style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                    <Ionicons name="cube" size={12} color="#fff" />
+                    <Text style={{ fontSize: 10, color: "#fff", fontWeight: "bold" }}>Верх. Багаж (+200)</Text>
+                  </View>
+                )}
+                {activeOrder.options.includes("conditioner") && (
+                  <View style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                    <Ionicons name="snow" size={12} color="#4ade80" />
+                    <Text style={{ fontSize: 10, color: "#4ade80", fontWeight: "bold" }}>Кондиционер (+100)</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
             {/* Navigator button — full width */}
             <TouchableOpacity style={styles.navBtn} onPress={openNavigator} activeOpacity={0.85}>
               <Ionicons name="navigate" size={18} color="#000000ff" />
@@ -769,7 +835,11 @@ export default function MainScreen() {
             </View>
             <Text style={styles.statusCenterText}>
               {activeOrder.status === 'assigned' ? "Подача автомобиля..." :
-                activeOrder.status === 'arrived' ? "Ожидание клиента..." :
+                activeOrder.status === 'arrived' ? (
+                  waitingElapsed > 180
+                    ? `Платное ожидание: ${Math.floor((waitingElapsed - 180) / 60) * 20} ₸ (${Math.floor(waitingElapsed / 60)} мин)`
+                    : `Ожидание: ${Math.floor(waitingElapsed / 60)}:${(waitingElapsed % 60).toString().padStart(2, '0')} (Беспл.)`
+                ) :
                   "В пути..."}
             </Text>
 
@@ -963,7 +1033,7 @@ export default function MainScreen() {
     <View style={styles.container}>
       <View style={styles.contentArea}>{renderActiveTab()}</View>
 
-      <View style={styles.navBar}>
+      <View style={[styles.navBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
         {[
           { key: "home", icon: "home", label: "Главная" },
           { key: "orders", icon: "receipt-outline", label: "Заказы" },

@@ -90,6 +90,7 @@ export async function POST(req: NextRequest) {
     classId, tariffId, cashlessAccountId, useBonuses,
     distributionMethod, optionIds, printReceipt, estimatedPrice,
     pricePerKm, pickupPoint, dropoffPoint, distanceKm,
+    hasLuggage, hasRoofLuggage, hasConditioner
   } = body;
 
   if (!phone) return NextResponse.json({ error: "Телефон обязателен" }, { status: 400 });
@@ -107,6 +108,11 @@ export async function POST(req: NextRequest) {
   // Use operator ID from session
   const resolvedOperatorId = currentOpId;
 
+  const optionsArr: string[] = [];
+  if (hasLuggage) optionsArr.push("luggage");
+  if (hasRoofLuggage) optionsArr.push("roof_luggage");
+  if (hasConditioner) optionsArr.push("conditioner");
+
   const order = await prisma.order.create({
     data: {
       phone,
@@ -121,6 +127,7 @@ export async function POST(req: NextRequest) {
       dropoffPoint: dropoffPoint && dropoffPoint.length === 2 ? `POINT(${dropoffPoint[1]} ${dropoffPoint[0]})` : null,
       stops: stops || [],
       comment: comment || null,
+      options: optionsArr,
       isScheduled: timing === "scheduled",
       scheduledAt: timing === "scheduled" && scheduledAt ? new Date(scheduledAt) : null,
       distributionMethod: distributionMethod || "automatic",
@@ -170,7 +177,18 @@ export async function POST(req: NextRequest) {
 
         const pickup = parseWkt(order.pickupPoint);
         const freeDrivers = await prisma.driver.findMany({
-          where: { status: "free", currentLocation: { not: null } },
+          where: { 
+            status: "free", 
+            currentLocation: { not: null },
+            ...(order.classId ? {
+              vehicles: {
+                some: {
+                  isActive: true,
+                  classes: { some: { classId: order.classId } }
+                }
+              }
+            } : {})
+          },
           select: { id: true, currentLocation: true }
         });
 

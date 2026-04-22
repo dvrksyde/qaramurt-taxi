@@ -89,7 +89,8 @@ export async function calculateSessionDistance(
 
   const tariffPerKm = Number(session.tariffPerKm ?? 80);
   const baseFare = Number(session.baseFare ?? BASE_FARE);
-  const finalPrice = roundTo5(baseFare + distanceKm * tariffPerKm);
+  // +10 ₸ correction — compensates for GPS rounding losses over the trip
+  const finalPrice = roundTo5(baseFare + distanceKm * tariffPerKm) + 10;
 
   return {
     sessionId,

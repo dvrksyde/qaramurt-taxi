@@ -33,6 +33,9 @@ export function NewOrderModal({ onClose }: Props) {
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Frequent client addresses
+  const [clientAddresses, setClientAddresses] = useState<{ address: string; point: string | null; count: number }[]>([]);
+
   const { dispatchOrder } = useSocket();
   const monitorStore = useMonitorStore();
 
@@ -52,6 +55,9 @@ export function NewOrderModal({ onClose }: Props) {
       tariffId: null,
       cashlessAccountId: null,
       pricePerKm: "80",
+      hasLuggage: false,
+      hasRoofLuggage: false,
+      hasConditioner: false,
     },
   });
 
@@ -60,6 +66,7 @@ export function NewOrderModal({ onClose }: Props) {
     name: "stops",
   });
 
+  const watchedPhone = watch("phone");
   const watchedClass = watch("classId");
   const watchedTariff = watch("tariffId");
   const watchedPickup = watch("pickupAddress");
@@ -69,8 +76,28 @@ export function NewOrderModal({ onClose }: Props) {
   const watchedPickupPoint = watch("pickupPoint");
   const watchedDropoffPoint = watch("dropoffPoint");
   const watchedPricePerKm = watch("pricePerKm");
+  const watchedHasLuggage = watch("hasLuggage");
+  const watchedHasRoofLuggage = watch("hasRoofLuggage");
+  const watchedHasConditioner = watch("hasConditioner");
+  const distanceKm = watch("distanceKm");
 
   const isDelivery = services.find(s => s.id === Number(watchedServiceId))?.name?.toLowerCase()?.includes("доставка");
+
+  // Fetch frequent addresses when phone changes
+  useEffect(() => {
+    const digits = (watchedPhone ?? "").replace(/\D/g, "");
+    if (digits.length < 7) { setClientAddresses([]); return; }
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/clients/${encodeURIComponent(watchedPhone ?? "")}/addresses`);
+        const d = await res.json();
+        if (d.data) setClientAddresses(d.data);
+      } catch {}
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [watchedPhone]);
 
   // Load initial data
   useEffect(() => {
@@ -146,14 +173,8 @@ export function NewOrderModal({ onClose }: Props) {
           const coords = routeData.geometry.coordinates.map((c: [number, number]) => [c[1], c[0]]);
           setRoute(coords);
 
-          const distanceKm = routeData.distance / 1000;
-          setValue("distanceKm", Number(distanceKm.toFixed(3)));
-
-          // Auto-calculate price
-          const pricePerKm = Number(watchedPricePerKm);
-          const basePrice = 290;
-          const estimated = Math.round((basePrice + distanceKm * pricePerKm) / 5) * 5;
-          setValue("estimatedPrice", estimated);
+          const distKm = routeData.distance / 1000;
+          setValue("distanceKm", Number(distKm.toFixed(3)));
         }
       } catch (e) {
         console.error("OSRM fetch failed", e);
@@ -161,7 +182,40 @@ export function NewOrderModal({ onClose }: Props) {
     };
 
     fetchRoute();
-  }, [watchedPickupPoint, watchedDropoffPoint, watchedPricePerKm, setValue]);
+  }, [watchedPickupPoint, watchedDropoffPoint, setValue]);
+
+  // Price calculation
+  useEffect(() => {
+    if (distanceKm == null) return;
+    
+    // Auto-calculate price
+    const pricePerKm = Number(watchedPricePerKm);
+    let basePrice = 290;
+    const selectedClass = classGroups.flatMap(g => g.classes ?? []).find(c => c.id === Number(watchedClass));
+    if (selectedClass?.name === "Комфорт") {
+      basePrice = 390;
+    }
+    
+    let estimated = Math.round((basePrice + distanceKm * pricePerKm) / 5) * 5;
+    
+    if (watchedHasLuggage) estimated += 100;
+    if (watchedHasRoofLuggage) estimated += 200;
+    if (watchedHasConditioner) estimated += 100;
+
+    setValue("estimatedPrice", estimated);
+  }, [distanceKm, watchedPricePerKm, watchedClass, classGroups, watchedHasLuggage, watchedHasRoofLuggage, watchedHasConditioner, setValue]);
+
+  // Sync pricePerKm when class changes
+  useEffect(() => {
+    const isComfort = classGroups.flatMap(g => g.classes ?? []).find(c => c.id === Number(watchedClass))?.name === "Комфорт";
+    if (isComfort) {
+      if (watchedPricePerKm === "80") setValue("pricePerKm", "100");
+      if (watchedPricePerKm === "110") setValue("pricePerKm", "130");
+    } else {
+      if (watchedPricePerKm === "100") setValue("pricePerKm", "80");
+      if (watchedPricePerKm === "130") setValue("pricePerKm", "110");
+    }
+  }, [watchedClass, watchedPricePerKm, classGroups, setValue]);
 
   // Keyboard shortcut: Esc to close
   useEffect(() => {
@@ -305,6 +359,50 @@ export function NewOrderModal({ onClose }: Props) {
                 </select>
               </div>
 
+              {/* Frequent client addresses */}
+              {clientAddresses.length > 0 && (
+                <div style={{ marginBottom: 6 }}>
+                  <div style={{ fontSize: 10, color: "var(--color-text-3)", marginBottom: 4, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    Частые адреса клиента:
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {clientAddresses.map((item, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          setValue("pickupAddress", item.address);
+                          if (item.point) {
+                            const m = item.point.match(/POINT\(([\d.\-]+)\s+([\d.\-]+)\)/);
+                            if (m) setValue("pickupPoint", [Number(m[2]), Number(m[1])]);
+                          }
+                          setActiveField('dropoff');
+                        }}
+                        style={{
+                          fontSize: 11,
+                          padding: "3px 8px",
+                          borderRadius: 12,
+                          border: "1px solid var(--color-primary)",
+                          background: "var(--color-surface-2)",
+                          color: "var(--color-primary)",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
+                          maxWidth: 200,
+                          overflow: "hidden",
+                          whiteSpace: "nowrap",
+                          textOverflow: "ellipsis",
+                        }}
+                        title={item.address}
+                      >
+                        📍 {item.address.length > 26 ? item.address.slice(0, 24) + "…" : item.address}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="form-row">
                 <span className="form-label">Имя:</span>
                 <input {...register("clientName")} className="form-input highlight" placeholder="Имя клиента" />
@@ -404,13 +502,24 @@ export function NewOrderModal({ onClose }: Props) {
 
               <div className="form-row">
                 <span className="form-label">Тариф:</span>
-                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer" }}>
-                  <input type="radio" value="80" {...register("pricePerKm")} /> 80 ₸/км (гор.)
-                </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer", marginLeft: 12 }}>
-                  <input type="radio" value="110" {...register("pricePerKm")} /> 110 ₸/км (за.)
-                </label>
+                {(() => {
+                  const isComfort = classGroups.flatMap(g => g.classes ?? []).find(c => c.id === Number(watchedClass))?.name === "Комфорт";
+                  const cityPrice = isComfort ? "100" : "80";
+                  const subPrice = isComfort ? "130" : "110";
+                  return (
+                    <>
+                      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer" }}>
+                        <input type="radio" value={cityPrice} {...register("pricePerKm")} /> {cityPrice} ₸/км (гор.)
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer", marginLeft: 12 }}>
+                        <input type="radio" value={subPrice} {...register("pricePerKm")} /> {subPrice} ₸/км (за.)
+                      </label>
+                    </>
+                  );
+                })()}
               </div>
+
+
 
               <div style={{ marginBottom: 4 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Метод распределения</div>
@@ -424,8 +533,8 @@ export function NewOrderModal({ onClose }: Props) {
 
             {/* ── RIGHT: Price & Stats ── */}
             <div>
-              <div style={{ background: "#f8f9fa", padding: 12, borderRadius: 8, marginBottom: 16 }}>
-                <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>Расчет стоимости:</div>
+              <div style={{ background: "var(--color-surface-2)", padding: 12, borderRadius: 8, marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: "var(--color-text-2)", marginBottom: 4 }}>Расчет стоимости:</div>
                 <div style={{ fontSize: 24, fontWeight: 700, color: "var(--color-primary)" }}>
                   {(watch("estimatedPrice") as number | null) || 0} <span style={{ fontSize: 14 }}>₸</span>
                 </div>
@@ -434,6 +543,19 @@ export function NewOrderModal({ onClose }: Props) {
                     Дистанция: <strong>{watch("distanceKm") as number} км</strong>
                   </div>
                 )}
+              </div>
+
+              <div style={{ background: "var(--color-surface-2)", padding: 12, borderRadius: 8, marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-2)", marginBottom: 8 }}>Опции заказа:</div>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 6, cursor: "pointer" }}>
+                  <input type="checkbox" {...register("hasLuggage")} /> Багаж (+100)
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 6, cursor: "pointer" }}>
+                  <input type="checkbox" {...register("hasRoofLuggage")} /> Верхний багаж (+200)
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 0, cursor: "pointer" }}>
+                  <input type="checkbox" {...register("hasConditioner")} /> Кондиционер (+100)
+                </label>
               </div>
 
               <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>Авто на линии:</div>

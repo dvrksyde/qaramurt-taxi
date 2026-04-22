@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, checkPermission } from "@/lib/permissions";
 import { hashPassword } from "@/lib/passwords";
-import { buildDriverRankMap } from "@/lib/driverRanking";
+import { buildDriverRankMap, getStartOfWeek } from "@/lib/driverRanking";
 
 function serializeDriver(driver: any, rating: number, ordersCount: number) {
   const { passwordHash: _passwordHash, ...safeDriver } = driver;
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     include: {
       tariffGroup: { select: { name: true, type: true } },
       vehicles: { select: { id: true, plate: true, make: true, model: true, color: true, classes: true } },
-      _count: { select: { orders: { where: { status: "completed" } } } },
+      _count: { select: { orders: { where: { status: "completed", completedAt: { gte: getStartOfWeek() } } } } },
     },
     orderBy: [{ status: "asc" }, { lastName: "asc" }],
   });
@@ -155,7 +155,7 @@ export async function POST(req: NextRequest) {
     include: {
       tariffGroup: { select: { name: true, type: true } },
       vehicles: true,
-      _count: { select: { orders: { where: { status: "completed" } } } },
+      _count: { select: { orders: { where: { status: "completed", completedAt: { gte: getStartOfWeek() } } } } },
     },
   });
 

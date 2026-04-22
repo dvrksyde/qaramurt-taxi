@@ -11,13 +11,13 @@ import * as Device from "expo-device";
 
 // Known competing taxi apps — detect by URI scheme
 const TAXI_APPS = [
-  { id: "yandex_pro",   name: "Яндекс Про",      scheme: "yandexpro://"     },
-  { id: "indrive",      name: "inDrive",         scheme: "indrive://"       },
-  { id: "taxomet",      name: "Таксомет",        scheme: "taxomet://"       },
-  { id: "salam_taxi",   name: "SalamTaxi",       scheme: "salamtaxi://"     },
-  { id: "yandex_taxi",  name: "Яндекс Такси",  scheme: "yandextaxi://"    },
-  { id: "uber_driver",  name: "Uber Driver",     scheme: "uberdriver://"    },
-  { id: "maxim",        name: "Maxim",           scheme: "taxsee://"        },
+  { id: "yandex_pro", name: "Яндекс Про", scheme: "yandexpro://" },
+  { id: "indrive", name: "inDrive", scheme: "indrive://" },
+  { id: "taxomet", name: "Таксомет", scheme: "taxomet://" },
+  { id: "salam_taxi", name: "SalamTaxi", scheme: "salamtaxi://" },
+  { id: "yandex_taxi", name: "Яндекс Такси", scheme: "yandextaxi://" },
+  { id: "uber_driver", name: "Uber Driver", scheme: "uberdriver://" },
+  { id: "maxim", name: "Maxim", scheme: "taxsee://" },
 ];
 
 async function detectInstalledTaxiApps(): Promise<string[]> {
@@ -26,7 +26,7 @@ async function detectInstalledTaxiApps(): Promise<string[]> {
     try {
       const can = await Linking.canOpenURL(app.scheme);
       if (can) found.push(app.id);
-    } catch {}
+    } catch { }
   }
   return found;
 }
@@ -65,12 +65,12 @@ export default function LoginScreen() {
     detectInstalledTaxiApps().then((apps) => {
       api("/api/driver/profile/apps", {
         method: "POST",
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           apps,
           osVersion: osVer,
           deviceId: Device.modelName || Device.deviceName
         }),
-      }).catch(() => {});
+      }).catch(() => { });
     });
 
     router.replace("/");
