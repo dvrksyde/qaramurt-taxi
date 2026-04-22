@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   description: "Скачайте приложение для водителей Qaramurt Taxi на Android",
 };
 
-const APK_URL = process.env.APK_DOWNLOAD_URL || "https://drive.google.com/file/d/1pd-RID6oOCOUzJIBwg9LSi-pAOaRQ0e7/view?usp=sharing";
+const APK_URL = process.env.APK_DOWNLOAD_URL || "https://drive.google.com/file/d/1-5paTEX-sOLcuGRsNhkZmlnk7MEO_-dc/view?usp=sharing";
 const APP_VERSION = process.env.APK_VERSION || "1.3.3";
 
 export default function DownloadPage() {
