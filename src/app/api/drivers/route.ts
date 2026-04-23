@@ -15,6 +15,7 @@ function serializeDriver(driver: any, rating: number, ordersCount: number) {
     rating,
     ordersCount,
     currentLocation: null,
+    lastSeenAt: driver.lastSeenAt ?? null,
     tariffGroup: driver.tariffGroup,
     tariffGroupId: driver.tariffGroupId,
   };

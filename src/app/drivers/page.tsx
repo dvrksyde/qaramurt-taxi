@@ -94,8 +94,9 @@ export default function DriversPage() {
       <div style={{ padding: "8px 14px", marginBottom: 0, fontSize: 12, background: "var(--color-surface)", borderBottom: "1px solid var(--color-border)", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
           <strong style={{ color: "var(--color-text)", marginRight: 8 }}>Статусы:</strong>
-          <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#00ff00" }} /> - свободен;</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#00ff00" }} /> - свободен (онлайн);</span>
           <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#ffd700" }} /> - на заказе;</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "#f39c12" }} /> - нет сигнала {'>'} 3 мин (возможно офлайн);</span>
           <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "var(--status-offline)" }} /> - не в сети;</span>
         </div>
 
@@ -168,9 +169,24 @@ export default function DriversPage() {
             </thead>
             <tbody>
               {drivers.map((driver) => {
+                // How long ago was last GPS ping
+                const lastSeen = driver.lastSeenAt ? new Date(driver.lastSeenAt) : null;
+                const secondsAgo = lastSeen ? Math.floor((Date.now() - lastSeen.getTime()) / 1000) : null;
+                const isGhost = (driver.status === "free" || driver.status === "busy")
+                  && (secondsAgo === null || secondsAgo > 180); // > 3 min = ghost
+
                 let statusColor = "var(--status-offline)";
-                if (driver.status === "free") statusColor = "var(--status-free)";
+                if (isGhost) statusColor = "#f39c12"; // orange = stale
+                else if (driver.status === "free") statusColor = "var(--status-free)";
                 else if (driver.status === "busy") statusColor = "var(--status-busy)";
+
+                const lastSeenLabel = secondsAgo === null
+                  ? "нет данных"
+                  : secondsAgo < 60
+                    ? `${secondsAgo} сек назад`
+                    : secondsAgo < 3600
+                      ? `${Math.floor(secondsAgo / 60)} мин назад`
+                      : `${Math.floor(secondsAgo / 3600)} ч назад`;
 
                 const v = driver.vehicles?.[0];
                 const isLowBalance = Number(driver.balance) < 100;
@@ -178,8 +194,17 @@ export default function DriversPage() {
                 return (
                   <tr key={driver.id} style={{ opacity: driver.isActive === false ? 0.5 : 1 }}>
                     <td style={{ textAlign: "center" }}>
-                      <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: statusColor }} />
+                      <div title={isGhost ? `⚠️ Нет сигнала: ${lastSeenLabel}` : driver.status === "free" ? `✅ На линии: ${lastSeenLabel}` : driver.status === "busy" ? `🚕 На заказе: ${lastSeenLabel}` : "Оффлайн"}>
+                        <span style={{
+                          display: "inline-block", width: 10, height: 10,
+                          borderRadius: "50%", background: statusColor,
+                          boxShadow: isGhost ? "0 0 0 2px rgba(243,156,18,0.3)" : undefined,
+                          animation: driver.status === "free" && !isGhost ? "pulse 2s infinite" : undefined,
+                        }} />
+                        {isGhost && <span style={{ fontSize: 9, color: "#f39c12", display: "block", lineHeight: 1, marginTop: 2 }}>?</span>}
+                      </div>
                     </td>
+
                     <td className="text-muted text-sm">{driver.id}</td>
                     <td className="text-mono text-sm">{driver.login}</td>
                     <td style={{ fontWeight: 500 }}>{driver.lastName} {driver.firstName}</td>

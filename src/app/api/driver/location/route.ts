@@ -18,7 +18,10 @@ export async function POST(req: NextRequest) {
   // Update driver location in DB (WKT format for PostGIS) + fetch driver info for monitor
   const driver = await prisma.driver.update({
     where: { id: auth.driverId },
-    data: { currentLocation: `POINT(${lng} ${lat})` },
+    data: {
+      currentLocation: `POINT(${lng} ${lat})`,
+      lastSeenAt: new Date(), // Точное время последнего GPS пинга
+    },
     include: {
       vehicles: { where: { isActive: true }, take: 1, select: { plate: true, make: true, model: true, color: true } },
     },
