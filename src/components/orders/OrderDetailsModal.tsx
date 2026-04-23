@@ -25,6 +25,15 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
 
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // Extra options state
+  const EXTRAS = [
+    { key: "luggage",     label: "Багаж",          price: 100 },
+    { key: "roof_luggage",label: "Верхний багаж",  price: 200 },
+    { key: "conditioner", label: "Кондиционер",    price: 100 },
+  ];
+  const [extras, setExtras] = useState<string[]>([]);
+  const [savingExtras, setSavingExtras] = useState(false);
+
   // Reassign state
   const [showReassign, setShowReassign] = useState(false);
   const [freeDrivers, setFreeDrivers] = useState<any[]>([]);
@@ -47,6 +56,11 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
 
       if (data.data) {
         setOrder(data.data);
+        // Restore saved extras from order.options
+        const savedOptions = data.data.options;
+        if (Array.isArray(savedOptions)) {
+          setExtras(savedOptions.map((o: any) => o.key).filter(Boolean));
+        }
 
         // Load GPS track if order is active or completed
         if (data.data.status === "in_progress" || data.data.status === "completed") {
@@ -433,19 +447,89 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
             {/* Vehicle Section */}
             <div className="details-card">
               <div className="card-label">Автомобиль</div>
-              {order.vehicle ? (
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>
-                    {order.vehicle.color} {order.vehicle.make} {order.vehicle.model}
+              {(() => {
+                // Use order.vehicle OR driver's vehicle as fallback
+                const v = order.vehicle ||
+                  (order.driver?.vehicles?.[0] ? order.driver.vehicles[0] : null);
+                return v ? (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600 }}>
+                      {v.color} {v.make} {v.model}
+                    </div>
+                    <span className="license-plate" style={{ marginTop: 8, display: "inline-block" }}>
+                      {v.plate}
+                    </span>
                   </div>
-                  <span className="license-plate" style={{ marginTop: 8, display: "inline-block" }}>
-                    {order.vehicle.plate}
-                  </span>
-                </div>
-              ) : (
-                <div style={{ padding: "12px 0", color: "var(--color-text-3)", fontStyle: "italic" }}>Данные об авто отсутствуют</div>
-              )}
+                ) : (
+                  <div style={{ padding: "12px 0", color: "var(--color-text-3)", fontStyle: "italic" }}>Данные об авто отсутствуют</div>
+                );
+              })()}
             </div>
+
+            {/* Extra Options Section */}
+            {order.status !== "completed" && order.status !== "canceled" && (
+              <div className="details-card">
+                <div className="card-label">Доп. опции</div>
+                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {EXTRAS.map((ex) => (
+                    <label key={ex.key} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        checked={extras.includes(ex.key)}
+                        onChange={(e) => {
+                          setExtras(prev =>
+                            e.target.checked
+                              ? [...prev, ex.key]
+                              : prev.filter(k => k !== ex.key)
+                          );
+                        }}
+                        style={{ width: 16, height: 16, accentColor: "var(--color-primary)" }}
+                      />
+                      <span style={{ flex: 1 }}>{ex.label}</span>
+                      <span style={{ color: "var(--color-primary)", fontWeight: 700 }}>+{ex.price} ₸</span>
+                    </label>
+                  ))}
+                </div>
+                {(() => {
+                  const extraTotal = EXTRAS.filter(e => extras.includes(e.key)).reduce((s, e) => s + e.price, 0);
+                  return extraTotal > 0 && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: "var(--color-text-2)", textAlign: "right" }}>
+                      Доп. итого: <strong style={{ color: "var(--color-primary)" }}>+{extraTotal} ₸</strong>
+                    </div>
+                  );
+                })()}
+                <button
+                  className="btn btn-primary btn-sm"
+                  style={{ width: "100%", marginTop: 10 }}
+                  disabled={savingExtras}
+                  onClick={async () => {
+                    setSavingExtras(true);
+                    try {
+                      const selectedExtras = EXTRAS.filter(e => extras.includes(e.key));
+                      const extraTotal = selectedExtras.reduce((s, e) => s + e.price, 0);
+                      const basePrice = Number(order.estimatedPrice || order.finalPrice || 0);
+                      // Subtract old extras, add new extras
+                      const oldOptions: any[] = Array.isArray(order.options) ? order.options : [];
+                      const oldTotal = oldOptions.reduce((s: number, o: any) => s + (o.price || 0), 0);
+                      const newPrice = basePrice - oldTotal + extraTotal;
+                      await fetch(`/api/orders/${orderId}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          options: selectedExtras,
+                          extraPrice: newPrice,
+                        }),
+                      });
+                      await loadOrder();
+                    } finally {
+                      setSavingExtras(false);
+                    }
+                  }}
+                >
+                  {savingExtras ? "Сохраняю..." : "💾 Сохранить опции"}
+                </button>
+              </div>
+            )}
 
             {/* Price Section */}
             <div className="details-card" style={{ background: "var(--color-primary)", color: "white" }}>
@@ -456,6 +540,14 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
               <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>
                 Дистанция: {order.distanceKm ? `${Number(order.distanceKm).toFixed(1)} км` : "—"}
               </div>
+              {(() => {
+                const opts: any[] = Array.isArray(order.options) ? order.options : [];
+                return opts.length > 0 && (
+                  <div style={{ fontSize: 11, opacity: 0.75, marginTop: 4 }}>
+                    Опции: {opts.map((o: any) => o.label).join(", ")}
+                  </div>
+                );
+              })()}
             </div>
 
           </div>

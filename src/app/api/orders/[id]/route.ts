@@ -19,7 +19,11 @@ export async function GET(_req: NextRequest, { params }: Params) {
     const order = await prisma.order.findUnique({
       where: { id: parsedId },
       include: {
-        driver: true,
+        driver: {
+          include: {
+            vehicles: { where: { isActive: true }, take: 1 },
+          },
+        },
         vehicle: true,
         service: true,
         class: true,
@@ -73,7 +77,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const body = await req.json();
-  const { status, driverId, vehicleId, finalPrice, cancelReason, source } = body;
+  const { status, driverId, vehicleId, finalPrice, cancelReason, source, options, extraPrice } = body;
+
 
   const now = new Date();
   const timestamps: Record<string, Date | null> = {};
@@ -93,6 +98,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         ...(vehicleId !== undefined && { vehicleId }),
         ...(finalPrice !== undefined && { finalPrice }),
         ...(cancelReason && { cancelReason }),
+        // Extra options: save JSON array
+        ...(options !== undefined && { options }),
+        // Recalculate estimated price when extras added (not on completed orders)
+        ...(extraPrice !== undefined && !status && {
+          estimatedPrice: extraPrice,
+        }),
         ...timestamps,
       },
       include: { driver: true }
@@ -162,10 +173,20 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   // Notify monitor via socket
-  const io = (global as Record<string, unknown>).socketIO as { to: (room: string) => { emit: (event: string, data: unknown) => void } } | undefined;
+  const io = (global as Record<string, unknown>).socketIO as any;
   if (io) {
     io.to("monitor").emit("order_status_change", { orderId: updated.id, status, driverId: updated.driverId });
+
+    // Notify driver directly if options/price changed (no status change)
+    if (!status && options !== undefined && updated.driverId) {
+      io.to(`driver:${updated.driverId}`).emit("order_updated", {
+        orderId: updated.id,
+        estimatedPrice: updated.estimatedPrice,
+        options: updated.options,
+      });
+    }
   }
+
 
   // Free driver if order completed or canceled
   if ((status === "completed" || status === "canceled") && updated.driverId) {

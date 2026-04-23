@@ -86,7 +86,9 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
         if (d > 0.015) {
           const newDist = state.tripDistance + d;
           const currentBaseFare = state.activeOrder?.class?.name === "Комфорт" ? 390 : BASE_FARE;
-          const newPrice = roundTo5(currentBaseFare + newDist * Number(state.activeOrder.pricePerKm));
+          const options: any[] = Array.isArray(state.activeOrder?.options) ? state.activeOrder.options : [];
+          const extrasTotal = options.reduce((sum, opt) => sum + (Number(opt.price) || 0), 0);
+          const newPrice = roundTo5(currentBaseFare + extrasTotal + newDist * Number(state.activeOrder.pricePerKm));
           useDriverStore.getState().setTripMeter(newDist, newPrice);
         }
       }
@@ -345,6 +347,17 @@ export default function MainScreen() {
       setDispatcherAssignedOrder(data.order); // Show dedicated modal
     });
 
+    sock.on("order_updated", (data: any) => {
+      const state = useDriverStore.getState();
+      if (state.activeOrder?.id === data.orderId) {
+        setActiveOrder({
+          ...state.activeOrder,
+          estimatedPrice: data.estimatedPrice,
+          options: data.options,
+        });
+      }
+    });
+
     sock.on("driver_ratings_updated", () => {
       refreshProfileRank();
     });
@@ -587,7 +600,9 @@ export default function MainScreen() {
       startTrip();
 
       const currentBaseFare = activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE;
-      let baseTripFare = activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : currentBaseFare;
+      const options: any[] = Array.isArray(activeOrder.options) ? activeOrder.options : [];
+      const extrasTotal = options.reduce((sum, opt) => sum + (Number(opt.price) || 0), 0);
+      let baseTripFare = activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : (currentBaseFare + extrasTotal);
       if (activeOrder.arrivedAt) {
         // Calculate waiting fee locally for the UI (server matches this logic)
         const waitMs = Date.now() - new Date(activeOrder.arrivedAt).getTime();
@@ -860,26 +875,26 @@ export default function MainScreen() {
             </TouchableOpacity>
 
             {/* Display Options if present */}
-            {activeOrder.options && activeOrder.options.length > 0 && (
+            {Array.isArray(activeOrder.options) && activeOrder.options.length > 0 && (
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4, marginLeft: 22 }}>
-                {activeOrder.options.includes("luggage") && (
-                  <View style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
-                    <Ionicons name="briefcase" size={12} color="#fff" />
-                    <Text style={{ fontSize: 10, color: "#fff", fontWeight: "bold" }}>Багаж (+100)</Text>
-                  </View>
-                )}
-                {activeOrder.options.includes("roof_luggage") && (
-                  <View style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
-                    <Ionicons name="cube" size={12} color="#fff" />
-                    <Text style={{ fontSize: 10, color: "#fff", fontWeight: "bold" }}>Верх. Багаж (+200)</Text>
-                  </View>
-                )}
-                {activeOrder.options.includes("conditioner") && (
-                  <View style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
-                    <Ionicons name="snow" size={12} color="#4ade80" />
-                    <Text style={{ fontSize: 10, color: "#4ade80", fontWeight: "bold" }}>Кондиционер (+100)</Text>
-                  </View>
-                )}
+                {activeOrder.options.map((opt: any) => {
+                  const key = typeof opt === 'string' ? opt : opt.key;
+                  const label = opt.label || (key === 'luggage' ? 'Багаж' : key === 'roof_luggage' ? 'Верх. Багаж' : key === 'conditioner' ? 'Кондиционер' : 'Опция');
+                  const price = opt.price || (key === 'luggage' ? 100 : key === 'roof_luggage' ? 200 : key === 'conditioner' ? 100 : 0);
+                  
+                  return (
+                    <View key={key} style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <Ionicons 
+                        name={key === 'luggage' ? 'briefcase' : key === 'roof_luggage' ? 'cube' : key === 'conditioner' ? 'snow' : 'apps-outline'} 
+                        size={12} 
+                        color={key === 'conditioner' ? '#4ade80' : '#fff'} 
+                      />
+                      <Text style={{ fontSize: 10, color: key === 'conditioner' ? '#4ade80' : '#fff', fontWeight: "bold" }}>
+                        {label} (+{price})
+                      </Text>
+                    </View>
+                  );
+                })}
               </View>
             )}
 
