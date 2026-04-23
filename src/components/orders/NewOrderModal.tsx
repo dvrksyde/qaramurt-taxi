@@ -15,8 +15,7 @@ interface Props { onClose: () => void; }
 const DISTRIBUTION_METHODS = [
   { value: "automatic",  label: "автоматически" },
   { value: "broadcast",  label: "показать всем водителям сразу" },
-  { value: "map_pick",   label: "выбрать водителя по карте" },
-  { value: "list_pick",  label: "выбрать водителя по списку" },
+  { value: "manual",     label: "выбрать водителя" },
 ] as const;
 
 export function NewOrderModal({ onClose }: Props) {
@@ -37,7 +36,7 @@ export function NewOrderModal({ onClose }: Props) {
   // Frequent client addresses
   const [clientAddresses, setClientAddresses] = useState<{ address: string; point: string | null; count: number }[]>([]);
 
-  // Driver picker for list_pick / map_pick
+  // Driver picker for manual selection
   const [pickerDrivers, setPickerDrivers] = useState<any[]>([]);
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerView, setPickerView] = useState<"list" | "map">("list");
@@ -305,9 +304,9 @@ export function NewOrderModal({ onClose }: Props) {
   };
 
   const watchedDistMethod = watch("distributionMethod");
-  const needsDriverPick = watchedDistMethod === "list_pick" || watchedDistMethod === "map_pick";
+  const needsDriverPick = watchedDistMethod === "manual";
 
-  // Load drivers when list_pick or map_pick is selected
+  // Load drivers when manual selection is chosen
   useEffect(() => {
     if (!needsDriverPick) {
       setSelectedDriverId(null);
@@ -570,7 +569,7 @@ export function NewOrderModal({ onClose }: Props) {
                 ))}
               </div>
 
-              {/* Driver picker for list_pick / map_pick */}
+              {/* Driver picker for manual selection */}
               {needsDriverPick && (() => {
                 const parseWkt = (wkt: string | null): [number, number] | null => {
                   if (!wkt) return null;
@@ -591,9 +590,7 @@ export function NewOrderModal({ onClose }: Props) {
                   <div style={{ marginTop: 8, padding: 10, borderRadius: 8, border: "1px solid var(--color-border)", background: "var(--color-surface-2)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-text-2)", textTransform: "uppercase" }}>
-                        {selectedDriver
-                          ? <span style={{ color: "#00b894" }}>✅ {selectedDriver.callsign ? `${selectedDriver.callsign} · ` : ""}{selectedDriver.lastName} {selectedDriver.firstName}</span>
-                          : "Выберите водителя"}
+                        ВЫБЕРИТЕ ВОДИТЕЛЯ
                       </div>
                       <div style={{ display: "flex", border: "1px solid var(--color-border)", borderRadius: 6, overflow: "hidden" }}>
                         <button type="button" onClick={() => setPickerView("list")} style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", background: pickerView === "list" ? "#0984e3" : "transparent", color: pickerView === "list" ? "#fff" : "var(--color-text-2)" }}>📋</button>
@@ -635,6 +632,12 @@ export function NewOrderModal({ onClose }: Props) {
                         {driverPins.length === 0
                           ? <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-3)", fontSize: 12 }}>Нет водителей с GPS</div>
                           : <DriverPickMap drivers={driverPins} pickup={pickupCoords} selectedDriverId={selectedDriverId} onSelectDriver={(id) => setSelectedDriverId(id === selectedDriverId ? null : id)} />}
+                      </div>
+                    )}
+
+                    {selectedDriver && (
+                      <div style={{ marginTop: 8, padding: "6px 10px", borderRadius: 6, background: "rgba(0,184,148,0.1)", border: "1px solid rgba(0,184,148,0.3)", fontSize: 12, fontWeight: 600, color: "#00b894" }}>
+                         ✅ {selectedDriver.callsign ? `${selectedDriver.callsign} · ` : ""}{selectedDriver.lastName} {selectedDriver.firstName}
                       </div>
                     )}
                   </div>
