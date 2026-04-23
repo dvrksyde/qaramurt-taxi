@@ -30,36 +30,31 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
     if (!order) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    // Fetch unsupported geometry fields
-    const rawOrder = await prisma.$queryRaw`
-      SELECT 
-        ST_AsText("pickupPoint") as "pickupPoint", 
-        ST_AsText("dropoffPoint") as "dropoffPoint" 
-      FROM orders 
-      WHERE id = ${order.id}
-    ` as any[];
+    // Read geometry fields directly as plain text (no PostGIS needed)
+    const rawPoints = await prisma.order.findUnique({
+      where: { id: parsedId },
+      select: { pickupPoint: true, dropoffPoint: true },
+    });
 
     let driverPos = null;
     if (order.driverId) {
-      const rawDriver = await prisma.$queryRaw`
-        SELECT ST_AsText("currentLocation") as "currentLocation"
-        FROM drivers
-        WHERE id = ${order.driverId}
-      ` as any[];
-      if (rawDriver[0]?.currentLocation) {
-        driverPos = rawDriver[0].currentLocation;
-      }
+      const rawDriver = await prisma.driver.findUnique({
+        where: { id: order.driverId },
+        select: { currentLocation: true },
+      });
+      driverPos = rawDriver?.currentLocation || null;
     }
 
     const enrichedOrder = {
       ...order,
-      pickupPoint: rawOrder[0]?.pickupPoint || null,
-      dropoffPoint: rawOrder[0]?.dropoffPoint || null,
+      pickupPoint: rawPoints?.pickupPoint || null,
+      dropoffPoint: rawPoints?.dropoffPoint || null,
     };
-    
+
     if (enrichedOrder.driver) {
-      enrichedOrder.driver.currentLocation = driverPos;
+      (enrichedOrder.driver as any).currentLocation = driverPos;
     }
+
 
     const access = await requireOrderReadAccess(order.operatorId);
     if (!access.allowed) return access.response!;

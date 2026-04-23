@@ -69,17 +69,17 @@ export function ChatTab() {
 
   // Build driver list: ALL drivers, with online status from driverLocations
   const driverList = allDrivers.map((d) => {
-    const loc = driverLocations[d.id];
     return {
       driverId: d.id,
       name: `${d.lastName} ${d.firstName}`.trim(),
       callsign: d.callsign || null,
-      status: loc?.status || (d.status === "free" || d.status === "busy" ? d.status : "offline"),
+      status: d.status, // всегда из БД — как на вкладке "Водители"
     };
   }).sort((a, b) => {
     const statusOrder: Record<string, number> = { free: 0, busy: 1, offline: 2 };
     return (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3);
   });
+
 
   // Filter messages for selected driver
   const filteredMessages = selectedDriverId === "all"

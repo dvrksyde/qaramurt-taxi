@@ -33,10 +33,12 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
 
   const loadOrder = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await fetch(`/api/orders/${orderId}`);
       if (!res.ok) {
-        throw new Error(`Server returned ${res.status}`);
+        const errText = await res.text();
+        throw new Error(`Сервер вернул ${res.status}: ${errText.slice(0, 200)}`);
       }
       const text = await res.text();
       const data = text ? JSON.parse(text) : {};
@@ -57,9 +59,12 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
             console.error("Failed to load track", e);
           }
         }
+      } else {
+        throw new Error(data.error || "Данные заказа не получены");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to load order info", err);
+      setLoadError(err?.message || "Не удалось загрузить данные заказа");
     } finally {
       setLoading(false);
     }
@@ -137,6 +142,22 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
       <div className="modal-overlay">
         <div className="modal" style={{ width: 400, textAlign: "center", padding: 40 }}>
           <div className="pulse">Загрузка данных...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!order && loadError) {
+    return (
+      <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+        <div className="modal" style={{ width: 420, textAlign: "center", padding: 40 }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+          <div style={{ fontWeight: 700, marginBottom: 8, color: "var(--color-text)" }}>Ошибка загрузки</div>
+          <div style={{ fontSize: 12, color: "var(--color-text-3)", marginBottom: 20, wordBreak: "break-all" }}>{loadError}</div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+            <button className="btn btn-primary" onClick={loadOrder}>Повторить</button>
+            <button className="btn btn-ghost" onClick={onClose}>Закрыть</button>
+          </div>
         </div>
       </div>
     );

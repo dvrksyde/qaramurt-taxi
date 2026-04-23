@@ -112,9 +112,16 @@ export function NewOrderModal({ onClose }: Props) {
     Promise.all([
       fetch("/api/services").then((r) => r.json()),
       fetch("/api/vehicle-classes").then((r) => r.json()),
-    ]).then(([svc, cls]) => {
+      fetch("/api/drivers").then((r) => r.json()),
+    ]).then(([svc, cls, drv]) => {
       if (svc.data) setServices(svc.data);
       if (cls.data) setClassGroups(cls.data);
+      if (drv.data) {
+        const all = drv.data as any[];
+        const online = all.filter((d) => d.status !== "offline" && d.isActive);
+        const free = all.filter((d) => d.status === "free" && d.isActive);
+        setAvailability({ total: online.length, online: online.length, free: free.length });
+      }
     }).catch(console.error);
   }, []);
 
