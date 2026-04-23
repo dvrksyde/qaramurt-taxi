@@ -23,6 +23,8 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
   const [mapFitKey, setMapFitKey] = useState(0);
   const { updateOrder } = useMonitorStore();
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   // Reassign state
   const [showReassign, setShowReassign] = useState(false);
   const [freeDrivers, setFreeDrivers] = useState<any[]>([]);
