@@ -8,6 +8,7 @@ import { useMonitorStore } from "@/stores/monitorStore";
 import dynamic from "next/dynamic";
 
 const MiniMap = dynamic(() => import("./MiniMap"), { ssr: false });
+const DriverPickMap = dynamic(() => import("./DriverPickMap"), { ssr: false });
 
 interface Props { onClose: () => void; }
 
@@ -35,6 +36,13 @@ export function NewOrderModal({ onClose }: Props) {
 
   // Frequent client addresses
   const [clientAddresses, setClientAddresses] = useState<{ address: string; point: string | null; count: number }[]>([]);
+
+  // Driver picker for list_pick / map_pick
+  const [pickerDrivers, setPickerDrivers] = useState<any[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerView, setPickerView] = useState<"list" | "map">("list");
+  const [pickerSearch, setPickerSearch] = useState("");
+  const [selectedDriverId, setSelectedDriverId] = useState<number | null>(null);
 
   const { dispatchOrder } = useSocket();
   const monitorStore = useMonitorStore();
@@ -289,13 +297,37 @@ export function NewOrderModal({ onClose }: Props) {
     }
   };
 
+  const watchedDistMethod = watch("distributionMethod");
+  const needsDriverPick = watchedDistMethod === "list_pick" || watchedDistMethod === "map_pick";
+
+  // Load drivers when list_pick or map_pick is selected
+  useEffect(() => {
+    if (!needsDriverPick) {
+      setSelectedDriverId(null);
+      setPickerDrivers([]);
+      return;
+    }
+    setPickerLoading(true);
+    setSelectedDriverId(null);
+    setPickerSearch("");
+    fetch("/api/drivers?sortBy=callsign&sortDir=asc")
+      .then((r) => r.json())
+      .then((d) => setPickerDrivers((d.data || []).filter((dr: any) => dr.isActive && dr.status !== "busy")))
+      .catch(() => setPickerDrivers([]))
+      .finally(() => setPickerLoading(false));
+  }, [needsDriverPick]);
+
   const onSubmit = async (data: NewOrderFormData) => {
+    if (needsDriverPick && !selectedDriverId) {
+      alert("Выберите водителя из списка или карты");
+      return;
+    }
     setSubmitting(true);
     try {
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, selectedDriverId }),
       });
       if (res.ok) {
         const d = await res.json();
@@ -323,6 +355,7 @@ export function NewOrderModal({ onClose }: Props) {
   };
 
   const allClasses = classGroups.flatMap((g) => g.classes ?? []);
+
 
   return (
     <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -529,6 +562,77 @@ export function NewOrderModal({ onClose }: Props) {
                   </label>
                 ))}
               </div>
+
+              {/* Driver picker for list_pick / map_pick */}
+              {needsDriverPick && (() => {
+                const parseWkt = (wkt: string | null): [number, number] | null => {
+                  if (!wkt) return null;
+                  const m = wkt.match(/POINT\(([^ ]+) ([^ ]+)\)/);
+                  return m ? [parseFloat(m[2]), parseFloat(m[1])] : null;
+                };
+                const driverPins = pickerDrivers
+                  .map((d: any) => {
+                    const loc = parseWkt(d.currentLocation);
+                    if (!loc) return null;
+                    return { id: d.id, callsign: d.callsign, firstName: d.firstName, lastName: d.lastName, status: d.status, lat: loc[0], lng: loc[1] };
+                  }).filter(Boolean) as any[];
+
+                const selectedDriver = pickerDrivers.find((d) => d.id === selectedDriverId);
+                const pickupCoords = watchedPickupPoint as [number, number] | null ?? null;
+
+                return (
+                  <div style={{ marginTop: 8, padding: 10, borderRadius: 8, border: "1px solid var(--color-border)", background: "var(--color-surface-2)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-text-2)", textTransform: "uppercase" }}>
+                        {selectedDriver
+                          ? <span style={{ color: "#00b894" }}>✅ {selectedDriver.callsign ? `${selectedDriver.callsign} · ` : ""}{selectedDriver.lastName} {selectedDriver.firstName}</span>
+                          : "Выберите водителя"}
+                      </div>
+                      <div style={{ display: "flex", border: "1px solid var(--color-border)", borderRadius: 6, overflow: "hidden" }}>
+                        <button type="button" onClick={() => setPickerView("list")} style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", background: pickerView === "list" ? "#0984e3" : "transparent", color: pickerView === "list" ? "#fff" : "var(--color-text-2)" }}>📋</button>
+                        <button type="button" onClick={() => setPickerView("map")} style={{ padding: "3px 10px", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", background: pickerView === "map" ? "#0984e3" : "transparent", color: pickerView === "map" ? "#fff" : "var(--color-text-2)" }}>🗺️</button>
+                      </div>
+                    </div>
+
+                    {pickerLoading ? (
+                      <div style={{ textAlign: "center", padding: 12, color: "var(--color-text-3)", fontSize: 12 }}>Загрузка водителей...</div>
+                    ) : pickerView === "list" ? (
+                      <>
+                        <input
+                          type="text"
+                          placeholder="Поиск..."
+                          value={pickerSearch}
+                          onChange={(e) => setPickerSearch(e.target.value)}
+                          style={{ width: "100%", padding: "5px 8px", border: "1px solid var(--color-border)", borderRadius: 6, fontSize: 12, boxSizing: "border-box", marginBottom: 6, background: "var(--color-surface)", color: "var(--color-text)", outline: "none" }}
+                        />
+                        <div style={{ maxHeight: 140, overflowY: "auto", display: "flex", flexDirection: "column", gap: 3 }}>
+                          {pickerDrivers.filter((d) => {
+                            const q = pickerSearch.toLowerCase();
+                            return !q || d.callsign?.toLowerCase().includes(q) || d.firstName?.toLowerCase().includes(q) || d.lastName?.toLowerCase().includes(q);
+                          }).map((d) => (
+                            <div key={d.id} onClick={() => setSelectedDriverId(d.id === selectedDriverId ? null : d.id)}
+                              style={{ padding: "5px 8px", borderRadius: 6, cursor: "pointer", fontSize: 12, display: "flex", justifyContent: "space-between", alignItems: "center",
+                                background: selectedDriverId === d.id ? "rgba(9,132,227,0.12)" : "var(--color-surface)",
+                                border: selectedDriverId === d.id ? "1px solid #0984e3" : "1px solid var(--color-border)" }}>
+                              <span>{d.callsign && <strong style={{ marginRight: 4 }}>{d.callsign}</strong>}{d.lastName} {d.firstName}</span>
+                              <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 10, background: d.status === "free" ? "rgba(0,184,148,0.15)" : "rgba(99,110,114,0.15)", color: d.status === "free" ? "#00b894" : "#636e72" }}>
+                                {d.status === "free" ? "Свободен" : "Оффлайн"}
+                              </span>
+                            </div>
+                          ))}
+                          {pickerDrivers.length === 0 && <div style={{ textAlign: "center", padding: 10, color: "var(--color-text-3)", fontSize: 12 }}>Нет свободных водителей</div>}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ height: 180, borderRadius: 8, overflow: "hidden", border: "1px solid var(--color-border)" }}>
+                        {driverPins.length === 0
+                          ? <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-3)", fontSize: 12 }}>Нет водителей с GPS</div>
+                          : <DriverPickMap drivers={driverPins} pickup={pickupCoords} selectedDriverId={selectedDriverId} onSelectDriver={(id) => setSelectedDriverId(id === selectedDriverId ? null : id)} />}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* ── RIGHT: Price & Stats ── */}

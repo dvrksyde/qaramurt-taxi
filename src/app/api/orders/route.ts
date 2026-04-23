@@ -90,7 +90,8 @@ export async function POST(req: NextRequest) {
     classId, tariffId, cashlessAccountId, useBonuses,
     distributionMethod, optionIds, printReceipt, estimatedPrice,
     pricePerKm, pickupPoint, dropoffPoint, distanceKm,
-    hasLuggage, hasRoofLuggage, hasConditioner
+    hasLuggage, hasRoofLuggage, hasConditioner,
+    selectedDriverId,
   } = body;
 
   if (!phone) return NextResponse.json({ error: "Телефон обязателен" }, { status: 400 });
@@ -112,6 +113,20 @@ export async function POST(req: NextRequest) {
   if (hasLuggage) optionsArr.push("luggage");
   if (hasRoofLuggage) optionsArr.push("roof_luggage");
   if (hasConditioner) optionsArr.push("conditioner");
+
+  // If dispatcher picked a driver manually (list_pick or map_pick)
+  let assignedDriverId: number | null = null;
+  let assignedVehicleId: number | null = null;
+  if (selectedDriverId && (distributionMethod === "list_pick" || distributionMethod === "map_pick")) {
+    const driver = await prisma.driver.findUnique({
+      where: { id: parseInt(selectedDriverId) },
+      include: { vehicles: { where: { isActive: true }, take: 1 } },
+    });
+    if (driver && driver.isActive) {
+      assignedDriverId = driver.id;
+      assignedVehicleId = driver.vehicles[0]?.id ?? null;
+    }
+  }
 
   const order = await prisma.order.create({
     data: {
@@ -137,7 +152,15 @@ export async function POST(req: NextRequest) {
       printReceipt: printReceipt || false,
       pricePerKm: pricePerKm ? parseInt(pricePerKm) : 80,
       distanceKm: distanceKm ?? null,
-      status: "pending",
+      // If driver was manually selected — assign immediately
+      ...(assignedDriverId ? {
+        driverId: assignedDriverId,
+        vehicleId: assignedVehicleId,
+        status: "assigned",
+        assignedAt: new Date(),
+      } : {
+        status: "pending",
+      }),
     },
     include: {
       driver: true,
@@ -145,6 +168,14 @@ export async function POST(req: NextRequest) {
       class: true,
     },
   });
+
+  // If driver was assigned, set them to busy
+  if (assignedDriverId) {
+    await prisma.driver.update({
+      where: { id: assignedDriverId },
+      data: { status: "busy" },
+    }).catch(() => {});
+  }
 
   // Log initial status
   await prisma.orderStatusLog.create({

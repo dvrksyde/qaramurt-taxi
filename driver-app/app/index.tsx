@@ -148,6 +148,9 @@ export default function MainScreen() {
   const tripDistanceRef = useRef(0);
   const insets = useSafeAreaInsets();
 
+  // Dispatcher-assigned order modal
+  const [dispatcherAssignedOrder, setDispatcherAssignedOrder] = useState<any>(null);
+
   useEffect(() => {
     Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
@@ -294,6 +297,12 @@ export default function MainScreen() {
     sock.off("new_order_alert");
     sock.off("order_taken");
     sock.off("driver_ratings_updated");
+    sock.off("connect");
+
+    // Auto-reconnect: re-register driver room after reconnect (e.g. after bg kill)
+    sock.on("connect", () => {
+      sock.emit("driver_connect", driverId);
+    });
 
     sock.on("new_order_alert", (data: any) => {
       if (data.classId) {
@@ -309,10 +318,31 @@ export default function MainScreen() {
     });
 
     sock.on("order_taken", (data: any) => {
+      // Instantly dismiss order modal if taken by another driver
       const currentAlert = useDriverStore.getState().orderAlert;
       if (currentAlert && currentAlert.orderId === data.orderId) {
         setOrderAlert(null);
       }
+    });
+
+    // Dispatcher removed this order from us
+    sock.on("order_reassigned", (data: any) => {
+      const state = useDriverStore.getState();
+      if (state.activeOrder?.id === data.orderId) {
+        setActiveOrder(null);
+        resetTrip();
+        Alert.alert("Диспетчер", data.message || "Заказ был снят с вас");
+      }
+    });
+
+    // Dispatcher assigned an order directly to us
+    sock.on("order_assigned_by_dispatcher", (data: any) => {
+      Vibration.vibrate([0, 400, 150, 400, 150, 400]);
+      playAppSound('new_order');
+      const mapped = mapOrderToState(data.order);
+      setActiveOrder(mapped);
+      setActiveTab("home");
+      setDispatcherAssignedOrder(data.order); // Show dedicated modal
     });
 
     sock.on("driver_ratings_updated", () => {
@@ -386,37 +416,37 @@ export default function MainScreen() {
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (appState) => {
       if (appState === "active") {
-        // App came back to foreground — cancel any pending offline transition
+        // Cancel any pending offline transition
         if (bgOfflineTimerRef.current) {
           clearTimeout(bgOfflineTimerRef.current);
           bgOfflineTimerRef.current = null;
         }
-        loadDashboard();
-      } else if (appState === "background" || appState === "inactive") {
-        // App went to background or is being closed
-        // Wait 60 seconds — if app doesn't come back, go offline
-        if (bgOfflineTimerRef.current) return; // already scheduled
-        bgOfflineTimerRef.current = setTimeout(async () => {
-          bgOfflineTimerRef.current = null;
-          const storeState = useDriverStore.getState();
-          if (!storeState.isOnline) return; // already offline
-          try {
-            await api("/api/driver/status", {
-              method: "PATCH",
-              body: JSON.stringify({ status: "offline" }),
-            });
-            useDriverStore.getState().setOnline(false);
-          } catch {
-            // ignore — server will clear stale connections via heartbeat
+
+        // Reconnect socket if it dropped while in background
+        const storeState = useDriverStore.getState();
+        if (storeState.isOnline && storeState.profile) {
+          const sock = getSocket();
+          if (!sock || !sock.connected) {
+            startSocketAndGPS(storeState.profile.id);
           }
-        }, 60_000); // 60 seconds
+        }
+
+        loadDashboard();
       }
+      // ✅ FIX 2: NEVER auto-go-offline. Driver works full day, app can be in background.
+      // The driver manually controls their online/offline status.
     });
 
     const interval = setInterval(() => {
-      // Only refresh if app is active
       if (AppState.currentState === "active") {
         loadDashboard();
+      } else {
+        // Keep socket alive in background
+        const sock = getSocket();
+        const storeState = useDriverStore.getState();
+        if (storeState.isOnline && (!sock || !sock.connected) && storeState.profile) {
+          connectSocket(storeState.profile.id);
+        }
       }
     }, 15000);
 
@@ -427,7 +457,7 @@ export default function MainScreen() {
         clearTimeout(bgOfflineTimerRef.current);
       }
     };
-  }, [loadDashboard]);
+  }, [loadDashboard, startSocketAndGPS]);
 
   useEffect(() => {
     if (orderAlert) {
@@ -450,21 +480,14 @@ export default function MainScreen() {
   }, [orderAlert, setOrderAlert]);
 
   const toggleOnline = async () => {
-    setLoading(true);
+    // ✅ FIX 1: Optimistic update — instant UI, server sync in background
     const newStatus = isOnline ? "offline" : "free";
-    const res = await api("/api/driver/status", {
-      method: "PATCH",
-      body: JSON.stringify({ status: newStatus }),
-    });
-    setLoading(false);
+    const newIsOnline = !isOnline;
 
-    if (res.error) {
-      Alert.alert("Ошибка", res.error);
-      return;
-    }
+    setOnline(newIsOnline);
+    setProfile(profile ? { ...profile, status: newStatus as any } : null);
 
-    setOnline(!isOnline);
-    if (newStatus === "free" && profile) {
+    if (newIsOnline && profile) {
       startSocketAndGPS(profile.id);
     } else {
       stopLocationTracking();
@@ -472,25 +495,36 @@ export default function MainScreen() {
       realtimeDriverRef.current = null;
     }
 
-    setProfile(profile ? { ...profile, status: newStatus as any } : null);
+    // Fire-and-forget to server
+    api("/api/driver/status", {
+      method: "PATCH",
+      body: JSON.stringify({ status: newStatus }),
+    }).catch(() => {});
   };
 
   const acceptOrder = async () => {
     if (!orderAlert) return;
+
+    // ✅ FIX 3: Optimistic dismiss — close modal instantly, don't freeze UI
+    const alertSnapshot = orderAlert;
+    setOrderAlert(null);
     setLoading(true);
-    const res = await api(`/api/driver/orders/${orderAlert.orderId}/accept`, {
+
+    const res = await api(`/api/driver/orders/${alertSnapshot.orderId}/accept`, {
       method: "POST",
     });
     setLoading(false);
 
     if (res.error) {
-      Alert.alert("Ошибка", res.error);
-      setOrderAlert(null);
+      // Order was already taken — just silently ignore (modal already closed)
+      // If it's a real error, show it but don't reopen modal
+      if (!res.error.includes("уже назначен") && !res.error.includes("taken")) {
+        Alert.alert("Ошибка", res.error);
+      }
       return;
     }
 
     setActiveOrder(mapOrderToState(res.data));
-    setOrderAlert(null);
     resetTrip();
     setActiveTab("home");
     loadDashboard();
@@ -1128,6 +1162,72 @@ export default function MainScreen() {
               <TouchableOpacity style={[styles.alertBtn, { backgroundColor: "#d2291dff" }]} onPress={rejectOrder}>
                 <Ionicons name="close" size={24} color="#fff" />
                 <Text style={styles.alertBtnText}>Отклонить</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Dispatcher Assignment Modal ── */}
+      <Modal visible={!!dispatcherAssignedOrder} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.alertCard, { borderColor: "#0984e3", borderWidth: 2 }]}>
+            <View style={styles.alertHeader}>
+              <Ionicons name="person" size={28} color="#0984e3" />
+              <Text style={[styles.alertTitle, { color: "#0984e3" }]}>ДИСПЕТЧЕР</Text>
+            </View>
+
+            <Text style={{ color: "#ccc", fontSize: 13, textAlign: "center", marginBottom: 14 }}>
+              Вам назначили заказ №{dispatcherAssignedOrder?.id}
+            </Text>
+
+            <View style={styles.alertBody}>
+              <View style={styles.alertRow}>
+                <Ionicons name="location" size={18} color="#0984e3" />
+                <Text style={styles.alertText}>
+                  {dispatcherAssignedOrder?.pickupAddress || "Адрес не указан"}
+                </Text>
+              </View>
+              {dispatcherAssignedOrder?.dropoffAddress && (
+                <View style={styles.alertRow}>
+                  <Ionicons name="flag" size={18} color="#0984e3" />
+                  <Text style={styles.alertText}>{dispatcherAssignedOrder.dropoffAddress}</Text>
+                </View>
+              )}
+              <View style={styles.alertRow}>
+                <Ionicons name="call" size={18} color="#0984e3" />
+                <Text style={styles.alertText}>
+                  {dispatcherAssignedOrder?.phone
+                    ? `${dispatcherAssignedOrder.phone.slice(0, 8)}***`
+                    : "—"}
+                </Text>
+              </View>
+              {dispatcherAssignedOrder?.estimatedPrice && (
+                <View style={styles.alertRow}>
+                  <Ionicons name="cash" size={18} color="#0984e3" />
+                  <Text style={[styles.alertText, { fontWeight: "700", fontSize: 16 }]}>
+                    {dispatcherAssignedOrder.estimatedPrice} ₸
+                  </Text>
+                </View>
+              )}
+              {dispatcherAssignedOrder?.comment ? (
+                <View style={styles.alertRow}>
+                  <Ionicons name="chatbubble-ellipses" size={18} color="#888" />
+                  <Text style={[styles.alertText, { color: "#aaa" }]}>{dispatcherAssignedOrder.comment}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            <View style={[styles.alertActions, { marginTop: 16 }]}>
+              <TouchableOpacity
+                style={[styles.alertBtn, { backgroundColor: "#0984e3", flex: 1 }]}
+                onPress={() => {
+                  setDispatcherAssignedOrder(null);
+                  setActiveTab("home");
+                }}
+              >
+                <Ionicons name="checkmark-circle" size={24} color="#fff" />
+                <Text style={styles.alertBtnText}>Понял</Text>
               </TouchableOpacity>
             </View>
           </View>

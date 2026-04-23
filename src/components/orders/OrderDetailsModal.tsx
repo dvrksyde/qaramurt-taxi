@@ -23,6 +23,14 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
   const [mapFitKey, setMapFitKey] = useState(0);
   const { updateOrder } = useMonitorStore();
 
+  // Reassign state
+  const [showReassign, setShowReassign] = useState(false);
+  const [freeDrivers, setFreeDrivers] = useState<any[]>([]);
+  const [loadingDrivers, setLoadingDrivers] = useState(false);
+  const [reassigning, setReassigning] = useState(false);
+  const [selectedDriverId, setSelectedDriverId] = useState<number | null>(null);
+  const [driverSearch, setDriverSearch] = useState("");
+
   const loadOrder = async () => {
     setLoading(true);
     try {
@@ -32,10 +40,10 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
       }
       const text = await res.text();
       const data = text ? JSON.parse(text) : {};
-      
+
       if (data.data) {
         setOrder(data.data);
-        
+
         // Load GPS track if order is active or completed
         if (data.data.status === "in_progress" || data.data.status === "completed") {
           try {
@@ -77,6 +85,50 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
       }
     } catch (err) {
       alert("Ошибка при обновлении статуса");
+    }
+  };
+
+  const openReassign = async () => {
+    setShowReassign(true);
+    setSelectedDriverId(null);
+    setDriverSearch("");
+    setLoadingDrivers(true);
+    try {
+      const res = await fetch("/api/drivers?sortBy=callsign&sortDir=asc");
+      const data = await res.json();
+      // Show all active, non-busy drivers
+      const available = (data.data || []).filter((d: any) =>
+        d.isActive && d.status !== "busy" && d.id !== order?.driverId
+      );
+      setFreeDrivers(available);
+    } catch {
+      setFreeDrivers([]);
+    } finally {
+      setLoadingDrivers(false);
+    }
+  };
+
+  const handleReassign = async () => {
+    if (!selectedDriverId) return;
+    setReassigning(true);
+    try {
+      const res = await fetch(`/api/orders/${orderId}/reassign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newDriverId: selectedDriverId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Ошибка переназначения");
+        return;
+      }
+      setOrder(data.data);
+      updateOrder(orderId, { status: "assigned" as any, driverId: selectedDriverId } as any);
+      setShowReassign(false);
+    } catch {
+      alert("Ошибка при переназначении");
+    } finally {
+      setReassigning(false);
     }
   };
 
@@ -126,11 +178,11 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
         </div>
 
         <div className="modal-body" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20, padding: 20, flex: 1, overflowY: "auto" }}>
-          
+
           {/* Left Column: Map & Route */}
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ height: 350, borderRadius: 12, overflow: "hidden", border: "1px solid var(--color-border)", position: "relative" }}>
-              <MiniMap 
+              <MiniMap
                 pickup={pickup}
                 dropoff={dropoff}
                 driverLocation={driverPos}
@@ -180,7 +232,7 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
 
           {/* Right Column: Order/Driver Info & Status */}
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            
+
             {/* Status Section */}
             <div className="details-card">
               <div className="card-label">Текущий статус</div>
@@ -195,42 +247,42 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
                     pending: 1, assigned: 2, arrived: 3, in_progress: 4, completed: 5, canceled: 5
                   };
                   const currentRank = ranks[order.status] || 0;
-                  
+
                   return (
                     <>
-                      <button 
-                        className="btn btn-ghost btn-sm" 
+                      <button
+                        className="btn btn-ghost btn-sm"
                         disabled={currentRank >= 2}
                         onClick={() => handleStatusChange("assigned")}
                       >
                         Назначить
                       </button>
-                      <button 
-                        className="btn btn-ghost btn-sm" 
+                      <button
+                        className="btn btn-ghost btn-sm"
                         disabled={currentRank >= 3}
                         onClick={() => handleStatusChange("arrived")}
                       >
                         На месте
                       </button>
-                      <button 
-                        className="btn btn-ghost btn-sm" 
+                      <button
+                        className="btn btn-ghost btn-sm"
                         disabled={currentRank >= 4}
                         onClick={() => handleStatusChange("in_progress")}
                       >
                         Везёт
                       </button>
-                      <button 
-                        className="btn btn-ghost btn-sm" 
+                      <button
+                        className="btn btn-ghost btn-sm"
                         disabled={currentRank >= 5}
-                        onClick={() => handleStatusChange("completed")} 
+                        onClick={() => handleStatusChange("completed")}
                         style={{ color: currentRank >= 5 ? "var(--color-text-3)" : "var(--status-free)" }}
                       >
                         Завершить
                       </button>
-                      <button 
-                        className="btn btn-ghost btn-sm" 
+                      <button
+                        className="btn btn-ghost btn-sm"
                         disabled={currentRank >= 5}
-                        onClick={() => handleStatusChange("canceled")} 
+                        onClick={() => handleStatusChange("canceled")}
                         style={{ color: currentRank >= 5 ? "var(--color-text-3)" : "var(--status-offline)", gridColumn: "span 2" }}
                       >
                         Отменить заказ
@@ -243,7 +295,18 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
 
             {/* Driver Section */}
             <div className="details-card">
-              <div className="card-label">Водитель</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div className="card-label">Водитель</div>
+                {order.status !== "completed" && order.status !== "canceled" && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={openReassign}
+                    style={{ fontSize: 12, padding: "4px 10px", color: "#0984e3" }}
+                  >
+                    🔄 Переназначить
+                  </button>
+                )}
+              </div>
               {order.driver ? (
                 <div style={{ marginTop: 8 }}>
                   <div style={{ fontSize: 16, fontWeight: 700 }}>
@@ -255,7 +318,92 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
                   </div>
                 </div>
               ) : (
-                <div style={{ padding: "12px 0", color: "var(--color-text-3)", fontStyle: "italic" }}>Водитель не назначен</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 8 }}>
+                  <span style={{ color: "var(--color-text-3)", fontStyle: "italic" }}>Водитель не назначен</span>
+                </div>
+              )}
+
+              {/* Reassign Panel */}
+              {showReassign && (
+                <div style={{ marginTop: 12, borderTop: "1px solid var(--color-border)", paddingTop: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-text-2)", marginBottom: 8, textTransform: "uppercase" }}>
+                    Выбрать нового водителя
+                  </div>
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder="Поиск по позывному или имени..."
+                    value={driverSearch}
+                    onChange={(e) => setDriverSearch(e.target.value)}
+                    style={{
+                      width: "100%", padding: "8px 10px", border: "1px solid var(--color-border)",
+                      borderRadius: 8, background: "var(--color-surface)", color: "var(--color-text)",
+                      fontSize: 13, boxSizing: "border-box", marginBottom: 8, outline: "none",
+                    }}
+                  />
+                  {loadingDrivers ? (
+                    <div style={{ textAlign: "center", padding: 12, color: "var(--color-text-3)" }}>Загрузка...</div>
+                  ) : (
+                    <div style={{ maxHeight: 200, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+                      {freeDrivers
+                        .filter((d) => {
+                          const q = driverSearch.toLowerCase();
+                          return !q ||
+                            d.callsign?.toLowerCase().includes(q) ||
+                            d.firstName?.toLowerCase().includes(q) ||
+                            d.lastName?.toLowerCase().includes(q) ||
+                            d.phone?.includes(q);
+                        })
+                        .map((d) => (
+                          <div
+                            key={d.id}
+                            onClick={() => setSelectedDriverId(d.id === selectedDriverId ? null : d.id)}
+                            style={{
+                              padding: "8px 12px", borderRadius: 8, cursor: "pointer", fontSize: 13,
+                              background: selectedDriverId === d.id ? "rgba(9, 132, 227, 0.12)" : "var(--color-surface)",
+                              border: selectedDriverId === d.id ? "1px solid #0984e3" : "1px solid var(--color-border)",
+                              display: "flex", justifyContent: "space-between", alignItems: "center",
+                            }}
+                          >
+                            <div>
+                              {d.callsign && <strong style={{ marginRight: 6 }}>{d.callsign}</strong>}
+                              {d.lastName} {d.firstName}
+                            </div>
+                            <span style={{
+                              fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20,
+                              background: d.status === "free" ? "rgba(0,184,148,0.15)" : "rgba(99,110,114,0.15)",
+                              color: d.status === "free" ? "#00b894" : "var(--color-text-3)",
+                            }}>
+                              {d.status === "free" ? "Свободен" : "Оффлайн"}
+                            </span>
+                          </div>
+                        ))}
+                      {freeDrivers.filter((d) => {
+                        const q = driverSearch.toLowerCase();
+                        return !q || d.callsign?.toLowerCase().includes(q) || d.firstName?.toLowerCase().includes(q) || d.lastName?.toLowerCase().includes(q);
+                      }).length === 0 && (
+                          <div style={{ textAlign: "center", padding: 16, color: "var(--color-text-3)" }}>Нет доступных водителей</div>
+                        )}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={handleReassign}
+                      disabled={!selectedDriverId || reassigning}
+                      style={{ flex: 1 }}
+                    >
+                      {reassigning ? "Переназначаю..." : "✓ Назначить"}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setShowReassign(false)}
+                      style={{ flex: 1 }}
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
 
@@ -321,7 +469,7 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
         .info-section h4 {
           margin: 0 0 12px 0;
           font-size: 14px;
-          color: #333;
+          color: #eeeeeeff;
         }
       `}</style>
     </div>

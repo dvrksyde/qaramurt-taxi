@@ -135,7 +135,7 @@ export async function PATCH(
             if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
             updateData.finalPrice =
               clientFinalPrice ??
-              (roundTo5(currentBaseFare + Number(clientDistanceKm ?? 0) * Number(order.pricePerKm)) + 10);
+              roundTo5(currentBaseFare + Number(clientDistanceKm ?? 0) * Number(order.pricePerKm));
           }
         } catch (err) {
           console.error("[trip/complete] Server calc failed:", err);
@@ -144,14 +144,14 @@ export async function PATCH(
           updateData.finalPrice =
             clientFinalPrice ??
             (clientDistanceKm !== undefined
-              ? roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm)) + 10
+              ? roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm))
               : undefined);
         }
       } else {
         // No GPS session — fall back to client-reported values
         if (clientDistanceKm !== undefined) {
           updateData.distanceKm = clientDistanceKm;
-          updateData.finalPrice = roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm)) + 10;
+          updateData.finalPrice = roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm));
         } else if (clientFinalPrice !== undefined) {
           updateData.finalPrice = clientFinalPrice;
         }
