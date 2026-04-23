@@ -27,7 +27,12 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
     setLoading(true);
     try {
       const res = await fetch(`/api/orders/${orderId}`);
-      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(`Server returned ${res.status}`);
+      }
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : {};
+      
       if (data.data) {
         setOrder(data.data);
         
