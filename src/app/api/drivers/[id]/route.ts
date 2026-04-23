@@ -89,6 +89,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     carClassIds,
     password,
     tariffGroupId,
+    isActive,
   } = body;
 
   const updated = await prisma.driver.update({
@@ -103,6 +104,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       ...(comment !== undefined && { comment }),
       ...(status !== undefined && { status }),
       ...(tariffGroupId !== undefined && { tariffGroupId: tariffGroupId ? Number(tariffGroupId) : null }),
+      ...(isActive !== undefined && { isActive }),
       ...(password ? { passwordHash: await hashPassword(password) } : {}),
     },
     include: { vehicles: true, tariffGroup: true },

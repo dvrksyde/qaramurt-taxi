@@ -20,16 +20,48 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
   const [track, setTrack] = useState<[number, number][]>([]);
   const [trackPointsCount, setTrackPointsCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [mapFitKey, setMapFitKey] = useState(0);
   const { updateOrder } = useMonitorStore();
+
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Extra options state
+  const EXTRAS = [
+    { key: "luggage",     label: "Багаж",          price: 100 },
+    { key: "roof_luggage",label: "Верхний багаж",  price: 200 },
+    { key: "conditioner", label: "Кондиционер",    price: 100 },
+  ];
+  const [extras, setExtras] = useState<string[]>([]);
+  const [savingExtras, setSavingExtras] = useState(false);
+
+  // Reassign state
+  const [showReassign, setShowReassign] = useState(false);
+  const [freeDrivers, setFreeDrivers] = useState<any[]>([]);
+  const [loadingDrivers, setLoadingDrivers] = useState(false);
+  const [reassigning, setReassigning] = useState(false);
+  const [selectedDriverId, setSelectedDriverId] = useState<number | null>(null);
+  const [driverSearch, setDriverSearch] = useState("");
 
   const loadOrder = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await fetch(`/api/orders/${orderId}`);
-      const data = await res.json();
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Сервер вернул ${res.status}: ${errText.slice(0, 200)}`);
+      }
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : {};
+
       if (data.data) {
         setOrder(data.data);
-        
+        // Restore saved extras from order.options
+        const savedOptions = data.data.options;
+        if (Array.isArray(savedOptions)) {
+          setExtras(savedOptions.map((o: any) => o.key).filter(Boolean));
+        }
+
         // Load GPS track if order is active or completed
         if (data.data.status === "in_progress" || data.data.status === "completed") {
           try {
@@ -43,9 +75,12 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
             console.error("Failed to load track", e);
           }
         }
+      } else {
+        throw new Error(data.error || "Данные заказа не получены");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to load order info", err);
+      setLoadError(err?.message || "Не удалось загрузить данные заказа");
     } finally {
       setLoading(false);
     }
@@ -74,11 +109,71 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
     }
   };
 
+  const openReassign = async () => {
+    setShowReassign(true);
+    setSelectedDriverId(null);
+    setDriverSearch("");
+    setLoadingDrivers(true);
+    try {
+      const res = await fetch("/api/drivers?sortBy=callsign&sortDir=asc");
+      const data = await res.json();
+      // Show all active, non-busy drivers
+      const available = (data.data || []).filter((d: any) =>
+        d.isActive && d.status !== "busy" && d.id !== order?.driverId
+      );
+      setFreeDrivers(available);
+    } catch {
+      setFreeDrivers([]);
+    } finally {
+      setLoadingDrivers(false);
+    }
+  };
+
+  const handleReassign = async () => {
+    if (!selectedDriverId) return;
+    setReassigning(true);
+    try {
+      const res = await fetch(`/api/orders/${orderId}/reassign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newDriverId: selectedDriverId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Ошибка переназначения");
+        return;
+      }
+      setOrder(data.data);
+      updateOrder(orderId, { status: "assigned" as any, driverId: selectedDriverId } as any);
+      setShowReassign(false);
+    } catch {
+      alert("Ошибка при переназначении");
+    } finally {
+      setReassigning(false);
+    }
+  };
+
   if (!order && loading) {
     return (
       <div className="modal-overlay">
         <div className="modal" style={{ width: 400, textAlign: "center", padding: 40 }}>
           <div className="pulse">Загрузка данных...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!order && loadError) {
+    return (
+      <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+        <div className="modal" style={{ width: 420, textAlign: "center", padding: 40 }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+          <div style={{ fontWeight: 700, marginBottom: 8, color: "var(--color-text)" }}>Ошибка загрузки</div>
+          <div style={{ fontSize: 12, color: "var(--color-text-3)", marginBottom: 20, wordBreak: "break-all" }}>{loadError}</div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+            <button className="btn btn-primary" onClick={loadOrder}>Повторить</button>
+            <button className="btn btn-ghost" onClick={onClose}>Закрыть</button>
+          </div>
         </div>
       </div>
     );
@@ -114,21 +209,22 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
             <h3 style={{ margin: 0 }}>Информация о заказе</h3>
           </div>
           <div className="flex-row">
-            <button className="btn btn-ghost" onClick={loadOrder} title="Обновить">🔄</button>
+            <button className="btn btn-ghost" onClick={() => { loadOrder(); setMapFitKey(k => k + 1); }} title="Обновить">🔄</button>
             <button className="btn btn-ghost" onClick={onClose}>✕</button>
           </div>
         </div>
 
         <div className="modal-body" style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 20, padding: 20, flex: 1, overflowY: "auto" }}>
-          
+
           {/* Left Column: Map & Route */}
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ height: 350, borderRadius: 12, overflow: "hidden", border: "1px solid var(--color-border)", position: "relative" }}>
-              <MiniMap 
+              <MiniMap
                 pickup={pickup}
                 dropoff={dropoff}
                 driverLocation={driverPos}
                 route={track}
+                fitKey={mapFitKey}
               />
             </div>
 
@@ -173,7 +269,7 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
 
           {/* Right Column: Order/Driver Info & Status */}
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            
+
             {/* Status Section */}
             <div className="details-card">
               <div className="card-label">Текущий статус</div>
@@ -188,42 +284,42 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
                     pending: 1, assigned: 2, arrived: 3, in_progress: 4, completed: 5, canceled: 5
                   };
                   const currentRank = ranks[order.status] || 0;
-                  
+
                   return (
                     <>
-                      <button 
-                        className="btn btn-ghost btn-sm" 
+                      <button
+                        className="btn btn-ghost btn-sm"
                         disabled={currentRank >= 2}
                         onClick={() => handleStatusChange("assigned")}
                       >
                         Назначить
                       </button>
-                      <button 
-                        className="btn btn-ghost btn-sm" 
+                      <button
+                        className="btn btn-ghost btn-sm"
                         disabled={currentRank >= 3}
                         onClick={() => handleStatusChange("arrived")}
                       >
                         На месте
                       </button>
-                      <button 
-                        className="btn btn-ghost btn-sm" 
+                      <button
+                        className="btn btn-ghost btn-sm"
                         disabled={currentRank >= 4}
                         onClick={() => handleStatusChange("in_progress")}
                       >
                         Везёт
                       </button>
-                      <button 
-                        className="btn btn-ghost btn-sm" 
+                      <button
+                        className="btn btn-ghost btn-sm"
                         disabled={currentRank >= 5}
-                        onClick={() => handleStatusChange("completed")} 
+                        onClick={() => handleStatusChange("completed")}
                         style={{ color: currentRank >= 5 ? "var(--color-text-3)" : "var(--status-free)" }}
                       >
                         Завершить
                       </button>
-                      <button 
-                        className="btn btn-ghost btn-sm" 
+                      <button
+                        className="btn btn-ghost btn-sm"
                         disabled={currentRank >= 5}
-                        onClick={() => handleStatusChange("canceled")} 
+                        onClick={() => handleStatusChange("canceled")}
                         style={{ color: currentRank >= 5 ? "var(--color-text-3)" : "var(--status-offline)", gridColumn: "span 2" }}
                       >
                         Отменить заказ
@@ -236,7 +332,18 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
 
             {/* Driver Section */}
             <div className="details-card">
-              <div className="card-label">Водитель</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div className="card-label">Водитель</div>
+                {order.status !== "completed" && order.status !== "canceled" && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={openReassign}
+                    style={{ fontSize: 12, padding: "4px 10px", color: "#0984e3" }}
+                  >
+                    🔄 Переназначить
+                  </button>
+                )}
+              </div>
               {order.driver ? (
                 <div style={{ marginTop: 8 }}>
                   <div style={{ fontSize: 16, fontWeight: 700 }}>
@@ -248,26 +355,181 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
                   </div>
                 </div>
               ) : (
-                <div style={{ padding: "12px 0", color: "var(--color-text-3)", fontStyle: "italic" }}>Водитель не назначен</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 8 }}>
+                  <span style={{ color: "var(--color-text-3)", fontStyle: "italic" }}>Водитель не назначен</span>
+                </div>
+              )}
+
+              {/* Reassign Panel */}
+              {showReassign && (
+                <div style={{ marginTop: 12, borderTop: "1px solid var(--color-border)", paddingTop: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-text-2)", marginBottom: 8, textTransform: "uppercase" }}>
+                    Выбрать нового водителя
+                  </div>
+                  <input
+                    autoFocus
+                    type="text"
+                    placeholder="Поиск по позывному или имени..."
+                    value={driverSearch}
+                    onChange={(e) => setDriverSearch(e.target.value)}
+                    style={{
+                      width: "100%", padding: "8px 10px", border: "1px solid var(--color-border)",
+                      borderRadius: 8, background: "var(--color-surface)", color: "var(--color-text)",
+                      fontSize: 13, boxSizing: "border-box", marginBottom: 8, outline: "none",
+                    }}
+                  />
+                  {loadingDrivers ? (
+                    <div style={{ textAlign: "center", padding: 12, color: "var(--color-text-3)" }}>Загрузка...</div>
+                  ) : (
+                    <div style={{ maxHeight: 200, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+                      {freeDrivers
+                        .filter((d) => {
+                          const q = driverSearch.toLowerCase();
+                          return !q ||
+                            d.callsign?.toLowerCase().includes(q) ||
+                            d.firstName?.toLowerCase().includes(q) ||
+                            d.lastName?.toLowerCase().includes(q) ||
+                            d.phone?.includes(q);
+                        })
+                        .map((d) => (
+                          <div
+                            key={d.id}
+                            onClick={() => setSelectedDriverId(d.id === selectedDriverId ? null : d.id)}
+                            style={{
+                              padding: "8px 12px", borderRadius: 8, cursor: "pointer", fontSize: 13,
+                              background: selectedDriverId === d.id ? "rgba(9, 132, 227, 0.12)" : "var(--color-surface)",
+                              border: selectedDriverId === d.id ? "1px solid #0984e3" : "1px solid var(--color-border)",
+                              display: "flex", justifyContent: "space-between", alignItems: "center",
+                            }}
+                          >
+                            <div>
+                              {d.callsign && <strong style={{ marginRight: 6 }}>{d.callsign}</strong>}
+                              {d.lastName} {d.firstName}
+                            </div>
+                            <span style={{
+                              fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20,
+                              background: d.status === "free" ? "rgba(0,184,148,0.15)" : "rgba(99,110,114,0.15)",
+                              color: d.status === "free" ? "#00b894" : "var(--color-text-3)",
+                            }}>
+                              {d.status === "free" ? "Свободен" : "Оффлайн"}
+                            </span>
+                          </div>
+                        ))}
+                      {freeDrivers.filter((d) => {
+                        const q = driverSearch.toLowerCase();
+                        return !q || d.callsign?.toLowerCase().includes(q) || d.firstName?.toLowerCase().includes(q) || d.lastName?.toLowerCase().includes(q);
+                      }).length === 0 && (
+                          <div style={{ textAlign: "center", padding: 16, color: "var(--color-text-3)" }}>Нет доступных водителей</div>
+                        )}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={handleReassign}
+                      disabled={!selectedDriverId || reassigning}
+                      style={{ flex: 1 }}
+                    >
+                      {reassigning ? "Переназначаю..." : "✓ Назначить"}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setShowReassign(false)}
+                      style={{ flex: 1 }}
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
 
             {/* Vehicle Section */}
             <div className="details-card">
               <div className="card-label">Автомобиль</div>
-              {order.vehicle ? (
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>
-                    {order.vehicle.color} {order.vehicle.make} {order.vehicle.model}
+              {(() => {
+                // Use order.vehicle OR driver's vehicle as fallback
+                const v = order.vehicle ||
+                  (order.driver?.vehicles?.[0] ? order.driver.vehicles[0] : null);
+                return v ? (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600 }}>
+                      {v.color} {v.make} {v.model}
+                    </div>
+                    <span className="license-plate" style={{ marginTop: 8, display: "inline-block" }}>
+                      {v.plate}
+                    </span>
                   </div>
-                  <span className="license-plate" style={{ marginTop: 8, display: "inline-block" }}>
-                    {order.vehicle.plate}
-                  </span>
-                </div>
-              ) : (
-                <div style={{ padding: "12px 0", color: "var(--color-text-3)", fontStyle: "italic" }}>Данные об авто отсутствуют</div>
-              )}
+                ) : (
+                  <div style={{ padding: "12px 0", color: "var(--color-text-3)", fontStyle: "italic" }}>Данные об авто отсутствуют</div>
+                );
+              })()}
             </div>
+
+            {/* Extra Options Section */}
+            {order.status !== "completed" && order.status !== "canceled" && (
+              <div className="details-card">
+                <div className="card-label">Доп. опции</div>
+                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {EXTRAS.map((ex) => (
+                    <label key={ex.key} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        checked={extras.includes(ex.key)}
+                        onChange={(e) => {
+                          setExtras(prev =>
+                            e.target.checked
+                              ? [...prev, ex.key]
+                              : prev.filter(k => k !== ex.key)
+                          );
+                        }}
+                        style={{ width: 16, height: 16, accentColor: "var(--color-primary)" }}
+                      />
+                      <span style={{ flex: 1 }}>{ex.label}</span>
+                      <span style={{ color: "var(--color-primary)", fontWeight: 700 }}>+{ex.price} ₸</span>
+                    </label>
+                  ))}
+                </div>
+                {(() => {
+                  const extraTotal = EXTRAS.filter(e => extras.includes(e.key)).reduce((s, e) => s + e.price, 0);
+                  return extraTotal > 0 && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: "var(--color-text-2)", textAlign: "right" }}>
+                      Доп. итого: <strong style={{ color: "var(--color-primary)" }}>+{extraTotal} ₸</strong>
+                    </div>
+                  );
+                })()}
+                <button
+                  className="btn btn-primary btn-sm"
+                  style={{ width: "100%", marginTop: 10 }}
+                  disabled={savingExtras}
+                  onClick={async () => {
+                    setSavingExtras(true);
+                    try {
+                      const selectedExtras = EXTRAS.filter(e => extras.includes(e.key));
+                      const extraTotal = selectedExtras.reduce((s, e) => s + e.price, 0);
+                      const basePrice = Number(order.estimatedPrice || order.finalPrice || 0);
+                      // Subtract old extras, add new extras
+                      const oldOptions: any[] = Array.isArray(order.options) ? order.options : [];
+                      const oldTotal = oldOptions.reduce((s: number, o: any) => s + (o.price || 0), 0);
+                      const newPrice = basePrice - oldTotal + extraTotal;
+                      await fetch(`/api/orders/${orderId}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          options: selectedExtras,
+                          extraPrice: newPrice,
+                        }),
+                      });
+                      await loadOrder();
+                    } finally {
+                      setSavingExtras(false);
+                    }
+                  }}
+                >
+                  {savingExtras ? "Сохраняю..." : "💾 Сохранить опции"}
+                </button>
+              </div>
+            )}
 
             {/* Price Section */}
             <div className="details-card" style={{ background: "var(--color-primary)", color: "white" }}>
@@ -278,6 +540,14 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
               <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>
                 Дистанция: {order.distanceKm ? `${Number(order.distanceKm).toFixed(1)} км` : "—"}
               </div>
+              {(() => {
+                const opts: any[] = Array.isArray(order.options) ? order.options : [];
+                return opts.length > 0 && (
+                  <div style={{ fontSize: 11, opacity: 0.75, marginTop: 4 }}>
+                    Опции: {opts.map((o: any) => o.label).join(", ")}
+                  </div>
+                );
+              })()}
             </div>
 
           </div>
@@ -314,7 +584,7 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
         .info-section h4 {
           margin: 0 0 12px 0;
           font-size: 14px;
-          color: #333;
+          color: #eeeeeeff;
         }
       `}</style>
     </div>

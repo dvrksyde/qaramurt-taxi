@@ -41,7 +41,7 @@ export async function PATCH(
 
   const order = await prisma.order.findFirst({
     where: { id: orderId, driverId: auth.driverId },
-    include: { service: true },
+    include: { service: true, class: true },
   });
 
   if (!order) {
@@ -50,11 +50,23 @@ export async function PATCH(
 
   const updateData: Record<string, unknown> = { status };
   const fixedPriceOrder = isDeliveryOrder(order);
+  const currentBaseFare = order.class?.name === "Комфорт" ? 390 : BASE_FARE;
 
   if (status === "arrived") {
     updateData.arrivedAt = new Date();
   } else if (status === "in_progress") {
     updateData.startedAt = new Date();
+
+    if (order.arrivedAt) {
+      const waitMs = (updateData.startedAt as Date).getTime() - order.arrivedAt.getTime();
+      const waitMins = Math.floor(waitMs / 60000);
+      if (waitMins > 3) {
+        const waitFee = (waitMins - 3) * 20;
+        if (fixedPriceOrder) {
+          updateData.estimatedPrice = Number(order.estimatedPrice || 0) + waitFee;
+        }
+      }
+    }
   } else if (status === "completed") {
     updateData.completedAt = new Date();
 
@@ -118,12 +130,12 @@ export async function PATCH(
             await completeSession(
               activeSession.id,
               clientDistanceKm ?? 0,
-              clientFinalPrice ?? roundTo5(BASE_FARE)
+              clientFinalPrice ?? roundTo5(currentBaseFare)
             );
             if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
             updateData.finalPrice =
               clientFinalPrice ??
-              roundTo5(BASE_FARE + Number(clientDistanceKm ?? 0) * Number(order.pricePerKm));
+              roundTo5(currentBaseFare + Number(clientDistanceKm ?? 0) * Number(order.pricePerKm));
           }
         } catch (err) {
           console.error("[trip/complete] Server calc failed:", err);
@@ -132,14 +144,14 @@ export async function PATCH(
           updateData.finalPrice =
             clientFinalPrice ??
             (clientDistanceKm !== undefined
-              ? roundTo5(BASE_FARE + Number(clientDistanceKm) * Number(order.pricePerKm))
+              ? roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm))
               : undefined);
         }
       } else {
         // No GPS session — fall back to client-reported values
         if (clientDistanceKm !== undefined) {
           updateData.distanceKm = clientDistanceKm;
-          updateData.finalPrice = roundTo5(BASE_FARE + Number(clientDistanceKm) * Number(order.pricePerKm));
+          updateData.finalPrice = roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm));
         } else if (clientFinalPrice !== undefined) {
           updateData.finalPrice = clientFinalPrice;
         }
@@ -173,7 +185,7 @@ export async function PATCH(
         where: { id: auth.driverId },
         include: { tariffGroup: true }
       });
-      
+
       const isCurbside = updatedOrder.pickupAddress === "С бордюра" || updatedOrder.comment === "Заказ с бордюра";
       const commPercent = isCurbside ? 10 : Number(dTG?.tariffGroup?.value || 15);
       const commission = Number(updatedOrder.finalPrice) * (commPercent / 100);
@@ -190,7 +202,7 @@ export async function PATCH(
             orderId,
             amount: commission,
             type: "order_fee",
-            description: isCurbside 
+            description: isCurbside
               ? `Комиссия ${commPercent}% (С бордюра) за заказ #${orderId}`
               : `Комиссия ${commPercent}% за заказ #${orderId}`,
           },

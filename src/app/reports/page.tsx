@@ -103,7 +103,10 @@ export default function ReportsPage() {
   };
 
   const fetchReport = useCallback((silent = false) => {
-    if (status === "loading" || !session || (session.user as any)?.role !== "admin") return;
+    const role = (session?.user as any)?.role;
+    const perms = (session?.user as any)?.permissions || [];
+    const canSee = role === "admin" || perms.includes("kassa_report_all");
+    if (status === "loading" || !session || !canSee) return;
     if (!silent) setLoading(true);
     fetch(`/api/reports?startDate=${startDate}T00:00:00&endDate=${endDate}T23:59:59`)
       .then(async (r) => {
@@ -122,7 +125,10 @@ export default function ReportsPage() {
   useEffect(() => {
     if (status === "loading") return;
     const role = (session?.user as any)?.role;
-    if (!session || role !== "admin") {
+    const perms = (session?.user as any)?.permissions || [];
+    const canSee = role === "admin" || perms.includes("kassa_report_all");
+
+    if (!session || !canSee) {
       router.push("/monitor");
       return;
     }
@@ -155,7 +161,7 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="page-content" style={{ padding: 24, minHeight: "100vh", paddingBottom: 100 }}>
+    <div className="page-content" style={{ padding: 24, minHeight: "100vh", paddingBottom: 100, overflowY: "auto" }}>
       <div style={{ marginBottom: 32, display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
         <div>
           <h1 style={{ margin: 0, color: "var(--color-text)", fontSize: 28, fontWeight: 700 }}>Финансовая статистика</h1>

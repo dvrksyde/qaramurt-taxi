@@ -12,28 +12,6 @@ function distanceM(lat1: number, lng1: number, lat2: number, lng2: number): numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-async function findPopularStreetName(officialStreet: string): Promise<string | null> {
-  const allEntries = await prisma.addressBook.findMany({
-    where: { isActive: true },
-    select: { name: true },
-  });
-
-  const words = officialStreet
-    .split(/[\s,\-–]+/)
-    .filter((w) => w.length >= 4);
-
-  for (const word of words) {
-    const wordLower = word.toLowerCase();
-    for (const entry of allEntries) {
-      const popularLower = entry.name.toLowerCase();
-      if (wordLower.startsWith(popularLower) || popularLower.startsWith(wordLower)) {
-        return entry.name;
-      }
-    }
-  }
-  return null;
-}
-
 export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
   const apiKey = process.env.YANDEX_API_KEY;
   if (!apiKey) return null;
@@ -65,12 +43,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string |
     const house = components.find((c: any) => c.kind === "house")?.name || "";
 
     if (officialStreet) {
-      const popularName = await findPopularStreetName(officialStreet);
-      if (popularName) {
-        return house ? `${popularName}, ${house}` : popularName;
-      } else {
-        return house ? `${officialStreet}, ${house}` : officialStreet;
-      }
+      return house ? `${officialStreet}, ${house}` : officialStreet;
     }
 
     const localityRaw = components.find((c: any) => c.kind === "locality")?.name || "Карамурт";

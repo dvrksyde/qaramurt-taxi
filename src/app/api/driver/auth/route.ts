@@ -23,8 +23,12 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  if (!driver || !driver.isActive) {
+  if (!driver) {
     return NextResponse.json({ error: "Неверный логин или пароль" }, { status: 401 });
+  }
+
+  if (!driver.isActive) {
+    return NextResponse.json({ error: "Ваш аккаунт заблокирован. Обратитесь к диспетчеру." }, { status: 403 });
   }
 
   const passwordCheck = await verifyPassword(password, driver.passwordHash);

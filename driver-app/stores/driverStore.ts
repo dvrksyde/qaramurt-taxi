@@ -43,6 +43,8 @@ interface ActiveOrder {
   estimatedPrice: number | null;
   isFixedPrice: boolean;
   startedAt: string | null;
+  options?: string[] | null;
+  class?: { id: number; name: string } | null;
 }
 
 interface DriverState {

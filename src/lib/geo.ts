@@ -19,16 +19,16 @@ export async function findNearbyDrivers(
       d.id,
       d.callsign,
       ST_Distance(
-        d.current_location::geography,
+        d."currentLocation"::geography,
         ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography
       ) AS distance_m
     FROM drivers d
     WHERE 
       d.status = 'free'
-      AND d.is_active = true
-      AND d.current_location IS NOT NULL
+      AND d."isActive" = true
+      AND d."currentLocation" IS NOT NULL
       AND ST_DWithin(
-        d.current_location::geography,
+        d."currentLocation"::geography,
         ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)::geography,
         ${radiusMeters}
       )
@@ -54,20 +54,20 @@ export async function getGeozoneOverride(
   dropoffLng: number,
   tariffId: number
 ): Promise<number | null> {
-  const result = await prisma.$queryRaw<Array<{ price_override: number }>>`
-    SELECT gp.price_override
+  const result = await prisma.$queryRaw<Array<{ priceOverride: number }>>`
+    SELECT gp."priceOverride" as "priceOverride"
     FROM geozone_prices gp
-    JOIN geozones gz_from ON gp.geozone_from_id = gz_from.id
-    JOIN geozones gz_to   ON gp.geozone_to_id   = gz_to.id
+    JOIN geozones gz_from ON gp."geozoneFromId" = gz_from.id
+    JOIN geozones gz_to   ON gp."geozoneToId"   = gz_to.id
     WHERE
-      gp.tariff_id = ${tariffId}
-      AND gp.is_active = true
+      gp."tariffId" = ${tariffId}
+      AND gp."isActive" = true
       AND ST_Contains(gz_from.polygon, ST_SetSRID(ST_MakePoint(${pickupLng}, ${pickupLat}), 4326))
       AND ST_Contains(gz_to.polygon,   ST_SetSRID(ST_MakePoint(${dropoffLng}, ${dropoffLat}), 4326))
     LIMIT 1
   `;
 
-  return result[0]?.price_override ?? null;
+  return result[0]?.priceOverride ?? null;
 }
 
 /**
@@ -81,7 +81,7 @@ export async function getGeozoneForPoint(
     SELECT id, name
     FROM geozones
     WHERE 
-      is_active = true
+      "isActive" = true
       AND ST_Contains(polygon, ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326))
     LIMIT 1
   `;
@@ -99,7 +99,7 @@ export async function updateDriverLocation(
 ): Promise<void> {
   await prisma.$executeRaw`
     UPDATE drivers
-    SET current_location = ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)
+    SET "currentLocation" = ST_SetSRID(ST_MakePoint(${lng}, ${lat}), 4326)
     WHERE id = ${driverId}
   `;
 }

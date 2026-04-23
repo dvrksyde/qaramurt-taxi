@@ -2,11 +2,11 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/permissions";
+import { checkPermission } from "@/lib/permissions";
 
 export async function GET(req: NextRequest) {
-  const access = await requireAuth();
-  if (!access.allowed || access.role !== "admin") {
+  const access = await checkPermission(["kassa_report_all"]);
+  if (!access.allowed) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

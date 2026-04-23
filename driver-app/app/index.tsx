@@ -17,9 +17,11 @@ import { useRouter } from "expo-router";
 import { api, clearToken } from "../services/api";
 import { connectSocket, disconnectSocket, getSocket } from "../services/socket";
 import { useDriverStore } from "../stores/driverStore";
+import { Audio } from "expo-av";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import { registerForPushNotifications, showOrderNotification } from "../services/notifications";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DriverHistoryPanel } from "../components/DriverHistoryPanel";
 import { DriverChatPanel } from "../components/DriverChatPanel";
 import { DriverProfilePanel } from "../components/DriverProfilePanel";
@@ -83,7 +85,10 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
 
         if (d > 0.015) {
           const newDist = state.tripDistance + d;
-          const newPrice = roundTo5(BASE_FARE + newDist * Number(state.activeOrder.pricePerKm));
+          const currentBaseFare = state.activeOrder?.class?.name === "Комфорт" ? 390 : BASE_FARE;
+          const options: any[] = Array.isArray(state.activeOrder?.options) ? state.activeOrder.options : [];
+          const extrasTotal = options.reduce((sum, opt) => sum + (Number(opt.price) || 0), 0);
+          const newPrice = roundTo5(currentBaseFare + extrasTotal + newDist * Number(state.activeOrder.pricePerKm));
           useDriverStore.getState().setTripMeter(newDist, newPrice);
         }
       }
@@ -143,6 +148,48 @@ export default function MainScreen() {
   const [refreshingGPS, setRefreshingGPS] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tripDistanceRef = useRef(0);
+  const insets = useSafeAreaInsets();
+
+  // Dispatcher-assigned order modal
+  const [dispatcherAssignedOrder, setDispatcherAssignedOrder] = useState<any>(null);
+
+  useEffect(() => {
+    Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    }).catch(console.warn);
+  }, []);
+
+  const playAppSound = async (type: 'new_order' | 'welcome' | 'trip_completed') => {
+    try {
+      let source;
+      switch (type) {
+        case 'new_order':
+          source = require('../assets/sounds/new_order.mp4');
+          break;
+        case 'welcome':
+          source = require('../assets/sounds/welcome.mp4');
+          break;
+        case 'trip_completed':
+          source = require('../assets/sounds/trip_completed.mp4');
+          break;
+      }
+      
+      const { sound } = await Audio.Sound.createAsync(source);
+      await sound.playAsync();
+      
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          sound.unloadAsync();
+        }
+      });
+    } catch (err) {
+      console.warn("Failed to play sound", err);
+    }
+  };
 
   const lastLocationState = useDriverStore((s) => s.lastLocation);
   useEffect(() => {
@@ -235,7 +282,8 @@ export default function MainScreen() {
 
   const mapOrderToState = useCallback((order: any) => {
     if (!order) return null;
-    return mapOrderToActiveOrder(order, BASE_FARE);
+    const currentBaseFare = order.class?.name === "Комфорт" ? 390 : BASE_FARE;
+    return mapOrderToActiveOrder(order, currentBaseFare);
   }, []);
 
   const refreshProfileRank = useCallback(async () => {
@@ -251,18 +299,62 @@ export default function MainScreen() {
     sock.off("new_order_alert");
     sock.off("order_taken");
     sock.off("driver_ratings_updated");
+    sock.off("connect");
+
+    // Auto-reconnect: re-register driver room after reconnect (e.g. after bg kill)
+    sock.on("connect", () => {
+      sock.emit("driver_connect", driverId);
+    });
 
     sock.on("new_order_alert", (data: any) => {
+      if (data.classId) {
+        const p = useDriverStore.getState().profile;
+        const hasClass = p?.vehicle?.classes?.some((c: any) => c.classId === data.classId);
+        if (!hasClass) return;
+      }
       Vibration.vibrate([0, 500, 200, 500]);
+      playAppSound('new_order');
       showOrderNotification(data.pickupAddress, data.pricePerKm || 80);
       setOrderAlert(data);
       setAlertTimer(30);
     });
 
     sock.on("order_taken", (data: any) => {
+      // Instantly dismiss order modal if taken by another driver
       const currentAlert = useDriverStore.getState().orderAlert;
       if (currentAlert && currentAlert.orderId === data.orderId) {
         setOrderAlert(null);
+      }
+    });
+
+    // Dispatcher removed this order from us
+    sock.on("order_reassigned", (data: any) => {
+      const state = useDriverStore.getState();
+      if (state.activeOrder?.id === data.orderId) {
+        setActiveOrder(null);
+        resetTrip();
+        Alert.alert("Диспетчер", data.message || "Заказ был снят с вас");
+      }
+    });
+
+    // Dispatcher assigned an order directly to us
+    sock.on("order_assigned_by_dispatcher", (data: any) => {
+      Vibration.vibrate([0, 400, 150, 400, 150, 400]);
+      playAppSound('new_order');
+      const mapped = mapOrderToState(data.order);
+      setActiveOrder(mapped);
+      setActiveTab("home");
+      setDispatcherAssignedOrder(data.order); // Show dedicated modal
+    });
+
+    sock.on("order_updated", (data: any) => {
+      const state = useDriverStore.getState();
+      if (state.activeOrder?.id === data.orderId) {
+        setActiveOrder({
+          ...state.activeOrder,
+          estimatedPrice: data.estimatedPrice,
+          options: data.options,
+        });
       }
     });
 
@@ -337,37 +429,37 @@ export default function MainScreen() {
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (appState) => {
       if (appState === "active") {
-        // App came back to foreground — cancel any pending offline transition
+        // Cancel any pending offline transition
         if (bgOfflineTimerRef.current) {
           clearTimeout(bgOfflineTimerRef.current);
           bgOfflineTimerRef.current = null;
         }
-        loadDashboard();
-      } else if (appState === "background" || appState === "inactive") {
-        // App went to background or is being closed
-        // Wait 60 seconds — if app doesn't come back, go offline
-        if (bgOfflineTimerRef.current) return; // already scheduled
-        bgOfflineTimerRef.current = setTimeout(async () => {
-          bgOfflineTimerRef.current = null;
-          const storeState = useDriverStore.getState();
-          if (!storeState.isOnline) return; // already offline
-          try {
-            await api("/api/driver/status", {
-              method: "PATCH",
-              body: JSON.stringify({ status: "offline" }),
-            });
-            useDriverStore.getState().setOnline(false);
-          } catch {
-            // ignore — server will clear stale connections via heartbeat
+
+        // Reconnect socket if it dropped while in background
+        const storeState = useDriverStore.getState();
+        if (storeState.isOnline && storeState.profile) {
+          const sock = getSocket();
+          if (!sock || !sock.connected) {
+            startSocketAndGPS(storeState.profile.id);
           }
-        }, 60_000); // 60 seconds
+        }
+
+        loadDashboard();
       }
+      // ✅ FIX 2: NEVER auto-go-offline. Driver works full day, app can be in background.
+      // The driver manually controls their online/offline status.
     });
 
     const interval = setInterval(() => {
-      // Only refresh if app is active
       if (AppState.currentState === "active") {
         loadDashboard();
+      } else {
+        // Keep socket alive in background
+        const sock = getSocket();
+        const storeState = useDriverStore.getState();
+        if (storeState.isOnline && (!sock || !sock.connected) && storeState.profile) {
+          connectSocket(storeState.profile.id);
+        }
       }
     }, 15000);
 
@@ -378,7 +470,7 @@ export default function MainScreen() {
         clearTimeout(bgOfflineTimerRef.current);
       }
     };
-  }, [loadDashboard]);
+  }, [loadDashboard, startSocketAndGPS]);
 
   useEffect(() => {
     if (orderAlert) {
@@ -401,21 +493,14 @@ export default function MainScreen() {
   }, [orderAlert, setOrderAlert]);
 
   const toggleOnline = async () => {
-    setLoading(true);
+    // ✅ FIX 1: Optimistic update — instant UI, server sync in background
     const newStatus = isOnline ? "offline" : "free";
-    const res = await api("/api/driver/status", {
-      method: "PATCH",
-      body: JSON.stringify({ status: newStatus }),
-    });
-    setLoading(false);
+    const newIsOnline = !isOnline;
 
-    if (res.error) {
-      Alert.alert("Ошибка", res.error);
-      return;
-    }
+    setOnline(newIsOnline);
+    setProfile(profile ? { ...profile, status: newStatus as any } : null);
 
-    setOnline(!isOnline);
-    if (newStatus === "free" && profile) {
+    if (newIsOnline && profile) {
       startSocketAndGPS(profile.id);
     } else {
       stopLocationTracking();
@@ -423,25 +508,36 @@ export default function MainScreen() {
       realtimeDriverRef.current = null;
     }
 
-    setProfile(profile ? { ...profile, status: newStatus as any } : null);
+    // Fire-and-forget to server
+    api("/api/driver/status", {
+      method: "PATCH",
+      body: JSON.stringify({ status: newStatus }),
+    }).catch(() => {});
   };
 
   const acceptOrder = async () => {
     if (!orderAlert) return;
+
+    // ✅ FIX 3: Optimistic dismiss — close modal instantly, don't freeze UI
+    const alertSnapshot = orderAlert;
+    setOrderAlert(null);
     setLoading(true);
-    const res = await api(`/api/driver/orders/${orderAlert.orderId}/accept`, {
+
+    const res = await api(`/api/driver/orders/${alertSnapshot.orderId}/accept`, {
       method: "POST",
     });
     setLoading(false);
 
     if (res.error) {
-      Alert.alert("Ошибка", res.error);
-      setOrderAlert(null);
+      // Order was already taken — just silently ignore (modal already closed)
+      // If it's a real error, show it but don't reopen modal
+      if (!res.error.includes("уже назначен") && !res.error.includes("taken")) {
+        Alert.alert("Ошибка", res.error);
+      }
       return;
     }
 
     setActiveOrder(mapOrderToState(res.data));
-    setOrderAlert(null);
     resetTrip();
     setActiveTab("home");
     loadDashboard();
@@ -490,7 +586,7 @@ export default function MainScreen() {
         };
         useDriverStore.getState().setLastLocation({ lat: seedPoint.lat, lng: seedPoint.lng });
         await queueTripPoint(res.data.id, seedPoint);
-      } catch {}
+      } catch { }
     })();
   };
 
@@ -500,11 +596,26 @@ export default function MainScreen() {
     const body: any = { status };
 
     if (status === "in_progress") {
+      playAppSound('welcome');
       startTrip();
+
+      const currentBaseFare = activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE;
+      const options: any[] = Array.isArray(activeOrder.options) ? activeOrder.options : [];
+      const extrasTotal = options.reduce((sum, opt) => sum + (Number(opt.price) || 0), 0);
+      let baseTripFare = activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : (currentBaseFare + extrasTotal);
+      if (activeOrder.arrivedAt) {
+        // Calculate waiting fee locally for the UI (server matches this logic)
+        const waitMs = Date.now() - new Date(activeOrder.arrivedAt).getTime();
+        const waitMins = Math.floor(waitMs / 60000);
+        if (waitMins > 3) {
+          baseTripFare += (waitMins - 3) * 20;
+        }
+      }
+
       // Обнуляем оба счётчика синхронно
       tripDistanceRef.current = 0;
-      useDriverStore.getState().setTripMeter(0, activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : BASE_FARE);
-      setTripMeter(0, activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : BASE_FARE);
+      useDriverStore.getState().setTripMeter(0, baseTripFare);
+      setTripMeter(0, baseTripFare);
 
       Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest }).then((loc) => {
         useDriverStore.getState().setLastLocation({
@@ -515,6 +626,7 @@ export default function MainScreen() {
     }
 
     if (status === "completed") {
+      playAppSound('trip_completed');
       if (!activeOrder.isFixedPrice) {
         // Сначала сбрасываем очередь точек на сервер, чтобы все точки были там
         await flushTripPoints(activeOrder.id);
@@ -523,8 +635,9 @@ export default function MainScreen() {
         // GPS-сессии нет или точек оказалось меньше 2 (плохой GPS / короткая поездка)
         const fallbackDist =
           Math.round(Math.max(useDriverStore.getState().tripDistance, tripDistanceRef.current) * 10) / 10;
+        const currentBaseFare = activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE;
         body.clientDistanceKm = fallbackDist;
-        body.clientFinalPrice = roundTo5(BASE_FARE + fallbackDist * activeOrder.pricePerKm);
+        body.clientFinalPrice = roundTo5(currentBaseFare + fallbackDist * activeOrder.pricePerKm) + 10;
       } else {
         // Fixed-price: явно передаём цену
         if (activeOrder.distanceKm > 0) {
@@ -571,10 +684,11 @@ export default function MainScreen() {
         } else {
           // Резервный показ из предварительного счётчика
           const fallbackDist = Math.round(Math.max(useDriverStore.getState().tripDistance, tripDistanceRef.current) * 10) / 10;
-          const fallbackPrice = roundTo5(BASE_FARE + fallbackDist * activeOrder.pricePerKm);
+          const currentBaseFare = activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE;
+          const fallbackPrice = roundTo5(currentBaseFare + fallbackDist * activeOrder.pricePerKm) + 10;
           Alert.alert(
             "Поездка завершена",
-            `Расстояние: ${fallbackDist} км\nПримерная сумма: ${fallbackPrice} ₸`,
+            `Расстояние: ${fallbackDist} км\nСумма: ${fallbackPrice} ₸`,
           );
         }
       } else {
@@ -666,6 +780,25 @@ export default function MainScreen() {
   const pickupCoords = parseWktPoint(activeOrder?.pickupPoint);
   const dropoffCoords = parseWktPoint(activeOrder?.dropoffPoint);
 
+  const [waitingElapsed, setWaitingElapsed] = useState(0);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (activeOrder && activeOrder.status === "arrived") {
+      interval = setInterval(() => {
+        if (activeOrder.arrivedAt) {
+          const elapsed = Math.floor((Date.now() - new Date(activeOrder.arrivedAt).getTime()) / 1000);
+          setWaitingElapsed(Math.max(0, elapsed));
+        } else {
+          setWaitingElapsed((prev) => prev + 1);
+        }
+      }, 1000);
+    } else {
+      setWaitingElapsed(0);
+    }
+    return () => clearInterval(interval);
+  }, [activeOrder]);
+
   const renderHome = () => {
     if (!profile) {
       return (
@@ -741,6 +874,30 @@ export default function MainScreen() {
               </Text>
             </TouchableOpacity>
 
+            {/* Display Options if present */}
+            {Array.isArray(activeOrder.options) && activeOrder.options.length > 0 && (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4, marginLeft: 22 }}>
+                {activeOrder.options.map((opt: any) => {
+                  const key = typeof opt === 'string' ? opt : opt.key;
+                  const label = opt.label || (key === 'luggage' ? 'Багаж' : key === 'roof_luggage' ? 'Верх. Багаж' : key === 'conditioner' ? 'Кондиционер' : 'Опция');
+                  const price = opt.price || (key === 'luggage' ? 100 : key === 'roof_luggage' ? 200 : key === 'conditioner' ? 100 : 0);
+                  
+                  return (
+                    <View key={key} style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <Ionicons 
+                        name={key === 'luggage' ? 'briefcase' : key === 'roof_luggage' ? 'cube' : key === 'conditioner' ? 'snow' : 'apps-outline'} 
+                        size={12} 
+                        color={key === 'conditioner' ? '#4ade80' : '#fff'} 
+                      />
+                      <Text style={{ fontSize: 10, color: key === 'conditioner' ? '#4ade80' : '#fff', fontWeight: "bold" }}>
+                        {label} (+{price})
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
             {/* Navigator button — full width */}
             <TouchableOpacity style={styles.navBtn} onPress={openNavigator} activeOpacity={0.85}>
               <Ionicons name="navigate" size={18} color="#000000ff" />
@@ -769,7 +926,11 @@ export default function MainScreen() {
             </View>
             <Text style={styles.statusCenterText}>
               {activeOrder.status === 'assigned' ? "Подача автомобиля..." :
-                activeOrder.status === 'arrived' ? "Ожидание клиента..." :
+                activeOrder.status === 'arrived' ? (
+                  waitingElapsed > 180
+                    ? `Платное ожидание: ${Math.floor((waitingElapsed - 180) / 60) * 20} ₸ (${Math.floor(waitingElapsed / 60)} мин)`
+                    : `Ожидание: ${Math.floor(waitingElapsed / 60)}:${(waitingElapsed % 60).toString().padStart(2, '0')} (Беспл.)`
+                ) :
                   "В пути..."}
             </Text>
 
@@ -963,7 +1124,7 @@ export default function MainScreen() {
     <View style={styles.container}>
       <View style={styles.contentArea}>{renderActiveTab()}</View>
 
-      <View style={styles.navBar}>
+      <View style={[styles.navBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
         {[
           { key: "home", icon: "home", label: "Главная" },
           { key: "orders", icon: "receipt-outline", label: "Заказы" },
@@ -1016,6 +1177,72 @@ export default function MainScreen() {
               <TouchableOpacity style={[styles.alertBtn, { backgroundColor: "#d2291dff" }]} onPress={rejectOrder}>
                 <Ionicons name="close" size={24} color="#fff" />
                 <Text style={styles.alertBtnText}>Отклонить</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Dispatcher Assignment Modal ── */}
+      <Modal visible={!!dispatcherAssignedOrder} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.alertCard, { borderColor: "#0984e3", borderWidth: 2 }]}>
+            <View style={styles.alertHeader}>
+              <Ionicons name="person" size={28} color="#0984e3" />
+              <Text style={[styles.alertTitle, { color: "#0984e3" }]}>ДИСПЕТЧЕР</Text>
+            </View>
+
+            <Text style={{ color: "#ccc", fontSize: 13, textAlign: "center", marginBottom: 14 }}>
+              Вам назначили заказ №{dispatcherAssignedOrder?.id}
+            </Text>
+
+            <View style={styles.alertBody}>
+              <View style={styles.alertRow}>
+                <Ionicons name="location" size={18} color="#0984e3" />
+                <Text style={styles.alertText}>
+                  {dispatcherAssignedOrder?.pickupAddress || "Адрес не указан"}
+                </Text>
+              </View>
+              {dispatcherAssignedOrder?.dropoffAddress && (
+                <View style={styles.alertRow}>
+                  <Ionicons name="flag" size={18} color="#0984e3" />
+                  <Text style={styles.alertText}>{dispatcherAssignedOrder.dropoffAddress}</Text>
+                </View>
+              )}
+              <View style={styles.alertRow}>
+                <Ionicons name="call" size={18} color="#0984e3" />
+                <Text style={styles.alertText}>
+                  {dispatcherAssignedOrder?.phone
+                    ? `${dispatcherAssignedOrder.phone.slice(0, 8)}***`
+                    : "—"}
+                </Text>
+              </View>
+              {dispatcherAssignedOrder?.estimatedPrice && (
+                <View style={styles.alertRow}>
+                  <Ionicons name="cash" size={18} color="#0984e3" />
+                  <Text style={[styles.alertText, { fontWeight: "700", fontSize: 16 }]}>
+                    {dispatcherAssignedOrder.estimatedPrice} ₸
+                  </Text>
+                </View>
+              )}
+              {dispatcherAssignedOrder?.comment ? (
+                <View style={styles.alertRow}>
+                  <Ionicons name="chatbubble-ellipses" size={18} color="#888" />
+                  <Text style={[styles.alertText, { color: "#aaa" }]}>{dispatcherAssignedOrder.comment}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            <View style={[styles.alertActions, { marginTop: 16 }]}>
+              <TouchableOpacity
+                style={[styles.alertBtn, { backgroundColor: "#0984e3", flex: 1 }]}
+                onPress={() => {
+                  setDispatcherAssignedOrder(null);
+                  setActiveTab("home");
+                }}
+              >
+                <Ionicons name="checkmark-circle" size={24} color="#fff" />
+                <Text style={styles.alertBtnText}>Понял</Text>
               </TouchableOpacity>
             </View>
           </View>

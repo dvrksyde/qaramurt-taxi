@@ -22,7 +22,7 @@ export async function POST(
 
   const order = await prisma.order.findFirst({
     where: { id: orderId, driverId: auth.driverId },
-    include: { service: true },
+    include: { service: true, class: true },
   });
 
   if (!order) {
@@ -64,12 +64,22 @@ export async function POST(
     });
   }
 
+  let currentBaseFare = order.class?.name === "Комфорт" ? 390 : BASE_FARE;
+  if (order.arrivedAt) {
+    const startedAtTime = order.startedAt ? order.startedAt.getTime() : Date.now();
+    const waitMs = startedAtTime - order.arrivedAt.getTime();
+    const waitMins = Math.floor(waitMs / 60000);
+    if (waitMins > 3) {
+      currentBaseFare += (waitMins - 3) * 20;
+    }
+  }
+
   const session = await prisma.orderTripSession.create({
     data: {
       orderId,
       driverId: auth.driverId,
       tariffPerKm: order.pricePerKm,
-      baseFare: BASE_FARE,
+      baseFare: currentBaseFare,
       startedAt: order.startedAt ?? new Date(),
       status: "active",
     },

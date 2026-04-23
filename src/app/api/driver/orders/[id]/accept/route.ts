@@ -12,10 +12,13 @@ export async function POST(
   const auth = verifyDriverToken(req);
   if (!auth) return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
 
-  // Check driver balance
+  // Check driver balance + get active vehicle
   const driver = await prisma.driver.findUnique({
     where: { id: auth.driverId },
-    select: { balance: true }
+    select: {
+      balance: true,
+      vehicles: { where: { isActive: true }, take: 1, select: { id: true } },
+    },
   });
 
   if (driver && Number(driver.balance) < 100) {
@@ -23,6 +26,9 @@ export async function POST(
       error: "Недостаточный баланс (минимум 100 ₸). Пожалуйста, пополните счет." 
     }, { status: 403 });
   }
+
+  const activeVehicleId = driver?.vehicles?.[0]?.id ?? null;
+
 
   // Check if driver is already on another active order
   const existingOrder = await prisma.order.findFirst({
@@ -49,6 +55,7 @@ export async function POST(
         driverId: auth.driverId,
         status: "assigned",
         assignedAt: new Date(),
+        ...(activeVehicleId ? { vehicleId: activeVehicleId } : {}),
       },
     });
 

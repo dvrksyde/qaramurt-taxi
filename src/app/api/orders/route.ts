@@ -90,6 +90,8 @@ export async function POST(req: NextRequest) {
     classId, tariffId, cashlessAccountId, useBonuses,
     distributionMethod, optionIds, printReceipt, estimatedPrice,
     pricePerKm, pickupPoint, dropoffPoint, distanceKm,
+    hasLuggage, hasRoofLuggage, hasConditioner,
+    selectedDriverId,
   } = body;
 
   if (!phone) return NextResponse.json({ error: "Телефон обязателен" }, { status: 400 });
@@ -107,6 +109,25 @@ export async function POST(req: NextRequest) {
   // Use operator ID from session
   const resolvedOperatorId = currentOpId;
 
+  const optionsArr: string[] = [];
+  if (hasLuggage) optionsArr.push("luggage");
+  if (hasRoofLuggage) optionsArr.push("roof_luggage");
+  if (hasConditioner) optionsArr.push("conditioner");
+
+  // If dispatcher picked a driver manually (list_pick or map_pick)
+  let assignedDriverId: number | null = null;
+  let assignedVehicleId: number | null = null;
+  if (selectedDriverId && (distributionMethod === "list_pick" || distributionMethod === "map_pick")) {
+    const driver = await prisma.driver.findUnique({
+      where: { id: parseInt(selectedDriverId) },
+      include: { vehicles: { where: { isActive: true }, take: 1 } },
+    });
+    if (driver && driver.isActive) {
+      assignedDriverId = driver.id;
+      assignedVehicleId = driver.vehicles[0]?.id ?? null;
+    }
+  }
+
   const order = await prisma.order.create({
     data: {
       phone,
@@ -121,6 +142,7 @@ export async function POST(req: NextRequest) {
       dropoffPoint: dropoffPoint && dropoffPoint.length === 2 ? `POINT(${dropoffPoint[1]} ${dropoffPoint[0]})` : null,
       stops: stops || [],
       comment: comment || null,
+      options: optionsArr,
       isScheduled: timing === "scheduled",
       scheduledAt: timing === "scheduled" && scheduledAt ? new Date(scheduledAt) : null,
       distributionMethod: distributionMethod || "automatic",
@@ -130,7 +152,15 @@ export async function POST(req: NextRequest) {
       printReceipt: printReceipt || false,
       pricePerKm: pricePerKm ? parseInt(pricePerKm) : 80,
       distanceKm: distanceKm ?? null,
-      status: "pending",
+      // If driver was manually selected — assign immediately
+      ...(assignedDriverId ? {
+        driverId: assignedDriverId,
+        vehicleId: assignedVehicleId,
+        status: "assigned",
+        assignedAt: new Date(),
+      } : {
+        status: "pending",
+      }),
     },
     include: {
       driver: true,
@@ -138,6 +168,14 @@ export async function POST(req: NextRequest) {
       class: true,
     },
   });
+
+  // If driver was assigned, set them to busy
+  if (assignedDriverId) {
+    await prisma.driver.update({
+      where: { id: assignedDriverId },
+      data: { status: "busy" },
+    }).catch(() => {});
+  }
 
   // Log initial status
   await prisma.orderStatusLog.create({
@@ -170,27 +208,71 @@ export async function POST(req: NextRequest) {
 
         const pickup = parseWkt(order.pickupPoint);
         const freeDrivers = await prisma.driver.findMany({
-          where: { status: "free", currentLocation: { not: null } },
+          where: { 
+            status: "free", 
+            currentLocation: { not: null },
+            ...(order.classId ? {
+              vehicles: {
+                some: {
+                  isActive: true,
+                  classes: { some: { classId: order.classId } }
+                }
+              }
+            } : {})
+          },
           select: { id: true, currentLocation: true }
         });
 
-        const RADIUS_KM = 5.0; // 5 kilometers radius
-        const nearbyDrivers = freeDrivers.filter((d) => {
-          const loc = parseWkt(d.currentLocation!);
-          if (!pickup || !loc) return false;
-          const dist = haversineKm(pickup.lat, pickup.lng, loc.lat, loc.lng);
-          return dist <= RADIUS_KM;
-        });
+        const CLOSE_RADIUS_KM = 2.5; // Первая волна (ближайшие)
+        const MAX_RADIUS_KM = 5.0; // Вторая волна
 
-        if (nearbyDrivers.length > 0) {
-          nearbyDrivers.forEach(d => {
+        const driversWithDist = freeDrivers
+          .map((d) => {
+            const loc = parseWkt(d.currentLocation!);
+            if (!pickup || !loc) return null;
+            return { id: d.id, dist: haversineKm(pickup.lat, pickup.lng, loc.lat, loc.lng) };
+          })
+          .filter((d): d is { id: number; dist: number } => d !== null && d.dist <= MAX_RADIUS_KM);
+
+        const closeDrivers = driversWithDist.filter((d) => d.dist <= CLOSE_RADIUS_KM);
+        const farDrivers = driversWithDist.filter((d) => d.dist > CLOSE_RADIUS_KM);
+
+        if (closeDrivers.length > 0) {
+          // Шаг 1: Отправляем только ближайшим (до 2.5 км)
+          closeDrivers.forEach((d) => {
+            io.to(`driver:${d.id}`).emit("new_order_alert", alertData);
+          });
+
+          // Шаг 2: Ждем 15 секунд. Если никто из ближайших не взял, расширяем радиус до 5 км
+          setTimeout(async () => {
+            try {
+              const checkOrder = await prisma.order.findUnique({ where: { id: order.id } });
+              if (checkOrder?.status === "pending") {
+                if (farDrivers.length > 0) {
+                  farDrivers.forEach((d) => {
+                    io.to(`driver:${d.id}`).emit("new_order_alert", alertData);
+                  });
+                } else {
+                  // Если дальше тоже никого нет, кидаем в общий эфир
+                  io.to("drivers").emit("new_order_alert", alertData);
+                }
+              }
+            } catch (err) {
+              console.error("Timer error checking order", err);
+            }
+          }, 15000);
+          
+        } else if (farDrivers.length > 0) {
+          // Если в радиусе 2.5 км никого нет, сразу отправляем тем, кто в пределах 5 км
+          farDrivers.forEach((d) => {
             io.to(`driver:${d.id}`).emit("new_order_alert", alertData);
           });
         } else {
-          // Fallback: if no one in 5km, just broadcast to everyone so order isn't lost
+          // Если вообще никого нет в радиусе 5 км, кидаем всем
           io.to("drivers").emit("new_order_alert", alertData);
         }
       } catch (e) {
+        console.error("Auto distribution error", e);
         // Fallback on error
         io.to("drivers").emit("new_order_alert", alertData);
       }

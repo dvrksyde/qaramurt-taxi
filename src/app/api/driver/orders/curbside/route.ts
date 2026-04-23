@@ -10,7 +10,10 @@ export async function POST(req: NextRequest) {
 
   const driver = await prisma.driver.findUnique({
     where: { id: auth.driverId },
-    include: { tariffGroup: true, vehicles: true },
+    include: { 
+      tariffGroup: true, 
+      vehicles: { include: { classes: { include: { class: true } } } } 
+    },
   });
 
   if (!driver) {
@@ -34,8 +37,16 @@ export async function POST(req: NextRequest) {
   }
 
   const activeVehicle = driver.vehicles.find((v) => v.isActive);
-  const pricePerKm = driver.tariffGroup ? 
+  const classObj = activeVehicle?.classes?.[0]?.class;
+  const isComfort = classObj?.name === "Комфорт";
+  
+  let pricePerKm = driver.tariffGroup ? 
     Number(driver.tariffGroup.description?.match(/(\d+) ₸\/км/)?.[1] || 80) : 80;
+
+  if (isComfort) {
+    if (pricePerKm === 80) pricePerKm = 100;
+    else if (pricePerKm === 120) pricePerKm = 140;
+  }
 
   try {
     const order = await prisma.$transaction(async (tx) => {
@@ -45,6 +56,7 @@ export async function POST(req: NextRequest) {
           phone: "БОРДЮР",
           driverId: driver.id,
           vehicleId: activeVehicle?.id,
+          classId: classObj?.id,
           pickupAddress: "С бордюра",
           status: "in_progress",
           comment: "Заказ с бордюра",

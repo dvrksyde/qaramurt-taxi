@@ -5,8 +5,7 @@ export const metadata: Metadata = {
   description: "Скачайте приложение для водителей Qaramurt Taxi на Android",
 };
 
-// ⚠️ Update this URL after each new APK build
-const APK_URL = process.env.APK_DOWNLOAD_URL || "https://drive.google.com/file/d/1jFIQZ6BLSPizJaggMkdLrUQA8HckLiV2/view?usp=sharing";
+const APK_URL = process.env.APK_DOWNLOAD_URL || "https://drive.google.com/file/d/1Sjh7UmQm6JSyiGaeHwYgOn0FM2Co-pKD/view?usp=sharing";
 const APP_VERSION = process.env.APK_VERSION || "1.3.3";
 
 export default function DownloadPage() {
@@ -73,6 +72,8 @@ export default function DownloadPage() {
             "Откройте скачанный файл",
             "Нажмите «Установить»",
             "Войдите с выданным вам логином и паролем",
+            "Дайте разрешение на геолокацию",
+            "Разрешите уведомления",
           ].map((step, i) => (
             <div key={i} style={{ display: "flex", gap: 10, marginBottom: 8, fontSize: 13, color: "#ccc", alignItems: "flex-start" }}>
               <span style={{ background: "#FFD700", color: "#000", borderRadius: "50%", width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>

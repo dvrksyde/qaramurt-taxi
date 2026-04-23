@@ -29,7 +29,7 @@ export function mapOrderToActiveOrder<T extends OrderLike>(order: T, baseFare: n
     currentPrice: isFixedPrice
       ? ((estimatedPrice ?? Number(order.finalPrice)) || 0)
       : (Number(order.finalPrice) || baseFare),
-    estimatedPrice: isFixedPrice ? estimatedPrice : null,
+    estimatedPrice: estimatedPrice,
     isFixedPrice,
     pricePerKm: Number(order.pricePerKm) || 80,
   };

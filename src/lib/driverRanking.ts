@@ -1,8 +1,18 @@
-﻿import { prisma } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
 
 export interface DriverRankEntry {
   rank: number;
   ordersCount: number;
+}
+
+export function getStartOfWeek(): Date {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayOfWeek = now.getDay();
+  const diffToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  const startOfWeek = new Date(startOfToday);
+  startOfWeek.setDate(startOfToday.getDate() - diffToMonday);
+  return startOfWeek;
 }
 
 export function buildDriverRankMap(items: Array<{ id: number; ordersCount: number }>) {
@@ -31,7 +41,7 @@ export async function getDriverRankMap() {
       _count: {
         select: {
           orders: {
-            where: { status: "completed" },
+            where: { status: "completed", completedAt: { gte: getStartOfWeek() } },
           },
         },
       },

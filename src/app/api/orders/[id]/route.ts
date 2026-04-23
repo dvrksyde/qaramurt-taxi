@@ -9,23 +9,65 @@ type Params = { params: Promise<{ id: string }> };
 
 // GET /api/orders/[id]
 export async function GET(_req: NextRequest, { params }: Params) {
-  const { id } = await params;
-  const order = await prisma.order.findUnique({
-    where: { id: parseInt(id) },
-    include: {
-      driver: true,
-      vehicle: true,
-      service: true,
-      class: true,
-      operator: true,
-      statusLogs: { orderBy: { createdAt: "asc" } },
-    },
-  });
+  try {
+    const { id } = await params;
+    const parsedId = parseInt(id);
+    if (isNaN(parsedId)) {
+      return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
+    }
 
-  if (!order) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const access = await requireOrderReadAccess(order.operatorId);
-  if (!access.allowed) return access.response!;
-  return NextResponse.json({ data: order });
+    const order = await prisma.order.findUnique({
+      where: { id: parsedId },
+      include: {
+        driver: {
+          include: {
+            vehicles: { where: { isActive: true }, take: 1 },
+          },
+        },
+        vehicle: true,
+        service: true,
+        class: true,
+        operator: true,
+        statusLogs: { orderBy: { createdAt: "asc" } },
+      },
+    });
+
+    if (!order) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    // Read geometry fields directly as plain text (no PostGIS needed)
+    const rawPoints = await prisma.order.findUnique({
+      where: { id: parsedId },
+      select: { pickupPoint: true, dropoffPoint: true },
+    });
+
+    let driverPos = null;
+    if (order.driverId) {
+      const rawDriver = await prisma.driver.findUnique({
+        where: { id: order.driverId },
+        select: { currentLocation: true },
+      });
+      driverPos = rawDriver?.currentLocation || null;
+    }
+
+    const enrichedOrder = {
+      ...order,
+      pickupPoint: rawPoints?.pickupPoint || null,
+      dropoffPoint: rawPoints?.dropoffPoint || null,
+    };
+
+    if (enrichedOrder.driver) {
+      (enrichedOrder.driver as any).currentLocation = driverPos;
+    }
+
+
+    const access = await requireOrderReadAccess(order.operatorId);
+    if (!access.allowed) return access.response!;
+    
+    return NextResponse.json({ data: enrichedOrder });
+  } catch (error: any) {
+    console.error("GET /api/orders/[id] Error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 }
 
 // PATCH /api/orders/[id] — update status or fields
@@ -35,7 +77,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
   const body = await req.json();
-  const { status, driverId, vehicleId, finalPrice, cancelReason, source } = body;
+  const { status, driverId, vehicleId, finalPrice, cancelReason, source, options, extraPrice } = body;
+
 
   const now = new Date();
   const timestamps: Record<string, Date | null> = {};
@@ -55,6 +98,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         ...(vehicleId !== undefined && { vehicleId }),
         ...(finalPrice !== undefined && { finalPrice }),
         ...(cancelReason && { cancelReason }),
+        // Extra options: save JSON array
+        ...(options !== undefined && { options }),
+        // Recalculate estimated price when extras added (not on completed orders)
+        ...(extraPrice !== undefined && !status && {
+          estimatedPrice: extraPrice,
+        }),
         ...timestamps,
       },
       include: { driver: true }
@@ -124,10 +173,20 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   // Notify monitor via socket
-  const io = (global as Record<string, unknown>).socketIO as { to: (room: string) => { emit: (event: string, data: unknown) => void } } | undefined;
+  const io = (global as Record<string, unknown>).socketIO as any;
   if (io) {
     io.to("monitor").emit("order_status_change", { orderId: updated.id, status, driverId: updated.driverId });
+
+    // Notify driver directly if options/price changed (no status change)
+    if (!status && options !== undefined && updated.driverId) {
+      io.to(`driver:${updated.driverId}`).emit("order_updated", {
+        orderId: updated.id,
+        estimatedPrice: updated.estimatedPrice,
+        options: updated.options,
+      });
+    }
   }
+
 
   // Free driver if order completed or canceled
   if ((status === "completed" || status === "canceled") && updated.driverId) {

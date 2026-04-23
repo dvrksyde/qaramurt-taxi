@@ -111,7 +111,8 @@ export function ActiveOrdersPanel() {
 
       if (res.data) {
         const order = res.data as any;
-        setActiveOrder(mapOrderToActiveOrder(order, BASE_FARE));
+        const currentBaseFare = order.class?.name === "Комфорт" ? 390 : BASE_FARE;
+        setActiveOrder(mapOrderToActiveOrder(order, currentBaseFare));
         Alert.alert("Успешно", "Заказ принят!");
       }
     },

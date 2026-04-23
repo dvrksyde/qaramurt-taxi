@@ -119,9 +119,6 @@ model VehicleClass {
   @@map("vehicle_classes")
 }
 
-// Removed VEHICLE OPTIONS ─────────────────────────────────────────────────────────
-
-
 // ─── GEOZONES ─────────────────────────────────────────────────────────────────
 
 model Geozone {
@@ -365,9 +362,10 @@ model Order {
   scheduledAt        DateTime?
   isUrgent           Boolean            @default(false)
   isExchange         Boolean            @default(false)
+  options            Json               @default("[]")
   createdAt          DateTime           @default(now())
   assignedAt         DateTime?
-  arrivedAt          DateTime?
+  arrivedAt         DateTime?
   startedAt          DateTime?
   completedAt        DateTime?
   canceledAt         DateTime?
