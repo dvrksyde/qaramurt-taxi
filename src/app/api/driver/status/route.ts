@@ -17,10 +17,7 @@ export async function PATCH(req: NextRequest) {
 
   const driver = await prisma.driver.update({
     where: { id: auth.driverId },
-    data: {
-      status,
-      ...(status === "free" ? { lastSeenAt: new Date() } : {}),
-    } as any,
+    data: { status },
   });
 
   // Notify monitor
