@@ -175,6 +175,8 @@ export default function DriversPage() {
                 const isGhost = (driver.status === "free" || driver.status === "busy")
                   && (secondsAgo === null || secondsAgo > 180); // > 3 min = ghost
 
+
+
                 let statusColor = "var(--status-offline)";
                 if (isGhost) statusColor = "#f39c12"; // orange = stale
                 else if (driver.status === "free") statusColor = "var(--status-free)";

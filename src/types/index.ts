@@ -31,6 +31,7 @@ export interface Driver {
   vehicles?: { id: number; plate: string; make: string; model: string; color: string; classes?: any[] }[];
   osVersion?: string | null;
   thirdPartyApps?: string[] | null;
+  lastSeenAt?: string | null;
 }
 
 export interface DriverLocation {
