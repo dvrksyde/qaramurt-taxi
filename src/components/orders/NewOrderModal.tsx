@@ -13,9 +13,9 @@ const DriverPickMap = dynamic(() => import("./DriverPickMap"), { ssr: false });
 interface Props { onClose: () => void; }
 
 const DISTRIBUTION_METHODS = [
-  { value: "automatic",  label: "автоматически" },
-  { value: "broadcast",  label: "показать всем водителям сразу" },
-  { value: "manual",     label: "выбрать водителя" },
+  { value: "automatic", label: "автоматически" },
+  { value: "broadcast", label: "показать всем водителям сразу" },
+  { value: "list_pick", label: "выбрать водителя по списку/карте" },
 ] as const;
 
 export function NewOrderModal({ onClose }: Props) {
@@ -26,7 +26,7 @@ export function NewOrderModal({ onClose }: Props) {
   const [estimating, setEstimating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [activeField, setActiveField] = useState<'pickup' | 'dropoff'>('pickup');
-  
+
   // Landmarks state
   const [landmarks, setLandmarks] = useState<any[]>([]);
   const [showLandmarks, setShowLandmarks] = useState(false);
@@ -100,7 +100,7 @@ export function NewOrderModal({ onClose }: Props) {
         const res = await fetch(`/api/clients/${encodeURIComponent(watchedPhone ?? "")}/addresses`);
         const d = await res.json();
         if (d.data) setClientAddresses(d.data);
-      } catch {}
+      } catch { }
     }, 400);
 
     return () => clearTimeout(timer);
@@ -160,7 +160,7 @@ export function NewOrderModal({ onClose }: Props) {
           setLandmarks(d.data);
           setSelectedIndex(-1);
         }
-      } catch (e) {}
+      } catch (e) { }
     }, 150);
 
     return () => clearTimeout(timer);
@@ -176,11 +176,11 @@ export function NewOrderModal({ onClose }: Props) {
     const fetchRoute = async () => {
       const [lat1, lng1] = watchedPickupPoint;
       const [lat2, lng2] = watchedDropoffPoint;
-      
+
       try {
         const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=full&geometries=geojson`);
         const data = await res.json();
-        
+
         if (data.code === "Ok" && data.routes?.[0]) {
           const routeData = data.routes[0];
           // Convert [lng, lat] to [lat, lng]
@@ -201,7 +201,7 @@ export function NewOrderModal({ onClose }: Props) {
   // Price calculation
   useEffect(() => {
     if (distanceKm == null) return;
-    
+
     // Auto-calculate price
     const pricePerKm = Number(watchedPricePerKm);
     let basePrice = 290;
@@ -209,9 +209,9 @@ export function NewOrderModal({ onClose }: Props) {
     if (selectedClass?.name === "Комфорт") {
       basePrice = 390;
     }
-    
+
     let estimated = Math.round((basePrice + distanceKm * pricePerKm) / 5) * 5;
-    
+
     if (watchedHasLuggage) estimated += 100;
     if (watchedHasRoofLuggage) estimated += 200;
     if (watchedHasConditioner) estimated += 100;
@@ -304,7 +304,7 @@ export function NewOrderModal({ onClose }: Props) {
   };
 
   const watchedDistMethod = watch("distributionMethod");
-  const needsDriverPick = watchedDistMethod === "manual";
+  const needsDriverPick = watchedDistMethod === "list_pick" || watchedDistMethod === "map_pick";
 
   // Load drivers when manual selection is chosen
   useEffect(() => {
@@ -338,7 +338,7 @@ export function NewOrderModal({ onClose }: Props) {
       if (res.ok) {
         const d = await res.json();
         const createdOrder = d.data;
-        
+
         // Push explicitly via socket to bypass Next.js API isolation
         dispatchOrder({
           orderId: createdOrder.id,
@@ -376,11 +376,11 @@ export function NewOrderModal({ onClose }: Props) {
             {/* ── LEFT: Map ── */}
             <div style={{ minHeight: 500, borderRadius: 3, overflow: "hidden", background: "#e8e8e0", position: "relative" }}>
               <div style={{ height: 500 }}>
-                <MiniMap 
-                  pickup={watchedPickupPoint} 
-                  dropoff={watchedDropoffPoint} 
+                <MiniMap
+                  pickup={watchedPickupPoint}
+                  dropoff={watchedDropoffPoint}
                   route={route || undefined}
-                  onMapClick={handleMapClick} 
+                  onMapClick={handleMapClick}
                 />
               </div>
             </div>
@@ -477,8 +477,8 @@ export function NewOrderModal({ onClose }: Props) {
                 {activeField === 'pickup' && showLandmarks && landmarks.length > 0 && (
                   <div ref={dropdownRef} className="landmark-dropdown">
                     {landmarks.map((item, index) => (
-                      <div 
-                        key={item.id} 
+                      <div
+                        key={item.id}
                         className={`landmark-item ${index === selectedIndex ? 'selected' : ''}`}
                         onClick={() => handleLandmarkSelect(item)}
                         onMouseEnter={() => setSelectedIndex(index)}
@@ -511,8 +511,8 @@ export function NewOrderModal({ onClose }: Props) {
                       {activeField === 'dropoff' && showLandmarks && landmarks.length > 0 && (
                         <div ref={dropdownRef} className="landmark-dropdown">
                           {landmarks.map((item, index) => (
-                            <div 
-                              key={item.id} 
+                            <div
+                              key={item.id}
                               className={`landmark-item ${index === selectedIndex ? 'selected' : ''}`}
                               onClick={() => handleLandmarkSelect(item)}
                               onMouseEnter={() => setSelectedIndex(index)}
@@ -615,9 +615,11 @@ export function NewOrderModal({ onClose }: Props) {
                             return !q || d.callsign?.toLowerCase().includes(q) || d.firstName?.toLowerCase().includes(q) || d.lastName?.toLowerCase().includes(q);
                           }).map((d) => (
                             <div key={d.id} onClick={() => setSelectedDriverId(d.id === selectedDriverId ? null : d.id)}
-                              style={{ padding: "5px 8px", borderRadius: 6, cursor: "pointer", fontSize: 12, display: "flex", justifyContent: "space-between", alignItems: "center",
+                              style={{
+                                padding: "5px 8px", borderRadius: 6, cursor: "pointer", fontSize: 12, display: "flex", justifyContent: "space-between", alignItems: "center",
                                 background: selectedDriverId === d.id ? "rgba(9,132,227,0.12)" : "var(--color-surface)",
-                                border: selectedDriverId === d.id ? "1px solid #0984e3" : "1px solid var(--color-border)" }}>
+                                border: selectedDriverId === d.id ? "1px solid #0984e3" : "1px solid var(--color-border)"
+                              }}>
                               <span>{d.callsign && <strong style={{ marginRight: 4 }}>{d.callsign}</strong>}{d.lastName} {d.firstName}</span>
                               <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 10, background: d.status === "free" ? "rgba(0,184,148,0.15)" : "rgba(99,110,114,0.15)", color: d.status === "free" ? "#00b894" : "#636e72" }}>
                                 {d.status === "free" ? "Свободен" : "Оффлайн"}
@@ -637,7 +639,7 @@ export function NewOrderModal({ onClose }: Props) {
 
                     {selectedDriver && (
                       <div style={{ marginTop: 8, padding: "6px 10px", borderRadius: 6, background: "rgba(0,184,148,0.1)", border: "1px solid rgba(0,184,148,0.3)", fontSize: 12, fontWeight: 600, color: "#00b894" }}>
-                         ✅ {selectedDriver.callsign ? `${selectedDriver.callsign} · ` : ""}{selectedDriver.lastName} {selectedDriver.firstName}
+                        ✅ {selectedDriver.callsign ? `${selectedDriver.callsign} · ` : ""}{selectedDriver.lastName} {selectedDriver.firstName}
                       </div>
                     )}
                   </div>
