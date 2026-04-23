@@ -20,7 +20,7 @@ export async function PATCH(req: NextRequest) {
     data: {
       status,
       ...(status === "free" ? { lastSeenAt: new Date() } : {}),
-    },
+    } as any,
   });
 
   // Notify monitor

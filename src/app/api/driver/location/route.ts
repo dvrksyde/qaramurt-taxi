@@ -20,8 +20,8 @@ export async function POST(req: NextRequest) {
     where: { id: auth.driverId },
     data: {
       currentLocation: `POINT(${lng} ${lat})`,
-      lastSeenAt: new Date(), // Точное время последнего GPS пинга
-    },
+      lastSeenAt: new Date(),
+    } as any,
     include: {
       vehicles: { where: { isActive: true }, take: 1, select: { plate: true, make: true, model: true, color: true } },
     },
