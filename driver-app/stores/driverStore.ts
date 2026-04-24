@@ -43,6 +43,11 @@ interface ActiveOrder {
   estimatedPrice: number | null;
   isFixedPrice: boolean;
   startedAt: string | null;
+  arrivedAt?: string | null;
+  isWaiting?: boolean;
+  waitingStartedAt?: string | null;
+  waitingAccumulatedSeconds?: number;
+  waitingFee?: number;
   options?: string[] | null;
   class?: { id: number; name: string } | null;
 }

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyDriverToken } from "@/lib/driverAuth";
 import { reverseGeocode } from "@/lib/geocoder";
 import { isDeliveryOrder } from "@/lib/orderPricing";
+import { computeWaitingTotals } from "@/lib/orderWaiting";
 import { calculateSessionDistance, completeSession } from "@/lib/tripDistance";
 
 const BASE_FARE = 290;
@@ -26,9 +27,6 @@ export async function PATCH(
   const body = await req.json();
   const { status, lat, lng } = body;
 
-  // Fixed-price orders send distanceKm + finalPrice directly.
-  // Non-fixed orders send clientDistanceKm + clientFinalPrice as a BACKUP
-  // (server will prefer GPS calculation; falls back to these if < 2 points).
   const clientDistanceKm: number | undefined =
     body.clientDistanceKm ?? body.distanceKm;
   const clientFinalPrice: number | undefined =
@@ -51,6 +49,11 @@ export async function PATCH(
   const updateData: Record<string, unknown> = { status };
   const fixedPriceOrder = isDeliveryOrder(order);
   const currentBaseFare = order.class?.name === "Комфорт" ? 390 : BASE_FARE;
+  const waitingTotals =
+    status === "completed" || status === "canceled"
+      ? computeWaitingTotals(order, new Date())
+      : null;
+  const waitingFee = Number(waitingTotals?.waitingFee ?? order.waitingFee ?? 0);
 
   if (status === "arrived") {
     updateData.arrivedAt = new Date();
@@ -61,19 +64,22 @@ export async function PATCH(
       const waitMs = (updateData.startedAt as Date).getTime() - order.arrivedAt.getTime();
       const waitMins = Math.floor(waitMs / 60000);
       if (waitMins > 3) {
-        const waitFee = (waitMins - 3) * 20;
+        const waitFeeBeforeTrip = (waitMins - 3) * 20;
         if (fixedPriceOrder) {
-          updateData.estimatedPrice = Number(order.estimatedPrice || 0) + waitFee;
+          updateData.estimatedPrice = Number(order.estimatedPrice || 0) + waitFeeBeforeTrip;
         }
       }
     }
   } else if (status === "completed") {
     updateData.completedAt = new Date();
+    updateData.isWaiting = false;
+    updateData.waitingStartedAt = null;
+    updateData.waitingAccumulatedSeconds =
+      waitingTotals?.waitingAccumulatedSeconds ?? Number(order.waitingAccumulatedSeconds || 0);
+    updateData.waitingFee = waitingFee;
 
-    // Save dropoff coordinates immediately (without waiting for geocoding)
     if (typeof lat === "number" && typeof lng === "number") {
       updateData.dropoffPoint = `POINT(${lng} ${lat})`;
-      // reverseGeocode runs in the background — does NOT block the response
       void (async () => {
         try {
           const address = await reverseGeocode(lat, lng);
@@ -84,28 +90,27 @@ export async function PATCH(
             });
           }
         } catch {
-          // Non-critical — ignore geocoding failures
+          // Ignore reverse geocode failures.
         }
       })();
     }
 
     if (fixedPriceOrder) {
-      // Fixed-price orders: use pre-set estimatedPrice from operator
       if (order.distanceKm !== null && order.distanceKm !== undefined) {
         updateData.distanceKm = order.distanceKm;
       } else if (clientDistanceKm !== undefined) {
         updateData.distanceKm = clientDistanceKm;
       }
+
       const fixedPrice =
         order.estimatedPrice !== null && order.estimatedPrice !== undefined
           ? Number(order.estimatedPrice)
           : clientFinalPrice;
+
       if (fixedPrice !== undefined) {
-        updateData.finalPrice = fixedPrice;
+        updateData.finalPrice = fixedPrice + waitingFee;
       }
     } else {
-      // ── SERVER-SIDE DISTANCE CALCULATION ────────────────────────────────────
-      // Find the active trip session for this order to compute real distance
       const activeSession = await prisma.orderTripSession.findFirst({
         where: {
           orderId,
@@ -120,48 +125,55 @@ export async function PATCH(
           const calc = await calculateSessionDistance(activeSession.id);
 
           if (calc.distanceKm > 0) {
-            // GPS session has enough points — use server calculation
-            await completeSession(activeSession.id, calc.distanceKm, calc.finalPrice);
+            const finalPriceWithWaiting = calc.finalPrice + waitingFee;
+            await completeSession(activeSession.id, calc.distanceKm, finalPriceWithWaiting);
             updateData.distanceKm = calc.distanceKm;
-            updateData.finalPrice = calc.finalPrice;
+            updateData.finalPrice = finalPriceWithWaiting;
           } else {
-            // < 2 GPS points (bad GPS / very short trip) — use client backup
+            const fallbackFinalPrice =
+              (clientFinalPrice ?? roundTo5(currentBaseFare)) + waitingFee;
+
             console.warn(`[trip/complete] Session ${activeSession.id} has < 2 points; using client fallback`);
             await completeSession(
               activeSession.id,
               clientDistanceKm ?? 0,
-              clientFinalPrice ?? roundTo5(currentBaseFare)
+              fallbackFinalPrice
             );
+
             if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
             updateData.finalPrice =
-              clientFinalPrice ??
-              roundTo5(currentBaseFare + Number(clientDistanceKm ?? 0) * Number(order.pricePerKm));
+              clientFinalPrice !== undefined
+                ? clientFinalPrice + waitingFee
+                : roundTo5(currentBaseFare + Number(clientDistanceKm ?? 0) * Number(order.pricePerKm)) + waitingFee;
           }
         } catch (err) {
           console.error("[trip/complete] Server calc failed:", err);
-          // Graceful fallback: use client values if server calc throws
           if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
           updateData.finalPrice =
-            clientFinalPrice ??
-            (clientDistanceKm !== undefined
-              ? roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm))
-              : undefined);
+            clientFinalPrice !== undefined
+              ? clientFinalPrice + waitingFee
+              : clientDistanceKm !== undefined
+                ? roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm)) + waitingFee
+                : undefined;
         }
       } else {
-        // No GPS session — fall back to client-reported values
         if (clientDistanceKm !== undefined) {
           updateData.distanceKm = clientDistanceKm;
-          updateData.finalPrice = roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm));
+          updateData.finalPrice =
+            roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm)) + waitingFee;
         } else if (clientFinalPrice !== undefined) {
-          updateData.finalPrice = clientFinalPrice;
+          updateData.finalPrice = clientFinalPrice + waitingFee;
         }
       }
-      // ────────────────────────────────────────────────────────────────────────
     }
   } else if (status === "canceled") {
     updateData.canceledAt = new Date();
+    updateData.isWaiting = false;
+    updateData.waitingStartedAt = null;
+    updateData.waitingAccumulatedSeconds =
+      waitingTotals?.waitingAccumulatedSeconds ?? Number(order.waitingAccumulatedSeconds || 0);
+    updateData.waitingFee = waitingFee;
 
-    // Also cancel any active trip session
     await prisma.orderTripSession.updateMany({
       where: { orderId, driverId: auth.driverId, status: "active" },
       data: { status: "canceled", completedAt: new Date() },
@@ -176,17 +188,19 @@ export async function PATCH(
 
     let operatorId = updatedOrder.operatorId;
     if (!operatorId) {
-      const defaultOp = await tx.operator.findFirst({ orderBy: { id: 'asc' } });
+      const defaultOp = await tx.operator.findFirst({ orderBy: { id: "asc" } });
       operatorId = defaultOp?.id ?? 1;
     }
 
     if (status === "completed" && updatedOrder.finalPrice) {
       const dTG = await tx.driver.findUnique({
         where: { id: auth.driverId },
-        include: { tariffGroup: true }
+        include: { tariffGroup: true },
       });
 
-      const isCurbside = updatedOrder.pickupAddress === "С бордюра" || updatedOrder.comment === "Заказ с бордюра";
+      const isCurbside =
+        updatedOrder.pickupAddress === "С бордюра" ||
+        updatedOrder.comment === "Заказ с бордюра";
       const commPercent = isCurbside ? 10 : Number(dTG?.tariffGroup?.value || 15);
       const commission = Number(updatedOrder.finalPrice) * (commPercent / 100);
 
@@ -240,10 +254,9 @@ export async function PATCH(
     data: { orderId, driverId: auth.driverId, status },
   });
 
-  // Read back the final values to return to the driver app
   const finalOrder = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { distanceKm: true, finalPrice: true },
+    select: { distanceKm: true, finalPrice: true, waitingFee: true, waitingAccumulatedSeconds: true },
   });
 
   const io = (global as Record<string, unknown>).socketIO as any;
@@ -254,6 +267,7 @@ export async function PATCH(
       driverId: auth.driverId,
       distanceKm: finalOrder?.distanceKm,
       finalPrice: finalOrder?.finalPrice,
+      waitingFee: finalOrder?.waitingFee,
     });
 
     if (status === "completed") {
@@ -269,6 +283,8 @@ export async function PATCH(
       status,
       distanceKm: finalOrder?.distanceKm ?? null,
       finalPrice: finalOrder?.finalPrice ?? null,
+      waitingFee: finalOrder?.waitingFee ?? 0,
+      waitingAccumulatedSeconds: finalOrder?.waitingAccumulatedSeconds ?? 0,
     },
   });
 }

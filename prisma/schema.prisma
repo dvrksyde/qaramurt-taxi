@@ -367,6 +367,10 @@ model Order {
   assignedAt         DateTime?
   arrivedAt         DateTime?
   startedAt          DateTime?
+  isWaiting          Boolean            @default(false)
+  waitingStartedAt   DateTime?
+  waitingAccumulatedSeconds Int         @default(0)
+  waitingFee         Decimal            @default(0) @db.Decimal(10, 2)
   completedAt        DateTime?
   canceledAt         DateTime?
   cancelReason       String?            @db.Text
