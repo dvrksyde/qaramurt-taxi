@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { haversineKm, estimateMinutes, calculatePrice } from "@/lib/pricing";
 import { getGeozoneOverride } from "@/lib/geo";
 import { checkPermission } from "@/lib/permissions";
+import { redis } from "@/lib/redis";
+import { orderDistributionQueue } from "@/lib/queue";
 
 // GET /api/orders — list with filters
 export async function GET(req: NextRequest) {
@@ -123,6 +125,11 @@ export async function POST(req: NextRequest) {
       include: { vehicles: { where: { isActive: true }, take: 1 } },
     });
     if (driver && driver.isActive) {
+      if (Number(driver.balance) < 30) {
+        return NextResponse.json({ 
+          error: "У водителя недостаточный баланс (менее 30 ₸). Невозможно назначить заказ." 
+        }, { status: 403 });
+      }
       assignedDriverId = driver.id;
       assignedVehicleId = driver.vehicles[0]?.id ?? null;
     }
@@ -207,35 +214,50 @@ export async function POST(req: NextRequest) {
         };
 
         const pickup = parseWkt(order.pickupPoint);
-        const freeDrivers = await prisma.driver.findMany({
-          where: { 
-            status: "free", 
-            currentLocation: { not: null },
-            ...(order.classId ? {
-              vehicles: {
-                some: {
-                  isActive: true,
-                  classes: { some: { classId: order.classId } }
-                }
-              }
-            } : {})
-          },
-          select: { id: true, currentLocation: true }
-        });
-
-        const CLOSE_RADIUS_KM = 2.5; // Первая волна (ближайшие)
+                const CLOSE_RADIUS_KM = 2.5; // Первая волна (ближайшие)
         const MAX_RADIUS_KM = 5.0; // Вторая волна
 
-        const driversWithDist = freeDrivers
-          .map((d) => {
-            const loc = parseWkt(d.currentLocation!);
-            if (!pickup || !loc) return null;
-            return { id: d.id, dist: haversineKm(pickup.lat, pickup.lng, loc.lat, loc.lng) };
-          })
-          .filter((d): d is { id: number; dist: number } => d !== null && d.dist <= MAX_RADIUS_KM);
+        let closeDrivers: {id: number, dist: number}[] = [];
+        let farDrivers: {id: number, dist: number}[] = [];
 
-        const closeDrivers = driversWithDist.filter((d) => d.dist <= CLOSE_RADIUS_KM);
-        const farDrivers = driversWithDist.filter((d) => d.dist > CLOSE_RADIUS_KM);
+        if (pickup) {
+          const nearbyDriverMembers = await redis.geoSearchWith(
+            "driver_locations", 
+            { longitude: pickup.lng, latitude: pickup.lat },
+            { radius: MAX_RADIUS_KM, unit: "km" },
+            ["WITHDIST", "ASC"]
+          ) as { member: string, distance: number }[];
+
+          const nearbyDriverIds = nearbyDriverMembers.map(d => Number(d.member));
+
+          if (nearbyDriverIds.length > 0) {
+            const validDrivers = await prisma.driver.findMany({
+              where: { 
+                id: { in: nearbyDriverIds },
+                status: "free", 
+                balance: { gte: 30 },
+                ...(order.classId ? {
+                  vehicles: {
+                    some: {
+                      isActive: true,
+                      classes: { some: { classId: order.classId } }
+                    }
+                  }
+                } : {})
+              },
+              select: { id: true }
+            });
+
+            const validDriverIds = new Set(validDrivers.map(d => d.id));
+
+            const validWithDist = nearbyDriverMembers
+              .filter(d => validDriverIds.has(Number(d.member)))
+              .map(d => ({ id: Number(d.member), dist: d.distance }));
+
+            closeDrivers = validWithDist.filter((d) => d.dist <= CLOSE_RADIUS_KM);
+            farDrivers = validWithDist.filter((d) => d.dist > CLOSE_RADIUS_KM);
+          }
+        }
 
         if (closeDrivers.length > 0) {
           // Шаг 1: Отправляем только ближайшим (до 2.5 км)
@@ -244,23 +266,11 @@ export async function POST(req: NextRequest) {
           });
 
           // Шаг 2: Ждем 15 секунд. Если никто из ближайших не взял, расширяем радиус до 5 км
-          setTimeout(async () => {
-            try {
-              const checkOrder = await prisma.order.findUnique({ where: { id: order.id } });
-              if (checkOrder?.status === "pending") {
-                if (farDrivers.length > 0) {
-                  farDrivers.forEach((d) => {
-                    io.to(`driver:${d.id}`).emit("new_order_alert", alertData);
-                  });
-                } else {
-                  // Если дальше тоже никого нет, кидаем в общий эфир
-                  io.to("drivers").emit("new_order_alert", alertData);
-                }
-              }
-            } catch (err) {
-              console.error("Timer error checking order", err);
-            }
-          }, 15000);
+          await orderDistributionQueue.add("expand-radius", {
+            orderId: order.id,
+            alertData,
+            farDriverIds: farDrivers.map((d) => d.id)
+          }, { delay: 15000 });
           
         } else if (farDrivers.length > 0) {
           // Если в радиусе 2.5 км никого нет, сразу отправляем тем, кто в пределах 5 км

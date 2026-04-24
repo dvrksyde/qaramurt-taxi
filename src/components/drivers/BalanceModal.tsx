@@ -134,7 +134,7 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
               <div style={{
                 fontSize: 30,
                 fontWeight: 800,
-                color: Number(driver.balance) < 100 ? "var(--status-offline)" : "var(--color-primary)",
+                color: Number(driver.balance) < 30 ? "var(--status-offline)" : "var(--color-primary)",
                 letterSpacing: "-0.5px"
               }}>
                 {Number(driver.balance).toLocaleString()}₸
@@ -146,11 +146,11 @@ export function BalanceModal({ driver, onClose, onUpdate }: Props) {
                 borderRadius: 20,
                 display: "inline-block",
                 background: "transparent",
-                color: Number(driver.balance) < 100 ? "var(--status-offline)" : "var(--status-free)",
+                color: Number(driver.balance) < 30 ? "var(--status-offline)" : "var(--status-free)",
                 fontWeight: 600,
                 border: "1px solid currentColor"
               }}>
-                {Number(driver.balance) < 100 ? "⚠️ Пополните баланс" : "✅ Баланс в норме"}
+                {Number(driver.balance) < 30 ? "⚠️ Баланс ниже 30₸ — водитель не получает заказы" : "✅ Баланс в норме"}
               </div>
             </div>
           </div>

@@ -20,14 +20,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Водитель не найден" }, { status: 404 });
   }
 
-  if (driver.status !== "free") {
-    return NextResponse.json({ error: "Вы должны быть свободны на линии" }, { status: 400 });
+  if (Number(driver.balance) < 30) {
+    return NextResponse.json({ 
+      error: "Недостаточный баланс (минимум 30 ₸). Пожалуйста, пополните счет." 
+    }, { status: 403 });
   }
 
-  if (Number(driver.balance) <= 0 || Number(driver.balance) < 30) {
-    return NextResponse.json({ 
-      error: "Ваш баланс ниже 30 ₸. Пополнение обязательно для взятия заказа с бордюра!" 
-    }, { status: 403 });
+  if (driver.status !== "free") {
+    return NextResponse.json({ error: "Вы должны быть свободны на линии" }, { status: 400 });
   }
 
   // Check if driver is already assigned to any active order
@@ -104,23 +104,9 @@ export async function POST(req: NextRequest) {
         status: "busy",
         location: driver.currentLocation,
       });
-
-      if (Number(driver.balance) <= 100) {
-        const warningMsg = "пополните баланс пополните баланс пополните баланссссссссссс!!!!!!!!!!!!!!!!!";
-        io.to(`driver:${driver.id}`).emit("chat_message", {
-          from: "Система",
-          driverId: driver.id,
-          text: warningMsg,
-          timestamp: new Date().toISOString(),
-          direction: "outbound"
-        });
-      }
     }
 
-    return NextResponse.json({ 
-      data: order,
-      warning: Number(driver.balance) <= 100 ? "пополните баланс пополните баланс пополните баланссссссссссс!!!!!!!!!!!!!!!!!" : undefined
-    });
+    return NextResponse.json({ data: order });
   } catch (error) {
     console.error("[curbside] Error creating curbside order:", error);
     return NextResponse.json({ error: "Ошибка создания заказа" }, { status: 500 });

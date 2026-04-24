@@ -5,6 +5,12 @@ import type { Order } from "@/types";
 
 export function CurrentOrdersTab() {
   const { currentOrders, setCurrentOrders } = useMonitorStore();
+  const [globalNow, setGlobalNow] = useState(Date.now());
+
+  useEffect(() => {
+    const int = setInterval(() => setGlobalNow(Date.now()), 1000);
+    return () => clearInterval(int);
+  }, []);
 
   useEffect(() => {
     fetch("/api/orders?status=pending,assigned,arrived,in_progress")
@@ -47,7 +53,7 @@ export function CurrentOrdersTab() {
         </thead>
         <tbody>
           {currentOrders.map((order) => (
-            <OrderRow key={order.id} order={order} />
+            <OrderRow key={order.id} order={order} now={globalNow} />
           ))}
         </tbody>
       </table>
@@ -55,7 +61,7 @@ export function CurrentOrdersTab() {
   );
 }
 
-function OrderRow({ order }: { order: Order }) {
+function OrderRow({ order, now }: { order: Order; now: number }) {
   const { setSelectedOrderId } = useMonitorStore();
   const statusLabels: Record<string, string> = {
     pending: "новый",
@@ -99,7 +105,7 @@ function OrderRow({ order }: { order: Order }) {
           </div>
 
           <div style={{ minWidth: 46, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-            <LiveOrderTimer order={order} />
+            <LiveOrderTimer order={order} now={now} />
           </div>
         </div>
       </td>
@@ -126,14 +132,7 @@ function OrderRow({ order }: { order: Order }) {
   );
 }
 
-function LiveOrderTimer({ order }: { order: Order }) {
-  const [now, setNow] = useState(Date.now());
-
-  useEffect(() => {
-    const int = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(int);
-  }, []);
-
+function LiveOrderTimer({ order, now }: { order: Order; now: number }) {
   const pad = (n: number) => n.toString().padStart(2, "0");
 
   if (order.status === "pending") {

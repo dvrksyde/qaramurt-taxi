@@ -8,6 +8,7 @@ import { Server as SocketIOServer, Socket } from "socket.io";
 
 import { verifyDriverTokenString } from "./src/lib/driverAuth";
 import { getPrisma } from "./src/lib/prisma";
+import "./src/lib/queue"; // Start BullMQ worker
 
 const dev = process.env.NODE_ENV !== "production";
 const app = next({ dev });

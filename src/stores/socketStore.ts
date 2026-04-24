@@ -19,7 +19,7 @@ export function useSocket() {
 
     const socket = io({
       path: "/api/socket",
-      transports: ["polling", "websocket"],   // polling first — works behind Render's proxy
+      transports: ["websocket", "polling"],   // websocket first for better performance
       reconnectionAttempts: Infinity,          // keep trying forever
       reconnectionDelay: 2000,
       reconnectionDelayMax: 10000,

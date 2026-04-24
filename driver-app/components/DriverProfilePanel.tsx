@@ -81,7 +81,14 @@ export function DriverProfilePanel() {
           <Text style={styles.summaryMeta}>Позывной: {profile?.callsign || "—"}</Text>
           <Text style={styles.summaryMeta}>Рейтинг: #{Number(profile?.rating || 0)}</Text>
           <Text style={styles.summaryMeta}>Выполнено заказов: {Number((profile as any)?.ordersCount || 0)}</Text>
-          <Text style={styles.summaryMeta}>Баланс: {Number(profile?.balance || 0).toLocaleString()} ₸</Text>
+          <Text style={[styles.summaryMeta, Number(profile?.balance || 0) < 30 && { color: '#ef4444' }]}>
+            Баланс: {Number(profile?.balance || 0).toLocaleString()} ₸
+          </Text>
+          {Number(profile?.balance || 0) < 30 && (
+            <Text style={{ color: '#ef4444', fontSize: 13, marginTop: 4, fontWeight: 'bold' }}>
+              ⚠️ Недостаточный баланс (минимум 30 ₸)
+            </Text>
+          )}
 
           <View style={styles.tariffBox}>
             <Text style={styles.tariffTitle}>Текущий тариф</Text>

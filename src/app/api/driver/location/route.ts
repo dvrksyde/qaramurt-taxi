@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyDriverToken } from "@/lib/driverAuth";
+import { redis } from "@/lib/redis";
 
 // POST /api/driver/location — update GPS coordinates
 export async function POST(req: NextRequest) {
@@ -15,33 +16,57 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "lat и lng обязательны" }, { status: 400 });
   }
 
-  // Update driver location in DB (WKT format for PostGIS) + fetch driver info for monitor
-  const driver = await prisma.driver.update({
-    where: { id: auth.driverId },
-    data: {
-      currentLocation: `POINT(${lng} ${lat})`,
-    },
-    include: {
-      vehicles: { where: { isActive: true }, take: 1, select: { plate: true, make: true, model: true, color: true } },
-    },
-  });
+  const driverId = auth.driverId;
+  const pointWkt = `POINT(${lng} ${lat})`;
+
+  // Save latest location to Redis for fast access
+  await redis.set(`driver:${driverId}:loc`, JSON.stringify({ lat, lng }), { EX: 3600 });
+  await redis.geoAdd("driver_locations", { member: driverId.toString(), longitude: lng, latitude: lat });
+
+  // Debounce DB updates (only update Postgres every 30 seconds per driver)
+  const lastDbUpdateKey = `driver:${driverId}:last_db_update`;
+  const lastUpdate = await redis.get(lastDbUpdateKey);
+  
+  let driverInfoStr = await redis.get(`driver:${driverId}:info`);
+  let driverInfo = driverInfoStr ? JSON.parse(driverInfoStr) : null;
+
+  if (!lastUpdate || !driverInfo) {
+    // It's time to update DB, or we don't have driver info cached
+    const updatedDriver = await prisma.driver.update({
+      where: { id: driverId },
+      data: { currentLocation: pointWkt },
+      include: {
+        vehicles: { where: { isActive: true }, take: 1, select: { plate: true, make: true, model: true, color: true } },
+      },
+    });
+
+    driverInfo = {
+      status: updatedDriver.status,
+      callsign: updatedDriver.callsign,
+      firstName: updatedDriver.firstName,
+      lastName: updatedDriver.lastName,
+      phone: updatedDriver.phone,
+      plate: updatedDriver.vehicles[0]?.plate ?? null,
+      vehicleLabel: updatedDriver.vehicles[0] ? `${updatedDriver.vehicles[0].make} ${updatedDriver.vehicles[0].model}` : null,
+    };
+
+    // Cache info for 60 seconds
+    await redis.set(`driver:${driverId}:info`, JSON.stringify(driverInfo), { EX: 60 });
+    // Mark last DB update (30s cooldown)
+    await redis.set(lastDbUpdateKey, "1", { EX: 30 });
+  }
 
   // Forward to monitor via Socket.io
   const io = (global as Record<string, unknown>).socketIO as any;
-  if (io) {
+  if (io && driverInfo) {
     io.to("monitor").emit("driver_location_update", {
-      driverId: auth.driverId,
+      driverId,
       lat,
       lng,
-      status: driver.status as string,
-      callsign: driver.callsign,
-      firstName: driver.firstName,
-      lastName: driver.lastName,
-      phone: driver.phone,
-      plate: driver.vehicles[0]?.plate ?? null,
-      vehicleLabel: driver.vehicles[0] ? `${driver.vehicles[0].make} ${driver.vehicles[0].model}` : null,
+      ...driverInfo
     });
   }
 
   return NextResponse.json({ ok: true });
 }
+

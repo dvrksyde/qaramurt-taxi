@@ -41,6 +41,11 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (!newDriver.isActive) {
     return NextResponse.json({ error: "Водитель заблокирован" }, { status: 403 });
   }
+  if (Number(newDriver.balance) < 30) {
+    return NextResponse.json({ 
+      error: "У водителя недостаточный баланс (менее 30 ₸). Невозможно назначить заказ." 
+    }, { status: 403 });
+  }
 
   // Get current order
   const order = await prisma.order.findUnique({ where: { id: orderId } });

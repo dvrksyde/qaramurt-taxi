@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyDriverToken } from "@/lib/driverAuth";
 
+import { redis } from "@/lib/redis";
+
 // PATCH /api/driver/status — toggle online/offline
 export async function PATCH(req: NextRequest) {
   const auth = verifyDriverToken(req);
@@ -19,6 +21,12 @@ export async function PATCH(req: NextRequest) {
     where: { id: auth.driverId },
     data: { status },
   });
+
+  if (status === "offline") {
+    // Keep Redis Geo index clean by removing offline drivers
+    await redis.zRem("driver_locations", auth.driverId.toString()).catch(() => {});
+    await redis.del(`driver:${auth.driverId}:info`).catch(() => {});
+  }
 
   // Notify monitor
   const io = (global as Record<string, unknown>).socketIO as any;

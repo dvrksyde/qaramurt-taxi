@@ -59,6 +59,11 @@ interface DriverState {
   setOnline: (v: boolean) => void;
   orderAlert: OrderAlert | null;
   setOrderAlert: (a: OrderAlert | null) => void;
+  orderQueue: OrderAlert[];
+  enqueueOrderAlert: (a: OrderAlert) => void;
+  dequeueOrderAlert: () => void;
+  clearOrderQueue: () => void;
+  removeOrderFromQueue: (orderId: number) => void;
   activeOrder: ActiveOrder | null;
   setActiveOrder: (o: ActiveOrder | null) => void;
   tripDistance: number;
@@ -78,6 +83,21 @@ export const useDriverStore = create<DriverState>((set) => ({
   setOnline: (isOnline) => set({ isOnline }),
   orderAlert: null,
   setOrderAlert: (orderAlert) => set({ orderAlert }),
+  orderQueue: [],
+  enqueueOrderAlert: (orderAlert) => set((state) => {
+    if (state.orderAlert?.orderId === orderAlert.orderId) return state;
+    if (state.orderQueue.some(o => o.orderId === orderAlert.orderId)) return state;
+    return { orderQueue: [...state.orderQueue, orderAlert] };
+  }),
+  dequeueOrderAlert: () => set((state) => {
+    if (state.orderQueue.length === 0) return { orderAlert: null };
+    const [next, ...rest] = state.orderQueue;
+    return { orderAlert: next, orderQueue: rest };
+  }),
+  clearOrderQueue: () => set({ orderQueue: [], orderAlert: null }),
+  removeOrderFromQueue: (orderId) => set((state) => ({
+    orderQueue: state.orderQueue.filter(o => o.orderId !== orderId)
+  })),
   activeOrder: null,
   setActiveOrder: (activeOrder) => set({ activeOrder }),
   tripDistance: 0,
