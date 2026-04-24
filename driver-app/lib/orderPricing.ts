@@ -7,10 +7,6 @@ type OrderLike = {
   estimatedPrice?: number | null;
   finalPrice?: number | null;
   pricePerKm?: number | string | null;
-  isWaiting?: boolean | null;
-  waitingStartedAt?: string | null;
-  waitingAccumulatedSeconds?: number | null;
-  waitingFee?: number | string | null;
 };
 
 export function isDeliveryOrder(order?: OrderLike | null): boolean {
@@ -36,9 +32,5 @@ export function mapOrderToActiveOrder<T extends OrderLike>(order: T, baseFare: n
     estimatedPrice: estimatedPrice,
     isFixedPrice,
     pricePerKm: Number(order.pricePerKm) || 80,
-    isWaiting: Boolean(order.isWaiting),
-    waitingStartedAt: order.waitingStartedAt ?? null,
-    waitingAccumulatedSeconds: Number(order.waitingAccumulatedSeconds) || 0,
-    waitingFee: Number(order.waitingFee) || 0,
   };
 }

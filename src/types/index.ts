@@ -73,10 +73,6 @@ export interface Order {
   assignedAt: string | null;
   arrivedAt: string | null;
   startedAt: string | null;
-  isWaiting?: boolean;
-  waitingStartedAt?: string | null;
-  waitingAccumulatedSeconds?: number;
-  waitingFee?: number;
   completedAt: string | null;
   driver?: Driver | null;
   service?: TaxiService | null;

@@ -21,9 +21,9 @@ export async function POST(
     },
   });
 
-  if (driver && Number(driver.balance) <= 0 || driver && Number(driver.balance) < 30) {
-    return NextResponse.json({
-      error: "Ваш баланс ниже 30 ₸. Пополнение обязательно для взятия заказа!"
+  if (driver && Number(driver.balance) < 100) {
+    return NextResponse.json({ 
+      error: "Недостаточный баланс (минимум 100 ₸). Пожалуйста, пополните счет." 
     }, { status: 403 });
   }
 
