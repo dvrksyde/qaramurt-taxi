@@ -169,9 +169,6 @@ export default function MainScreen() {
   const tripDistanceRef = useRef(0);
   const activeSoundRef = useRef<Audio.Sound | null>(null);
   const handledOrderAlertsRef = useRef<Map<number, number>>(new Map());
-  // Guard against concurrent loadDashboard calls
-  const loadingDashboardRef = useRef(false);
-  const lastDashboardLoadRef = useRef(0);
   const insets = useSafeAreaInsets();
 
   // Dispatcher-assigned order modal
@@ -408,19 +405,16 @@ export default function MainScreen() {
       }
 
       rememberHandledOrderAlert(data.orderId);
-      Vibration.vibrate([0, 500, 200, 500]);
-      playAppSound('new_order');
-      showOrderNotification(data.orderId, data.pickupAddress, data.pricePerKm || 80);
-      setOrderAlert(data);
-      setAlertTimer(30);
+      enqueueOrderAlert(data);
     });
 
     sock.on("order_taken", (data: any) => {
       // Instantly dismiss order modal if taken by another driver
       const currentAlert = useDriverStore.getState().orderAlert;
       if (currentAlert && currentAlert.orderId === data.orderId) {
-        clearIncomingOrderAlert(data.orderId);
+        setOrderAlert(null);
       }
+      removeOrderFromQueue(data.orderId);
     });
 
     // Dispatcher removed this order from us
@@ -478,14 +472,6 @@ export default function MainScreen() {
   ]);
 
   const loadDashboard = useCallback(async () => {
-    if (loadingDashboardRef.current) return;
-    const now = Date.now();
-    if (now - lastDashboardLoadRef.current < 10000) return;
-    
-    loadingDashboardRef.current = true;
-    lastDashboardLoadRef.current = now;
-    
-    try {
     const [profileRes, orderRes] = await Promise.all([
       api("/api/driver/profile"),
       api("/api/driver/orders/current"),
@@ -523,9 +509,6 @@ export default function MainScreen() {
       stopLocationTracking();
       disconnectSocket();
       realtimeDriverRef.current = null;
-    }
-    } finally {
-      loadingDashboardRef.current = false;
     }
   }, [logout, mapOrderToState, refreshCurrentPosition, setActiveOrder, setOnline, setProfile, startSocketAndGPS, stopLocationTracking]);
 
@@ -570,10 +553,7 @@ export default function MainScreen() {
 
     const interval = setInterval(() => {
       if (AppState.currentState === "active") {
-        const sock = getSocket();
-        if (!sock || !sock.connected) {
-          loadDashboard();
-        }
+        loadDashboard();
       } else {
         // Keep socket alive in background
         const sock = getSocket();
@@ -582,7 +562,7 @@ export default function MainScreen() {
           connectSocket(storeState.profile.id);
         }
       }
-    }, 60000);
+    }, 15000);
 
     return () => {
       subscription.remove();
@@ -612,6 +592,19 @@ export default function MainScreen() {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [clearIncomingOrderAlert, orderAlert]);
+
+  // --- Order Queue Processing ---
+  useEffect(() => {
+    // If we don't have an active alert but have orders in queue, show next
+    if (!orderAlert && orderQueue.length > 0 && !activeOrder) {
+      dequeueOrderAlert();
+      setAlertTimer(30);
+      
+      // Trigger sound and vibration for the next order in queue
+      Vibration.vibrate([0, 500, 200, 500]);
+      playAppSound('new_order');
+    }
+  }, [orderAlert, orderQueue.length, activeOrder, dequeueOrderAlert]);
 
   const toggleOnline = async () => {
     // вњ… FIX 1: Optimistic update вЂ” instant UI, server sync in background
@@ -1007,8 +1000,196 @@ export default function MainScreen() {
               <Text style={styles.orderHeaderTitle}>  Р—Р°РєР°Р· в„–{activeOrder.id}</Text>
             </View>
 
-            
+            <TouchableOpacity
+              style={[styles.gpsBadge, { marginRight: 8 }]}
+              onPress={refreshCurrentPosition}
+              disabled={refreshingGPS}
+            >
+              {refreshingGPS ? (
+                <ActivityIndicator size={10} color="#fff" style={{ marginRight: 4 }} />
+              ) : (
+                <Ionicons name="locate" size={12} color="#fff" />
+              )}
+              <Text style={[styles.gpsBadgeText, { fontSize: 10 }]}>
+                {refreshingGPS ? "РћР±РЅРѕРІР»РµРЅРёРµ..." : "РћР±РЅРѕРІРёС‚СЊ GPS"}
+              </Text>
+            </TouchableOpacity>
 
+            <TouchableOpacity
+              style={styles.menuBtn}
+              onPress={() => {
+                Alert.alert("Р”РµР№СЃС‚РІРёСЏ", "", [
+                  {
+                    text: "РћС‚РјРµРЅРёС‚СЊ Р·Р°РєР°Р·",
+                    style: "destructive",
+                    onPress: () => {
+                      Alert.alert("РћС‚РјРµРЅРёС‚СЊ Р·Р°РєР°Р·?", "Р­С‚Рѕ РґРµР№СЃС‚РІРёРµ РЅРµР»СЊР·СЏ РѕС‚РјРµРЅРёС‚СЊ", [
+                        { text: "РќРµС‚", style: "cancel" },
+                        { text: "Р”Р°, РѕС‚РјРµРЅРёС‚СЊ", style: "destructive", onPress: () => updateOrderStatus("canceled") },
+                      ]);
+                    },
+                  },
+                  { text: "Р—Р°РєСЂС‹С‚СЊ", style: "cancel" },
+                ]);
+              }}
+            >
+              <Ionicons name="ellipsis-vertical" size={20} color="#888" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Address + phone strip */}
+          <View style={styles.addressStrip}>
+            <View style={styles.addressLine}>
+              <Ionicons name="location" size={16} color="#FFD000" />
+              <Text style={styles.addressLineText} numberOfLines={1}>{activeOrder.pickupAddress || "РђРґСЂРµСЃ РЅРµ СѓРєР°Р·Р°РЅ"}</Text>
+            </View>
+            {/* Show dropoff only for delivery (fixed price) orders */}
+            {activeOrder.isFixedPrice && activeOrder.dropoffAddress && (
+              <View style={styles.addressLine}>
+                <Ionicons name="flag" size={16} color="#2196F3" />
+                <Text style={styles.addressLineText} numberOfLines={1}>{activeOrder.dropoffAddress}</Text>
+              </View>
+            )}
+            <TouchableOpacity style={styles.addressLine} onPress={callClient} activeOpacity={0.7}>
+              <Ionicons name="call" size={16} color="#FFD000" />
+              <Text style={[styles.phoneText, { color: "#FFD000", textDecorationLine: "underline" }]}>
+                {activeOrder.phone}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Display Options if present */}
+            {Array.isArray(activeOrder.options) && activeOrder.options.length > 0 && (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4, marginLeft: 22 }}>
+                {activeOrder.options.map((opt: any) => {
+                  const key = typeof opt === 'string' ? opt : opt.key;
+                  const label = opt.label || (key === 'luggage' ? 'Р‘Р°РіР°Р¶' : key === 'roof_luggage' ? 'Р’РµСЂС…. Р‘Р°РіР°Р¶' : key === 'conditioner' ? 'РљРѕРЅРґРёС†РёРѕРЅРµСЂ' : 'РћРїС†РёСЏ');
+                  const price = opt.price || (key === 'luggage' ? 100 : key === 'roof_luggage' ? 200 : key === 'conditioner' ? 100 : 0);
+                  
+                  return (
+                    <View key={key} style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <Ionicons 
+                        name={key === 'luggage' ? 'briefcase' : key === 'roof_luggage' ? 'cube' : key === 'conditioner' ? 'snow' : 'apps-outline'} 
+                        size={12} 
+                        color={key === 'conditioner' ? '#4ade80' : '#fff'} 
+                      />
+                      <Text style={{ fontSize: 10, color: key === 'conditioner' ? '#4ade80' : '#fff', fontWeight: "bold" }}>
+                        {label} (+{price})
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* Navigator button вЂ” full width */}
+            <TouchableOpacity style={styles.navBtn} onPress={openNavigator} activeOpacity={0.85}>
+              <Ionicons name="navigate" size={18} color="#000000ff" />
+              <Text style={styles.navBtnText}>
+                {
+                  activeOrder.status === "assigned"
+                    ? "РћС‚РєСЂС‹С‚СЊ РЅР°РІРёРіР°С‚РѕСЂ в†’ Рљ РєР»РёРµРЅС‚Сѓ"
+                    : activeOrder.status === "arrived"
+                      ? "РћС‚РєСЂС‹С‚СЊ РЅР°РІРёРіР°С‚РѕСЂ в†’ Рљ РЅР°Р·РЅР°С‡РµРЅРёСЋ"
+                      : activeOrder.status === "in_progress"
+                        ? "РћС‚РєСЂС‹С‚СЊ РЅР°РІРёРіР°С‚РѕСЂ в†’ Рљ РЅР°Р·РЅР°С‡РµРЅРёСЋ"
+                        : "РћС‚РєСЂС‹С‚СЊ РЅР°РІРёРіР°С‚РѕСЂ"
+                }
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Elegant Status Center Fill */}
+          <View style={styles.orderStatusCenter}>
+            <View style={styles.statusPulseCircle}>
+              <Ionicons
+                name={activeOrder.status === 'assigned' ? "paper-plane" : activeOrder.status === 'arrived' ? "body" : "car-sport"}
+                size={54}
+                color="#FFD000"
+              />
+            </View>
+            <Text style={styles.statusCenterText}>
+              {activeOrder.status === 'assigned' ? "РџРѕРґР°С‡Р° Р°РІС‚РѕРјРѕР±РёР»СЏ..." :
+                activeOrder.status === 'arrived' ? (
+                  arrivedWaitingElapsed > 180
+                    ? `РџР»Р°С‚РЅРѕРµ РѕР¶РёРґР°РЅРёРµ: ${Math.floor((arrivedWaitingElapsed - 180) / 60) * 20} в‚ё (${Math.floor(arrivedWaitingElapsed / 60)} РјРёРЅ)`
+                    : `РћР¶РёРґР°РЅРёРµ: ${Math.floor(arrivedWaitingElapsed / 60)}:${(arrivedWaitingElapsed % 60).toString().padStart(2, '0')} (Р‘РµСЃРїР».)`
+                ) :
+                  "Р’ РїСѓС‚Рё..."}
+            </Text>
+
+            <View style={styles.paymentBadge}>
+              <Ionicons name="cash-outline" size={16} color="#22c55e" />
+              <Text style={styles.paymentBadgeText}>РћРїР»Р°С‚Р° РЅР°Р»РёС‡РЅС‹РјРё</Text>
+            </View>
+
+            {hasTripWaitingSummary && (
+              <View style={styles.tripWaitingCard}>
+                <View style={styles.tripWaitingHeader}>
+                  <Ionicons
+                    name={activeOrder.isWaiting ? "pause-circle" : "time-outline"}
+                    size={18}
+                    color="#FFD000"
+                  />
+                  <Text style={styles.tripWaitingTitle}>
+                    {activeOrder.isWaiting ? "РћР¶РёРґР°РЅРёРµ Р°РєС‚РёРІРЅРѕ" : "РћР¶РёРґР°РЅРёРµ РїРѕ Р·Р°РєР°Р·Сѓ"}
+                  </Text>
+                </View>
+                <Text style={styles.tripWaitingTimer}>
+                  {Math.floor(tripWaitingElapsed / 60)}:{(tripWaitingElapsed % 60).toString().padStart(2, "0")}
+                </Text>
+                <Text style={styles.tripWaitingFee}>+{tripWaitingFee} ₸</Text>
+                <Text style={styles.tripWaitingHint}>20 ₸/мин во время паузы поездки</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Meter strip вЂ” single row (preliminary / approximate values) */}
+          {activeOrder.status === "in_progress" && (
+            <View style={styles.meterStrip}>
+              {activeOrder.isFixedPrice ? (
+                <>
+                  <Text style={styles.meterStripLabel}>Р¤РёРєСЃ. С†РµРЅР°</Text>
+                  <Text style={styles.meterStripPrice}>{displayedTripPrice} в‚ё</Text>
+                </>
+              ) : (
+                <>
+                  <View style={styles.meterStripItem}>
+                    <Ionicons name="speedometer-outline" size={14} color="#888" />
+                    {/* '~' indicates preliminary вЂ” server will calculate the exact figure */}
+                    <Text style={styles.meterStripValue}>{tripDistance.toFixed(1)} РєРј</Text>
+                  </View>
+                  <View style={styles.meterStripItem}>
+                    <Ionicons name="time-outline" size={14} color="#888" />
+                    <Text style={styles.meterStripValue}>{tripElapsed} РјРёРЅ</Text>
+                  </View>
+                  <Text style={styles.meterStripPrice}>{displayedTripPrice}в‚ё</Text>
+                </>
+              )}
+            </View>
+          )}
+
+          {/* Action button */}
+          <View style={styles.orderActions}>
+            {activeOrder.status === "assigned" && (
+              <SwipeButton
+                title="РЇ РЅР° РјРµСЃС‚Рµ"
+                onSwipeComplete={() => updateOrderStatus("arrived")}
+                color="#FFD000"
+                iconName="navigate"
+                disabled={loading}
+              />
+            )}
+            {activeOrder.status === "arrived" && (
+              <SwipeButton
+                title="РљР»РёРµРЅС‚ СЃРµР» вЂ” РїРѕРµС…Р°Р»Рё"
+                onSwipeComplete={() => updateOrderStatus("in_progress")}
+                color="#FFD000"
+                iconName="car"
+                disabled={loading}
+              />
+            )}
+            {activeOrder.status === "in_progress" && (
+              <>
                 <SwipeButton
                   title="Р—Р°РІРµСЂС€РёС‚СЊ РїРѕРµР·РґРєСѓ"
                   onSwipeComplete={() => updateOrderStatus("completed")}
@@ -1019,6 +1200,40 @@ export default function MainScreen() {
               </>
             )}
           </View>
+
+          {/* Floating Wait Button */}
+          {activeOrder.status === "in_progress" && (
+            <TouchableOpacity
+              style={{
+                position: "absolute",
+                right: 20,
+                bottom: 120, // above the order actions panel
+                width: 60,
+                height: 60,
+                borderRadius: 30,
+                backgroundColor: activeOrder.isWaiting ? "#FFD000" : "#202020",
+                borderWidth: 2,
+                borderColor: activeOrder.isWaiting ? "#FFD000" : "#3a3a3a",
+                alignItems: "center",
+                justifyContent: "center",
+                elevation: 10,
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.5,
+                shadowRadius: 5,
+                zIndex: 9999,
+              }}
+              onPress={() => toggleTripWaiting(activeOrder.isWaiting ? "stop" : "start")}
+              disabled={loading}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={activeOrder.isWaiting ? "play" : "pause"}
+                size={28}
+                color={activeOrder.isWaiting ? "#0a0a0a" : "#FFD000"}
+              />
+            </TouchableOpacity>
+          )}
         </View>
       );
     }
