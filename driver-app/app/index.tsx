@@ -93,13 +93,23 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
       if (state.activeOrder?.status === "in_progress" && state.lastLocation && !state.activeOrder.isFixedPrice) {
         const d = haversine(state.lastLocation.lat, state.lastLocation.lng, lat, lng);
 
-        if (d > 0.015) {
+        if (d > 0.005) {
           const newDist = state.tripDistance + d;
-          // Используем сохранённую базовую ставку — она уже включает ожидание у клиента
-          const baseFare = state.tripBaseFare || (state.activeOrder?.class?.name === "Комфорт" ? 390 : BASE_FARE);
           const options: any[] = Array.isArray(state.activeOrder?.options) ? state.activeOrder.options : [];
           const extrasTotal = options.reduce((sum, opt) => sum + (Number(opt.price) || 0), 0);
-          const newPrice = roundTo5(baseFare + extrasTotal + newDist * Number(state.activeOrder.pricePerKm));
+
+          let newPrice: number;
+          if (state.isOutOfCity && state.outOfCityStartTime !== null) {
+            // За городом: продолжаем от цены на момент выезда + расстояние по загородному тарифу + 25₸/мин
+            const distSinceZone = newDist - state.tripDistanceAtZoneChange;
+            const outRate = state.outOfCityRatePerKm || Number(state.activeOrder.pricePerKm);
+            const outTimeFee = Math.floor((Date.now() - state.outOfCityStartTime) / 60000) * 25;
+            newPrice = roundTo5(state.tripPriceAtZoneChange + extrasTotal + distSinceZone * outRate + outTimeFee);
+          } else {
+            // Внутри города: стандартный расчёт
+            const baseFare = state.tripBaseFare || (state.activeOrder?.class?.name === "Комфорт" ? 390 : BASE_FARE);
+            newPrice = roundTo5(baseFare + extrasTotal + newDist * Number(state.activeOrder.pricePerKm));
+          }
           useDriverStore.getState().setTripMeter(newDist, newPrice);
         }
       }
@@ -286,9 +296,9 @@ export default function MainScreen() {
     }
 
     await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-      accuracy: Location.Accuracy.High,
-      distanceInterval: 15,
-      timeInterval: 5000,
+      accuracy: Location.Accuracy.BestForNavigation,
+      distanceInterval: 5,   // 5m вместо 15m — точнее на поворотах и в пробках
+      timeInterval: 3000,    // max 1 обновление в 3 сек чтобы не спамить
       foregroundService: {
         notificationTitle: "Таксометр работает",
         notificationBody: "Дистанция заказа рассчитывается. Не закрывайте приложение.",
@@ -419,6 +429,27 @@ export default function MainScreen() {
           options: data.options,
         });
       }
+    });
+
+    sock.on("zone_change", (data: { isOutOfCity: boolean; outOfCityRatePerKm: number; message: string }) => {
+      const s = useDriverStore.getState();
+      // Only react during active trip
+      if (s.activeOrder?.status !== "in_progress") return;
+
+      s.setZoneChange({
+        isOutOfCity: data.isOutOfCity,
+        outOfCityRatePerKm: data.outOfCityRatePerKm,
+        currentPrice: s.tripPrice,
+        currentDistance: s.tripDistance,
+      });
+
+      Vibration.vibrate([0, 200, 100, 200]);
+      Alert.alert(
+        data.isOutOfCity ? "Выезд за город" : "Возврат в город",
+        data.message,
+        [{ text: "OK" }],
+        { cancelable: true }
+      );
     });
 
     sock.on("driver_ratings_updated", () => {

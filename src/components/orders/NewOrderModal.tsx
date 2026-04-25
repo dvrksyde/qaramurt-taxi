@@ -655,7 +655,7 @@ export function NewOrderModal({ onClose }: Props) {
                   {(watch("estimatedPrice") as number | null) || 0} <span style={{ fontSize: 14 }}>₸</span>
                 </div>
                 {watch("distanceKm") && (
-                  <div style={{ fontSize: 12, marginTop: 4, color: "#444" }}>
+                  <div style={{ fontSize: 12, marginTop: 4, color: "var(--color-text-2)" }}>
                     Дистанция: <strong>{watch("distanceKm") as number} км</strong>
                   </div>
                 )}

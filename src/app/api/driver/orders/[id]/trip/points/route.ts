@@ -4,6 +4,29 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyDriverToken } from "@/lib/driverAuth";
 import { isDeliveryOrder } from "@/lib/orderPricing";
+import { redis } from "@/lib/redis";
+
+const CITY_ZONE_CACHE_KEY = "city_boundary_wkt";
+const CITY_ZONE_CACHE_TTL = 300; // 5 min
+
+async function getCityBoundaryWkt(): Promise<string | null> {
+  try {
+    const cached = await redis.get(CITY_ZONE_CACHE_KEY);
+    if (cached) return cached;
+  } catch { /* Redis might be unavailable */ }
+
+  const rows = await prisma.$queryRaw<Array<{ polygon: string }>>`
+    SELECT polygon FROM geozones
+    WHERE type = 'city_boundary' AND "isActive" = true
+    LIMIT 1
+  `;
+  const wkt = rows[0]?.polygon ?? null;
+
+  if (wkt) {
+    try { await redis.set(CITY_ZONE_CACHE_KEY, wkt, { EX: CITY_ZONE_CACHE_TTL }); } catch { }
+  }
+  return wkt;
+}
 
 type TripPointPayload = {
   sequenceNumber: number;
@@ -80,15 +103,39 @@ export async function POST(
     );
   }
 
-  const session = await prisma.orderTripSession.findFirst({
-    where: {
-      orderId,
-      driverId: auth.driverId,
-      status: "active",
-      ...(sessionId ? { id: sessionId } : {}),
-    },
-    orderBy: { startedAt: "desc" },
-  });
+  // Raw query to access new fields (lastIsOutOfCity, outOfCityKmRate) before Prisma regen
+  type RawSession = {
+    id: number;
+    order_id: number;
+    driver_id: number | null;
+    points_received: number;
+    last_sequence_number: number | null;
+    last_is_out_of_city: boolean;
+    out_of_city_km_rate: string;
+  };
+
+  const whereClause = sessionId
+    ? `AND ots.id = ${sessionId}`
+    : "";
+
+  const sessions = await prisma.$queryRawUnsafe<RawSession[]>(`
+    SELECT ots.id,
+           ots."orderId"           AS order_id,
+           ots."driverId"          AS driver_id,
+           ots."pointsReceived"    AS points_received,
+           ots."lastSequenceNumber" AS last_sequence_number,
+           ots."lastIsOutOfCity"   AS last_is_out_of_city,
+           ots."outOfCityKmRate"   AS out_of_city_km_rate
+    FROM order_trip_sessions ots
+    WHERE ots."orderId" = $1
+      AND ots."driverId" = $2
+      AND ots.status = 'active'
+      ${whereClause}
+    ORDER BY ots."startedAt" DESC
+    LIMIT 1
+  `, orderId, auth.driverId);
+
+  const session = sessions[0] ?? null;
 
   if (!session) {
     return NextResponse.json(
@@ -111,29 +158,77 @@ export async function POST(
     skipDuplicates: true,
   });
 
-  const latestSequenceNumber = points[points.length - 1]?.sequenceNumber ?? session.lastSequenceNumber ?? null;
-  const latestCapturedAt = new Date(points[points.length - 1]?.capturedAt ?? Date.now());
+  const lastPoint = points[points.length - 1];
+  const latestSeq = lastPoint?.sequenceNumber ?? session.last_sequence_number ?? null;
+  const latestCapturedAt = new Date(lastPoint?.capturedAt ?? Date.now());
+  const prevSeq = session.last_sequence_number ?? 0;
+  const newSeq = latestSeq === null ? prevSeq : Math.max(prevSeq, latestSeq);
 
-  const updatedSession = await prisma.orderTripSession.update({
-    where: { id: session.id },
-    data: {
-      pointsReceived: { increment: createResult.count },
-      lastSequenceNumber:
-        latestSequenceNumber === null
-          ? session.lastSequenceNumber
-          : Math.max(session.lastSequenceNumber ?? latestSequenceNumber, latestSequenceNumber),
-      lastPointAt: latestCapturedAt,
-    },
-  });
+  // ── Zone detection (city boundary check) ──────────────────────────────────
+  let newIsOutOfCity = session.last_is_out_of_city;
+  try {
+    const cityWkt = await getCityBoundaryWkt();
+    if (cityWkt && createResult.count > 0) {
+      const seqNums = points.map((p) => p.sequenceNumber);
+
+      // Batch-update isOutOfCity for newly inserted points using PostGIS
+      await prisma.$executeRaw`
+        UPDATE order_trip_points otp
+        SET "isOutOfCity" = NOT ST_Contains(
+          ST_GeomFromText(${cityWkt}, 4326),
+          ST_SetSRID(ST_MakePoint(CAST(otp.lng AS float8), CAST(otp.lat AS float8)), 4326)
+        )
+        WHERE otp."tripSessionId" = ${session.id}
+          AND otp."sequenceNumber" = ANY(${seqNums}::integer[])
+      `;
+
+      // Get last point's zone via raw SQL (Prisma type doesn't have isOutOfCity yet)
+      const lastPts = await prisma.$queryRaw<Array<{ is_out_of_city: boolean }>>`
+        SELECT "isOutOfCity" AS is_out_of_city
+        FROM order_trip_points
+        WHERE "tripSessionId" = ${session.id}
+        ORDER BY "sequenceNumber" DESC
+        LIMIT 1
+      `;
+      newIsOutOfCity = lastPts[0]?.is_out_of_city ?? session.last_is_out_of_city;
+    }
+  } catch (zoneErr) {
+    console.error("[trip/points] Zone check error:", zoneErr);
+  }
+
+  // Update session — use raw SQL for new fields
+  await prisma.$executeRaw`
+    UPDATE order_trip_sessions
+    SET "pointsReceived"     = "pointsReceived" + ${createResult.count},
+        "lastSequenceNumber" = ${newSeq},
+        "lastPointAt"        = ${latestCapturedAt},
+        "lastIsOutOfCity"    = ${newIsOutOfCity}
+    WHERE id = ${session.id}
+  `;
+
+  // Emit zone_change if driver crossed the city boundary
+  if (newIsOutOfCity !== session.last_is_out_of_city) {
+    const io = (global as Record<string, unknown>).socketIO as any;
+    if (io) {
+      const outOfCityRate = Number(session.out_of_city_km_rate ?? 0);
+      io.to(`driver:${auth.driverId}`).emit("zone_change", {
+        isOutOfCity: newIsOutOfCity,
+        outOfCityRatePerKm: outOfCityRate,
+        message: newIsOutOfCity
+          ? `Выехали за город — ${outOfCityRate} ₸/км + 25 ₸/мин`
+          : "Вернулись в город — городской тариф",
+      });
+    }
+  }
 
   return NextResponse.json({
     data: {
-      sessionId: updatedSession.id,
+      sessionId: session.id,
       inserted: createResult.count,
       received: points.length,
-      pointsReceived: updatedSession.pointsReceived,
-      lastSequenceNumber: updatedSession.lastSequenceNumber,
-      lastPointAt: updatedSession.lastPointAt,
+      pointsReceived: session.points_received + createResult.count,
+      lastSequenceNumber: newSeq,
+      lastPointAt: latestCapturedAt,
     },
   });
 }

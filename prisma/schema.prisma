@@ -160,13 +160,14 @@ model Tariff {
   serviceId       Int
   classId         Int
   name            String   @db.VarChar(100)
-  basePrice       Decimal  @db.Decimal(10, 2)
-  pricePerKm      Decimal  @default(0) @db.Decimal(10, 4)
-  pricePerMin     Decimal  @default(0) @db.Decimal(10, 4)
-  minPrice        Decimal  @default(0) @db.Decimal(10, 2)
-  freeWaitMinutes Int      @default(5)
-  extraWaitPrice  Decimal  @default(0) @db.Decimal(10, 4)
-  isActive        Boolean  @default(true)
+  basePrice          Decimal  @db.Decimal(10, 2)
+  pricePerKm         Decimal  @default(0) @db.Decimal(10, 4)
+  outOfCityKmRate    Decimal  @default(0) @db.Decimal(10, 4)
+  pricePerMin        Decimal  @default(0) @db.Decimal(10, 4)
+  minPrice           Decimal  @default(0) @db.Decimal(10, 2)
+  freeWaitMinutes    Int      @default(5)
+  extraWaitPrice     Decimal  @default(0) @db.Decimal(10, 4)
+  isActive           Boolean  @default(true)
   createdAt       DateTime @default(now())
 
   service       TaxiService    @relation(fields: [serviceId], references: [id])
@@ -400,18 +401,22 @@ model OrderTripSession {
   orderId              Int
   driverId             Int?
   status               TripSessionStatus @default(active)
-  tariffPerKm          Decimal           @db.Decimal(10, 2)
-  baseFare             Decimal           @default(290) @db.Decimal(10, 2)
-  preliminaryDistanceKm Decimal          @default(0) @db.Decimal(10, 3)
-  finalDistanceKm      Decimal?          @db.Decimal(10, 3)
-  finalPrice           Decimal?          @db.Decimal(10, 2)
-  pointsReceived       Int               @default(0)
-  lastSequenceNumber   Int?
-  startedAt            DateTime          @default(now())
-  completedAt          DateTime?
-  lastPointAt          DateTime?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
+  tariffPerKm           Decimal           @db.Decimal(10, 2)
+  outOfCityKmRate       Decimal           @default(0) @db.Decimal(10, 4)
+  baseFare              Decimal           @default(290) @db.Decimal(10, 2)
+  preliminaryDistanceKm Decimal           @default(0) @db.Decimal(10, 3)
+  finalDistanceKm       Decimal?          @db.Decimal(10, 3)
+  finalPrice            Decimal?          @db.Decimal(10, 2)
+  outOfCityKm           Decimal           @default(0) @db.Decimal(10, 3)
+  outOfCitySeconds      Int               @default(0)
+  lastIsOutOfCity       Boolean           @default(false)
+  pointsReceived        Int               @default(0)
+  lastSequenceNumber    Int?
+  startedAt             DateTime          @default(now())
+  completedAt           DateTime?
+  lastPointAt           DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 
   order  Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   driver Driver? @relation(fields: [driverId], references: [id])
@@ -432,6 +437,7 @@ model OrderTripPoint {
   accuracyM      Decimal? @db.Decimal(8, 2)
   speedKmh       Decimal? @db.Decimal(8, 2)
   headingDeg     Decimal? @db.Decimal(8, 2)
+  isOutOfCity    Boolean  @default(false)
   capturedAt     DateTime
   receivedAt     DateTime @default(now())
   createdAt      DateTime @default(now())

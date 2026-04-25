@@ -21,6 +21,7 @@ export async function PATCH(
       data: {
         basePrice: body.basePrice,
         pricePerKm: body.pricePerKm,
+        outOfCityKmRate: body.outOfCityKmRate ?? 0,
         pricePerMin: body.pricePerMin,
         minPrice: body.minPrice,
         freeWaitMinutes: body.freeWaitMinutes,

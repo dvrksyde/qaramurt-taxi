@@ -22,7 +22,7 @@ export async function POST(
 
   const order = await prisma.order.findFirst({
     where: { id: orderId, driverId: auth.driverId },
-    include: { service: true, class: true },
+    include: { service: true, class: true, tariff: true },
   });
 
   if (!order) {
@@ -74,11 +74,23 @@ export async function POST(
     }
   }
 
+  // Out-of-city rate: from the order's tariff, or fallback to class tariff
+  let outOfCityKmRate = Number((order as any).tariff?.outOfCityKmRate ?? 0);
+  if (!outOfCityKmRate && order.classId) {
+    const classTariff = await prisma.tariff.findFirst({
+      where: { classId: order.classId, isActive: true },
+      select: { outOfCityKmRate: true },
+      orderBy: { id: "asc" },
+    });
+    outOfCityKmRate = Number(classTariff?.outOfCityKmRate ?? 0);
+  }
+
   const session = await prisma.orderTripSession.create({
     data: {
       orderId,
       driverId: auth.driverId,
       tariffPerKm: order.pricePerKm,
+      outOfCityKmRate,
       baseFare: currentBaseFare,
       startedAt: order.startedAt ?? new Date(),
       status: "active",
@@ -92,6 +104,7 @@ export async function POST(
       pointsReceived: session.pointsReceived,
       lastSequenceNumber: session.lastSequenceNumber,
       startedAt: session.startedAt,
+      outOfCityKmRate,
     },
   });
 }

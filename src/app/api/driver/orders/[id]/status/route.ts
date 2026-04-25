@@ -141,13 +141,11 @@ export async function PATCH(
           const calc = await calculateSessionDistance(activeSession.id);
 
           if (calc.distanceKm > 0) {
-            // GPS session has enough points — use server calculation
             const serverPrice = Math.max(calc.finalPrice, sessionBaseFare);
-            await completeSession(activeSession.id, calc.distanceKm, serverPrice);
+            await completeSession(activeSession.id, calc.distanceKm, serverPrice, calc.outOfCityKm, calc.outOfCitySeconds);
             updateData.distanceKm = calc.distanceKm;
             updateData.finalPrice = serverPrice;
           } else {
-            // < 2 GPS points (bad GPS / very short trip) — use client backup
             console.warn(`[trip/complete] Session ${activeSession.id} has < 2 points; using client fallback`);
             const fallbackPrice = Math.max(
               clientFinalPrice ?? roundTo5(sessionBaseFare),

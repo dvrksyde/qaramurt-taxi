@@ -1,20 +1,13 @@
 import { prisma } from "./prisma";
 
 const BASE_FARE = 290;
+const OUT_OF_CITY_MIN_RATE = 25; // ₸/мин вне города
 
 function roundTo5(n: number): number {
   return Math.round(n / 5) * 5;
 }
 
-/**
- * Haversine distance between two WGS-84 coordinates (in km).
- */
-function haversineKm(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number {
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
@@ -32,118 +25,149 @@ export type TripCalcResult = {
   distanceKm: number;
   finalPrice: number;
   pointsUsed: number;
+  cityKm: number;
+  outOfCityKm: number;
+  outOfCitySeconds: number;
+};
+
+type RawPoint = {
+  lat: string;
+  lng: string;
+  sequence_number: number;
+  captured_at: Date | null;
+  speed_kmh: string | null;
+  accuracy_m: string | null;
+  is_out_of_city: boolean;
+};
+
+type RawSession = {
+  id: number;
+  tariff_per_km: string;
+  out_of_city_km_rate: string;
+  base_fare: string;
 };
 
 /**
- * Fetch all GPS points for a trip session, compute cumulative Haversine
- * distance (≥ 5 m threshold per segment to filter GPS jitter), then
- * calculate the final price using the session's tariff.
+ * Calculate trip distance and price with city/out-of-city zone awareness.
  *
- * Gap interpolation: if two consecutive points are more than 20 seconds apart
- * AND speed data is available, we interpolate the missing distance using
- * speed × time. This compensates for phones that drop GPS in background.
+ * Pricing formula:
+ *   finalPrice = baseFare
+ *              + cityKm       × tariffPerKm
+ *              + outOfCityKm  × outOfCityKmRate
+ *              + (outOfCitySeconds ÷ 60) × 25₸
  *
- * If the session has fewer than 2 points the function returns distanceKm = 0
- * and the caller (status route) falls back to the client-reported values.
+ * Segment zone = zone of its PREVIOUS point (isOutOfCity flag).
  */
-export async function calculateSessionDistance(
-  sessionId: number
-): Promise<TripCalcResult> {
-  const session = await prisma.orderTripSession.findUnique({
-    where: { id: sessionId },
-    include: {
-      points: {
-        orderBy: { sequenceNumber: "asc" },
-        select: { lat: true, lng: true, sequenceNumber: true, capturedAt: true, speedKmh: true, accuracyM: true },
-      },
-    },
-  });
+export async function calculateSessionDistance(sessionId: number): Promise<TripCalcResult> {
+  // Fetch session via raw SQL to access new fields before Prisma regen
+  const sessions = await prisma.$queryRaw<RawSession[]>`
+    SELECT id,
+           "tariffPerKm"       AS tariff_per_km,
+           "outOfCityKmRate"   AS out_of_city_km_rate,
+           "baseFare"          AS base_fare
+    FROM order_trip_sessions
+    WHERE id = ${sessionId}
+    LIMIT 1
+  `;
 
-  if (!session) {
-    throw new Error(`Trip session ${sessionId} not found`);
-  }
+  if (!sessions.length) throw new Error(`Trip session ${sessionId} not found`);
+  const session = sessions[0];
 
-  const pts = session.points;
-  let totalKm = 0;
+  // Fetch points via raw SQL to access isOutOfCity
+  const pts = await prisma.$queryRaw<RawPoint[]>`
+    SELECT lat,
+           lng,
+           "sequenceNumber"  AS sequence_number,
+           "capturedAt"      AS captured_at,
+           "speedKmh"        AS speed_kmh,
+           "accuracyM"       AS accuracy_m,
+           "isOutOfCity"     AS is_out_of_city
+    FROM order_trip_points
+    WHERE "tripSessionId" = ${sessionId}
+    ORDER BY "sequenceNumber" ASC
+  `;
+
+  let cityKm = 0;
+  let outOfCityKm = 0;
+  let outOfCitySeconds = 0;
 
   if (pts.length >= 2) {
     for (let i = 1; i < pts.length; i++) {
       const prev = pts[i - 1];
       const curr = pts[i];
 
-      // Skip points with very poor accuracy (> 50m) — they add noise
-      const accuracy = Number(curr.accuracyM ?? 0);
-      if (accuracy > 50 && accuracy > 0) continue;
+      const accuracy = Number(curr.accuracy_m ?? 0);
+      if (accuracy > 100 && accuracy > 0) continue;
 
       const segKm = haversineKm(
-        Number(prev.lat),
-        Number(prev.lng),
-        Number(curr.lat),
-        Number(curr.lng)
+        Number(prev.lat), Number(prev.lng),
+        Number(curr.lat), Number(curr.lng)
       );
-
-      // Ignore micro-jitter < 5 m (GPS noise at standstill)
       if (segKm < 0.005) continue;
 
-      // Sanity cap: single segment > 2 km in < 20 sec = GPS jump, skip it
-      const prevTime = prev.capturedAt ? new Date(prev.capturedAt).getTime() : 0;
-      const currTime = curr.capturedAt ? new Date(curr.capturedAt).getTime() : 0;
+      const prevTime = prev.captured_at ? new Date(prev.captured_at).getTime() : 0;
+      const currTime = curr.captured_at ? new Date(curr.captured_at).getTime() : 0;
       const gapSec = currTime && prevTime ? (currTime - prevTime) / 1000 : 0;
 
-      if (gapSec > 0 && segKm > 2 && gapSec < 20) {
-        // Likely a GPS jump — skip
-        continue;
-      }
+      if (gapSec > 0 && segKm > 2 && gapSec < 20) continue; // GPS jump
 
-      // Gap interpolation: GPS dropped for > 20 sec while driving
-      // Use speed from the PREVIOUS point to estimate missed distance
-      if (gapSec > 20 && prev.speedKmh !== null && Number(prev.speedKmh) > 5) {
-        const speedKmh = Number(prev.speedKmh);
-        const gapHours = gapSec / 3600;
-        const interpolatedKm = speedKmh * gapHours;
-        // Use interpolated only if it's more than what haversine shows (GPS jumped)
-        if (interpolatedKm > segKm) {
-          totalKm += interpolatedKm;
-          continue;
+      const segIsOutOfCity = prev.is_out_of_city ?? false;
+      let effectiveKm = segKm;
+
+      if (gapSec > 20) {
+        const speedKmh = prev.speed_kmh !== null ? Number(prev.speed_kmh) : null;
+        if (speedKmh !== null && speedKmh > 5) {
+          const interpolated = speedKmh * (gapSec / 3600);
+          if (interpolated > segKm) effectiveKm = interpolated;
+        } else if (speedKmh === null && segKm > 0.1) {
+          effectiveKm = segKm;
         }
       }
 
-      totalKm += segKm;
+      if (segIsOutOfCity) {
+        outOfCityKm += effectiveKm;
+        if (gapSec > 0) outOfCitySeconds += gapSec;
+      } else {
+        cityKm += effectiveKm;
+      }
     }
   }
-  // If pts.length < 2, totalKm stays 0 — the status route will
-  // fall back to the client-reported distanceKm (sent as backup).
 
-  // Round UP to nearest 0.1 km — never shortchange the driver
-  const distanceKm = Math.ceil(totalKm * 10) / 10;
+  cityKm      = Math.ceil(cityKm      * 10) / 10;
+  outOfCityKm = Math.ceil(outOfCityKm * 10) / 10;
+  const distanceKm = cityKm + outOfCityKm;
 
-  const tariffPerKm = Number(session.tariffPerKm ?? 80);
-  const baseFare = Number(session.baseFare ?? BASE_FARE);
-  const finalPrice = roundTo5(baseFare + distanceKm * tariffPerKm);
+  const tariffPerKm   = Number(session.tariff_per_km     ?? 80);
+  const outOfCityRate = Number(session.out_of_city_km_rate ?? 0);
+  const baseFare      = Number(session.base_fare          ?? BASE_FARE);
+  const outOfCityTimeFee = Math.floor(outOfCitySeconds / 60) * OUT_OF_CITY_MIN_RATE;
 
-  return {
-    sessionId,
-    distanceKm,
-    finalPrice,
-    pointsUsed: pts.length,
-  };
+  const finalPrice = roundTo5(
+    baseFare
+    + cityKm      * tariffPerKm
+    + outOfCityKm * (outOfCityRate || tariffPerKm)
+    + outOfCityTimeFee
+  );
+
+  return { sessionId, distanceKm, finalPrice, pointsUsed: pts.length, cityKm, outOfCityKm, outOfCitySeconds };
 }
 
-/**
- * Close the trip session and persist finalDistanceKm / finalPrice.
- */
 export async function completeSession(
   sessionId: number,
   distanceKm: number,
-  finalPrice: number
+  finalPrice: number,
+  outOfCityKm = 0,
+  outOfCitySeconds = 0,
 ): Promise<void> {
-  await prisma.orderTripSession.update({
-    where: { id: sessionId },
-    data: {
-      status: "completed",
-      finalDistanceKm: distanceKm,
-      finalPrice: finalPrice,
-      completedAt: new Date(),
-    },
-  });
+  // Use raw SQL until Prisma client is regenerated with new fields
+  await prisma.$executeRaw`
+    UPDATE order_trip_sessions
+    SET status            = 'completed',
+        "finalDistanceKm" = ${distanceKm},
+        "finalPrice"      = ${finalPrice},
+        "outOfCityKm"     = ${outOfCityKm},
+        "outOfCitySeconds" = ${outOfCitySeconds},
+        "completedAt"     = NOW()
+    WHERE id = ${sessionId}
+  `;
 }

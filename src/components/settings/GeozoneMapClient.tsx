@@ -76,17 +76,22 @@ export default function GeozoneMapClient({ savedZones, onSaveSuccess }: Props) {
 
         const wkt = polygonToWKT(coords);
         const name = prompt("Введите название геозоны:");
-        
         if (!name) {
           mapInstance.current?.removeLayer(layer);
           return;
         }
 
+        const typeChoice = prompt(
+          "Тип геозоны:\n1 — Обычная зона (ценовая надбавка)\n2 — Граница города (смена тарифа)\n\nВведите 1 или 2:",
+          "1"
+        );
+        const type = typeChoice === "2" ? "city_boundary" : "zone";
+
         try {
           const res = await fetch("/api/geozones", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, type: "zone", polygon: wkt })
+            body: JSON.stringify({ name, type, polygon: wkt })
           });
           if (res.ok) {
             alert("Геозона сохранена!");
@@ -120,14 +125,19 @@ export default function GeozoneMapClient({ savedZones, onSaveSuccess }: Props) {
     
     savedZones.forEach(zone => {
       if (zone.geojson) {
+        const isCityBoundary = zone.type === "city_boundary";
         const layer = L.geoJSON(zone.geojson, {
           style: {
-            color: "var(--color-primary)",
-            weight: 2,
-            opacity: 0.8,
-            fillOpacity: 0.2
+            color: isCityBoundary ? "#e67e22" : "var(--color-primary)",
+            weight: isCityBoundary ? 3 : 2,
+            opacity: 0.9,
+            fillOpacity: isCityBoundary ? 0.05 : 0.2,
+            dashArray: isCityBoundary ? "8 4" : undefined,
           }
-        }).bindTooltip(zone.name, { permanent: true, direction: "center", className: "geozone-tooltip" });
+        }).bindTooltip(
+          isCityBoundary ? `🏙 ${zone.name} (Граница города)` : zone.name,
+          { permanent: true, direction: "center", className: "geozone-tooltip" }
+        );
         
         layersRef.current.addLayer(layer);
       }
