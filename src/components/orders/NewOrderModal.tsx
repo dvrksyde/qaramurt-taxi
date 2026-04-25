@@ -1,8 +1,7 @@
 "use client";
 import { useEffect, useCallback, useRef, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
-import type { NewOrderFormData, TaxiService, VehicleClass, VehicleClassGroup, Tariff } from "@/types";
-import { haversineKm, estimateMinutes } from "@/lib/pricing";
+import type { NewOrderFormData, TaxiService, VehicleClassGroup, Tariff } from "@/types";
 import { useSocket } from "@/stores/socketStore";
 import { useMonitorStore } from "@/stores/monitorStore";
 import dynamic from "next/dynamic";
@@ -23,7 +22,6 @@ export function NewOrderModal({ onClose }: Props) {
   const [classGroups, setClassGroups] = useState<VehicleClassGroup[]>([]);
   const [tariffs, setTariffs] = useState<Tariff[]>([]);
   const [availability, setAvailability] = useState({ total: 1, online: 0, free: 0 });
-  const [estimating, setEstimating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [activeField, setActiveField] = useState<'pickup' | 'dropoff'>('pickup');
 
@@ -49,7 +47,7 @@ export function NewOrderModal({ onClose }: Props) {
   // Route state
   const [route, setRoute] = useState<[number, number][] | null>(null);
 
-  const { register, handleSubmit, watch, setValue, control, setFocus, formState: { errors } } = useForm<NewOrderFormData>({
+  const { register, handleSubmit, watch, setValue, control, setFocus } = useForm<NewOrderFormData>({
     defaultValues: {
       phone: "+7",
       timing: "now",
@@ -68,10 +66,7 @@ export function NewOrderModal({ onClose }: Props) {
     },
   });
 
-  const { fields: stopFields, append: addStop, remove: removeStop } = useFieldArray({
-    control,
-    name: "stops",
-  });
+  useFieldArray({ control, name: "stops" });
 
   const watchedPhone = watch("phone");
   const watchedClass = watch("classId");
@@ -124,14 +119,28 @@ export function NewOrderModal({ onClose }: Props) {
     }).catch(console.error);
   }, []);
 
-  // Load tariffs when class changes
+  // Load tariffs when class changes and auto-link tariffId + pricePerKm
   useEffect(() => {
-    if (!watchedClass) { setTariffs([]); return; }
+    if (!watchedClass) {
+      setTariffs([]);
+      setValue("tariffId", null);
+      return;
+    }
+    const svcId = watch("serviceId");
     fetch(`/api/tariffs?classId=${watchedClass}`)
       .then((r) => r.json())
-      .then((d) => d.data && setTariffs(d.data))
+      .then((d) => {
+        const list = d.data ?? [];
+        setTariffs(list);
+        // Auto-select first matching tariff for this class+service
+        const match = list.find((t: Tariff) => t.serviceId === Number(svcId)) ?? list[0];
+        if (match) {
+          setValue("tariffId", match.id);
+          setValue("pricePerKm", String(match.pricePerKm));
+        }
+      })
       .catch(console.error);
-  }, [watchedClass]);
+  }, [watchedClass]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle outside click for landmarks dropdown
   useEffect(() => {
@@ -219,17 +228,7 @@ export function NewOrderModal({ onClose }: Props) {
     setValue("estimatedPrice", estimated);
   }, [distanceKm, watchedPricePerKm, watchedClass, classGroups, watchedHasLuggage, watchedHasRoofLuggage, watchedHasConditioner, setValue]);
 
-  // Sync pricePerKm when class changes
-  useEffect(() => {
-    const isComfort = classGroups.flatMap(g => g.classes ?? []).find(c => c.id === Number(watchedClass))?.name === "Комфорт";
-    if (isComfort) {
-      if (watchedPricePerKm === "80") setValue("pricePerKm", "100");
-      if (watchedPricePerKm === "120") setValue("pricePerKm", "140");
-    } else {
-      if (watchedPricePerKm === "100") setValue("pricePerKm", "80");
-      if (watchedPricePerKm === "140") setValue("pricePerKm", "120");
-    }
-  }, [watchedClass, watchedPricePerKm, classGroups, setValue]);
+  // pricePerKm is now auto-set from tariff when class changes — no manual sync needed
 
   // Keyboard shortcut: Esc to close
   useEffect(() => {
@@ -539,23 +538,54 @@ export function NewOrderModal({ onClose }: Props) {
                 </select>
               </div>
 
-              <div className="form-row">
-                <span className="form-label">Тариф:</span>
-                {(() => {
-                  const isComfort = classGroups.flatMap(g => g.classes ?? []).find(c => c.id === Number(watchedClass))?.name === "Комфорт";
-                  const cityPrice = isComfort ? "100" : "80";
-                  const subPrice = isComfort ? "140" : "120";
-                  return (
-                    <>
-                      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer" }}>
-                        <input type="radio" value={cityPrice} {...register("pricePerKm")} /> {cityPrice} ₸/км (гор.)
+              <div className="form-row" style={{ alignItems: "flex-start", flexWrap: "wrap", gap: 6 }}>
+                <span className="form-label" style={{ paddingTop: 4 }}>Тариф:</span>
+                {tariffs.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1 }}>
+                    {tariffs.map((t) => {
+                      const outRate = Number((t as any).outOfCityKmRate ?? 0);
+                      const isSelected = Number(watchedTariff) === t.id;
+                      return (
+                        <label
+                          key={t.id}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 6, fontSize: 12,
+                            cursor: "pointer", padding: "4px 8px", borderRadius: 6,
+                            border: isSelected ? "1px solid var(--color-primary)" : "1px solid var(--color-border)",
+                            background: isSelected ? "rgba(var(--color-primary-rgb, 9,132,227),0.08)" : "transparent",
+                          }}
+                        >
+                          <input
+                            type="radio"
+                            value={t.id}
+                            checked={isSelected}
+                            onChange={() => {
+                              setValue("tariffId", t.id);
+                              setValue("pricePerKm", String(t.pricePerKm));
+                            }}
+                          />
+                          <span style={{ fontWeight: 600 }}>{t.name}</span>
+                          <span style={{ color: "var(--color-text-3)" }}>—</span>
+                          <span>🏙 {Number(t.pricePerKm)} ₸/км</span>
+                          {outRate > 0 && (
+                            <span style={{ color: "#e67e22", fontSize: 11 }}>
+                              · 🚗 {outRate} ₸/км за городом
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  // No class selected — show simple radio for pricePerKm
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                    {["80", "100", "120", "140"].map((v) => (
+                      <label key={v} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer" }}>
+                        <input type="radio" value={v} {...register("pricePerKm")} /> {v} ₸/км
                       </label>
-                      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer", marginLeft: 12 }}>
-                        <input type="radio" value={subPrice} {...register("pricePerKm")} /> {subPrice} ₸/км (за.)
-                      </label>
-                    </>
-                  );
-                })()}
+                    ))}
+                  </div>
+                )}
               </div>
 
 
@@ -649,17 +679,47 @@ export function NewOrderModal({ onClose }: Props) {
 
             {/* ── RIGHT: Price & Stats ── */}
             <div>
-              <div style={{ background: "var(--color-surface-2)", padding: 12, borderRadius: 8, marginBottom: 16 }}>
-                <div style={{ fontSize: 11, color: "var(--color-text-2)", marginBottom: 4 }}>Расчет стоимости:</div>
-                <div style={{ fontSize: 24, fontWeight: 700, color: "var(--color-primary)" }}>
-                  {(watch("estimatedPrice") as number | null) || 0} <span style={{ fontSize: 14 }}>₸</span>
-                </div>
-                {watch("distanceKm") && (
-                  <div style={{ fontSize: 12, marginTop: 4, color: "var(--color-text-2)" }}>
-                    Дистанция: <strong>{watch("distanceKm") as number} км</strong>
+              {(() => {
+                const selectedTariff = tariffs.find((t) => t.id === Number(watchedTariff));
+                const outRate = Number((selectedTariff as any)?.outOfCityKmRate ?? 0);
+                const cityRate = Number(watchedPricePerKm || 80);
+                return (
+                  <div style={{ background: "var(--color-surface-2)", padding: 12, borderRadius: 8, marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, color: "var(--color-text-2)", marginBottom: 4 }}>Расчёт стоимости:</div>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: "var(--color-primary)" }}>
+                      ~{(watch("estimatedPrice") as number | null) || 0} <span style={{ fontSize: 14 }}>₸</span>
+                    </div>
+                    {watch("distanceKm") && (
+                      <div style={{ fontSize: 12, marginTop: 4, color: "var(--color-text-2)" }}>
+                        Дистанция: <strong>{watch("distanceKm") as number} км</strong>
+                      </div>
+                    )}
+
+                    {/* Zone pricing info */}
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--color-border)", display: "flex", flexDirection: "column", gap: 3 }}>
+                      <div style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
+                        <span>🏙</span>
+                        <span style={{ color: "var(--color-text-2)" }}>В городе:</span>
+                        <strong style={{ color: "var(--color-text)" }}>{cityRate} ₸/км</strong>
+                      </div>
+                      {outRate > 0 ? (
+                        <div style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
+                          <span>🚗</span>
+                          <span style={{ color: "#e67e22" }}>За городом:</span>
+                          <strong style={{ color: "#e67e22" }}>{outRate} ₸/км + 25 ₸/мин</strong>
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 10, color: "var(--color-text-3)", fontStyle: "italic" }}>
+                          ⚠️ Загородная ставка не настроена
+                        </div>
+                      )}
+                      <div style={{ fontSize: 10, color: "var(--color-text-3)", marginTop: 2 }}>
+                        Смена тарифа при пересечении границы города — автоматически
+                      </div>
+                    </div>
                   </div>
-                )}
-              </div>
+                );
+              })()}
 
               <div style={{ background: "var(--color-surface-2)", padding: 12, borderRadius: 8, marginBottom: 16 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-2)", marginBottom: 8 }}>Опции заказа:</div>

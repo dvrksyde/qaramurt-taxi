@@ -74,28 +74,36 @@ export async function POST(
     }
   }
 
-  // Out-of-city rate: from the order's tariff, or fallback to class tariff
-  let outOfCityKmRate = Number((order as any).tariff?.outOfCityKmRate ?? 0);
+  // Out-of-city rate via raw SQL (Prisma types don't have this field before db push)
+  let outOfCityKmRate = 0;
+  if (order.tariffId) {
+    const rows = await prisma.$queryRaw<Array<{ r: string }>>`
+      SELECT "outOfCityKmRate" AS r FROM tariffs WHERE id = ${order.tariffId} LIMIT 1
+    `;
+    outOfCityKmRate = Number(rows[0]?.r ?? 0);
+  }
   if (!outOfCityKmRate && order.classId) {
-    const classTariff = await prisma.tariff.findFirst({
-      where: { classId: order.classId, isActive: true },
-      select: { outOfCityKmRate: true },
-      orderBy: { id: "asc" },
-    });
-    outOfCityKmRate = Number(classTariff?.outOfCityKmRate ?? 0);
+    const rows = await prisma.$queryRaw<Array<{ r: string }>>`
+      SELECT "outOfCityKmRate" AS r FROM tariffs
+      WHERE "classId" = ${order.classId} AND "isActive" = true
+      ORDER BY id ASC LIMIT 1
+    `;
+    outOfCityKmRate = Number(rows[0]?.r ?? 0);
   }
 
-  const session = await prisma.orderTripSession.create({
-    data: {
-      orderId,
-      driverId: auth.driverId,
-      tariffPerKm: order.pricePerKm,
-      outOfCityKmRate,
-      baseFare: currentBaseFare,
-      startedAt: order.startedAt ?? new Date(),
-      status: "active",
-    },
-  });
+  // Create session via raw SQL so outOfCityKmRate is stored before Prisma client regen
+  const sessionRows = await prisma.$queryRaw<Array<{ id: number }>>`
+    INSERT INTO order_trip_sessions
+      ("orderId", "driverId", "tariffPerKm", "outOfCityKmRate", "baseFare", "startedAt", status,
+       "preliminaryDistanceKm", "pointsReceived", "lastIsOutOfCity", "outOfCityKm", "outOfCitySeconds", "createdAt", "updatedAt")
+    VALUES
+      (${orderId}, ${auth.driverId}, ${Number(order.pricePerKm)}, ${outOfCityKmRate}, ${currentBaseFare},
+       ${order.startedAt ?? new Date()}, 'active', 0, 0, false, 0, 0, NOW(), NOW())
+    RETURNING id
+  `;
+  const sessionId = sessionRows[0]?.id;
+  if (!sessionId) throw new Error("Failed to create trip session");
+  const session = { id: sessionId, status: "active", pointsReceived: 0, lastSequenceNumber: null, startedAt: order.startedAt ?? new Date() };
 
   return NextResponse.json({
     data: {

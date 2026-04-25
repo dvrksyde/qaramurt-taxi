@@ -111,7 +111,7 @@ function CityBoundaryLayer({
       pm.disableDraw();
       const layer = e.layer as L.Polygon;
       const geojson = layer.toGeoJSON();
-      let coords: number[][] = geojson.geometry.coordinates[0];
+      let coords: number[][] = (geojson.geometry.coordinates[0] as number[][]);
 
       // Close the ring
       if (coords.length > 0) {

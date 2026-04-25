@@ -22,6 +22,15 @@ export async function GET(req: NextRequest) {
     orderBy: [{ serviceId: "asc" }, { classId: "asc" }],
   });
 
+  // Fetch outOfCityKmRate via raw SQL (not in Prisma types until db push)
+  const ids = tariffs.map((t) => t.id);
+  const rateRows = ids.length
+    ? await prisma.$queryRaw<Array<{ id: number; r: string }>>`
+        SELECT id, "outOfCityKmRate" AS r FROM tariffs WHERE id = ANY(${ids}::integer[])
+      `
+    : [];
+  const rateMap = new Map(rateRows.map((r) => [r.id, Number(r.r ?? 0)]));
+
   return NextResponse.json({
     data: tariffs.map((t) => ({
       ...t,
@@ -30,6 +39,7 @@ export async function GET(req: NextRequest) {
       pricePerMin: Number(t.pricePerMin),
       minPrice: Number(t.minPrice),
       extraWaitPrice: Number(t.extraWaitPrice),
+      outOfCityKmRate: rateMap.get(t.id) ?? 0,
     })),
   });
 }
