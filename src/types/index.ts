@@ -220,11 +220,8 @@ export interface NewOrderFormData {
 
 export interface TabCounts {
   current: number;
-  scheduled: number;
-  exchange: number;
   chat: number;
   system: number;
-  alarms: number;
 }
 
 export interface SystemLogEntry {

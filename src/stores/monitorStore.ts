@@ -3,7 +3,7 @@ import type { Order, Driver, DriverLocation, TabCounts, ChatMessage, AlarmEvent,
 
 interface MonitorState {
   // Active tab
-  activeTab: "current" | "scheduled" | "exchange" | "map" | "chat" | "system" | "alarms" | "leaderboard";
+  activeTab: "current" | "map" | "chat" | "system" | "leaderboard";
   setActiveTab: (tab: MonitorState["activeTab"]) => void;
 
   // Tab counts
@@ -69,7 +69,7 @@ export const useMonitorStore = create<MonitorState>((set) => ({
     set({ activeTab: tab });
   },
 
-  counts: { current: 0, scheduled: 0, exchange: 0, chat: 0, system: 0, alarms: 0 },
+  counts: { current: 0, chat: 0, system: 0 },
   setCounts: (counts) => set((s) => ({ counts: { ...s.counts, ...counts } })),
   incrementCount: (tab) =>
     set((s) => ({ counts: { ...s.counts, [tab]: s.counts[tab] + 1 } })),
@@ -182,9 +182,8 @@ export const useMonitorStore = create<MonitorState>((set) => ({
   addAlarm: (alarm) =>
     set((s) => ({
       alarms: [alarm, ...s.alarms],
-      counts: { ...s.counts, alarms: s.counts.alarms + 1 },
     })),
-  clearAlarms: () => set({ alarms: [], counts: { ...useMonitorStore.getState().counts, alarms: 0 } }),
+  clearAlarms: () => set({ alarms: [] }),
 
   selectedOrderId: null,
   setSelectedOrderId: (id) => set({ selectedOrderId: id }),
