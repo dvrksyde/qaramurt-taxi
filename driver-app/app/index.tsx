@@ -181,10 +181,10 @@ export default function MainScreen() {
           source = require('../assets/sounds/trip_completed.mp4');
           break;
       }
-      
+
       const { sound } = await Audio.Sound.createAsync(source);
       await sound.playAsync();
-      
+
       sound.setOnPlaybackStatusUpdate((status) => {
         if (status.isLoaded && status.didJustFinish) {
           sound.unloadAsync();
@@ -316,17 +316,11 @@ export default function MainScreen() {
         const hasClass = p?.vehicle?.classes?.some((c: any) => c.classId === data.classId);
         if (!hasClass) return;
       }
-<<<<<<< HEAD
-
-      rememberHandledOrderAlert(data.orderId);
-      enqueueOrderAlert(data);
-=======
       Vibration.vibrate([0, 500, 200, 500]);
       playAppSound('new_order');
       showOrderNotification(data.pickupAddress, data.pricePerKm || 80);
       setOrderAlert(data);
       setAlertTimer(30);
->>>>>>> parent of 3283e3a (Updatee)
     });
 
     sock.on("order_taken", (data: any) => {
@@ -503,19 +497,6 @@ export default function MainScreen() {
     };
   }, [orderAlert, setOrderAlert]);
 
-  // --- Order Queue Processing ---
-  useEffect(() => {
-    // If we don't have an active alert but have orders in queue, show next
-    if (!orderAlert && orderQueue.length > 0 && !activeOrder) {
-      dequeueOrderAlert();
-      setAlertTimer(30);
-      
-      // Trigger sound and vibration for the next order in queue
-      Vibration.vibrate([0, 500, 200, 500]);
-      playAppSound('new_order');
-    }
-  }, [orderAlert, orderQueue.length, activeOrder, dequeueOrderAlert]);
-
   const toggleOnline = async () => {
     // ✅ FIX 1: Optimistic update — instant UI, server sync in background
     const newStatus = isOnline ? "offline" : "free";
@@ -536,7 +517,7 @@ export default function MainScreen() {
     api("/api/driver/status", {
       method: "PATCH",
       body: JSON.stringify({ status: newStatus }),
-    }).catch(() => {});
+    }).catch(() => { });
   };
 
   const acceptOrder = async () => {
@@ -905,13 +886,13 @@ export default function MainScreen() {
                   const key = typeof opt === 'string' ? opt : opt.key;
                   const label = opt.label || (key === 'luggage' ? 'Багаж' : key === 'roof_luggage' ? 'Верх. Багаж' : key === 'conditioner' ? 'Кондиционер' : 'Опция');
                   const price = opt.price || (key === 'luggage' ? 100 : key === 'roof_luggage' ? 200 : key === 'conditioner' ? 100 : 0);
-                  
+
                   return (
                     <View key={key} style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
-                      <Ionicons 
-                        name={key === 'luggage' ? 'briefcase' : key === 'roof_luggage' ? 'cube' : key === 'conditioner' ? 'snow' : 'apps-outline'} 
-                        size={12} 
-                        color={key === 'conditioner' ? '#4ade80' : '#fff'} 
+                      <Ionicons
+                        name={key === 'luggage' ? 'briefcase' : key === 'roof_luggage' ? 'cube' : key === 'conditioner' ? 'snow' : 'apps-outline'}
+                        size={12}
+                        color={key === 'conditioner' ? '#4ade80' : '#fff'}
                       />
                       <Text style={{ fontSize: 10, color: key === 'conditioner' ? '#4ade80' : '#fff', fontWeight: "bold" }}>
                         {label} (+{price})
@@ -1010,17 +991,6 @@ export default function MainScreen() {
               />
             )}
             {activeOrder.status === "in_progress" && (
-<<<<<<< HEAD
-              <>
-                <SwipeButton
-                  title="Р—Р°РІРµСЂС€РёС‚СЊ РїРѕРµР·РґРєСѓ"
-                  onSwipeComplete={() => updateOrderStatus("completed")}
-                  color="#ffd000ff"
-                  iconName="checkmark-circle"
-                  disabled={loading}
-                />
-              </>
-=======
               <SwipeButton
                 title="Завершить поездку"
                 onSwipeComplete={() => updateOrderStatus("completed")}
@@ -1028,43 +998,8 @@ export default function MainScreen() {
                 iconName="checkmark-circle"
                 disabled={loading}
               />
->>>>>>> parent of 3283e3a (Updatee)
             )}
           </View>
-
-          {/* Floating Wait Button */}
-          {activeOrder.status === "in_progress" && (
-            <TouchableOpacity
-              style={{
-                position: "absolute",
-                right: 20,
-                bottom: 120, // above the order actions panel
-                width: 60,
-                height: 60,
-                borderRadius: 30,
-                backgroundColor: activeOrder.isWaiting ? "#FFD000" : "#202020",
-                borderWidth: 2,
-                borderColor: activeOrder.isWaiting ? "#FFD000" : "#3a3a3a",
-                alignItems: "center",
-                justifyContent: "center",
-                elevation: 10,
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.5,
-                shadowRadius: 5,
-                zIndex: 9999,
-              }}
-              onPress={() => toggleTripWaiting(activeOrder.isWaiting ? "stop" : "start")}
-              disabled={loading}
-              activeOpacity={0.8}
-            >
-              <Ionicons
-                name={activeOrder.isWaiting ? "play" : "pause"}
-                size={28}
-                color={activeOrder.isWaiting ? "#0a0a0a" : "#FFD000"}
-              />
-            </TouchableOpacity>
-          )}
         </View>
       );
     }

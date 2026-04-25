@@ -10,9 +10,9 @@ export async function POST(req: NextRequest) {
 
   const driver = await prisma.driver.findUnique({
     where: { id: auth.driverId },
-    include: { 
-      tariffGroup: true, 
-      vehicles: { include: { classes: { include: { class: true } } } } 
+    include: {
+      tariffGroup: true,
+      vehicles: { include: { classes: { include: { class: true } } } }
     },
   });
 
@@ -21,18 +21,15 @@ export async function POST(req: NextRequest) {
   }
 
   if (Number(driver.balance) < 30) {
-    return NextResponse.json({ 
-      error: "Недостаточный баланс (минимум 30 ₸). Пожалуйста, пополните счет." 
+    return NextResponse.json({
+      error: "Недостаточный баланс (минимум 30 ₸). Пожалуйста, пополните счет."
     }, { status: 403 });
   }
 
-<<<<<<< HEAD
   if (driver.status !== "free") {
     return NextResponse.json({ error: "Вы должны быть свободны на линии" }, { status: 400 });
   }
 
-=======
->>>>>>> parent of 3283e3a (Updatee)
   // Check if driver is already assigned to any active order
   const activeOrder = await prisma.order.findFirst({
     where: {
@@ -48,8 +45,8 @@ export async function POST(req: NextRequest) {
   const activeVehicle = driver.vehicles.find((v) => v.isActive);
   const classObj = activeVehicle?.classes?.[0]?.class;
   const isComfort = classObj?.name === "Комфорт";
-  
-  let pricePerKm = driver.tariffGroup ? 
+
+  let pricePerKm = driver.tariffGroup ?
     Number(driver.tariffGroup.description?.match(/(\d+) ₸\/км/)?.[1] || 80) : 80;
 
   if (isComfort) {
