@@ -595,6 +595,28 @@ export default function MainScreen() {
     })();
   };
 
+  const toggleTripWaiting = async (action: "start" | "stop") => {
+    if (!activeOrder || activeOrder.status !== "in_progress") return;
+
+    setLoading(true);
+    const res = await api(`/api/driver/orders/${activeOrder.id}/waiting`, {
+      method: "PATCH",
+      body: JSON.stringify({ action }),
+    });
+    setLoading(true); // Keep loading until state is updated to prevent double-clicks
+
+    if (res.error) {
+      setLoading(false);
+      Alert.alert("Ошибка", res.error);
+      return;
+    }
+
+    if (res.data) {
+      setActiveOrder(mapOrderToState(res.data));
+    }
+    setLoading(false);
+  };
+
   const updateOrderStatus = async (status: string) => {
     if (!activeOrder) return;
 
@@ -642,13 +664,13 @@ export default function MainScreen() {
           Math.round(Math.max(useDriverStore.getState().tripDistance, tripDistanceRef.current) * 10) / 10;
         const currentBaseFare = activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE;
         body.clientDistanceKm = fallbackDist;
-        body.clientFinalPrice = roundTo5(currentBaseFare + fallbackDist * activeOrder.pricePerKm) + 10;
+        body.clientFinalPrice = roundTo5(currentBaseFare + fallbackDist * activeOrder.pricePerKm) + tripWaitingFee + 10;
       } else {
         // Fixed-price: явно передаём цену
         if (activeOrder.distanceKm > 0) {
           body.distanceKm = activeOrder.distanceKm;
         }
-        body.finalPrice = activeOrder.estimatedPrice ?? activeOrder.currentPrice;
+        body.finalPrice = (activeOrder.estimatedPrice ?? activeOrder.currentPrice) + tripWaitingFee;
       }
       // Передаём текущие координаты для обратного геокодирования точки выгрузки
       if (lastLocationState) {
@@ -786,6 +808,7 @@ export default function MainScreen() {
   const dropoffCoords = parseWktPoint(activeOrder?.dropoffPoint);
 
   const [waitingElapsed, setWaitingElapsed] = useState(0);
+  const [tripWaitingElapsed, setTripWaitingElapsed] = useState(0);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -803,6 +826,50 @@ export default function MainScreen() {
     }
     return () => clearInterval(interval);
   }, [activeOrder]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout | undefined;
+
+    const updateTripWaitingElapsed = () => {
+      if (!activeOrder?.isWaiting) {
+        setTripWaitingElapsed(Number(activeOrder?.waitingAccumulatedSeconds) || 0);
+        return;
+      }
+
+      const waitingStartedAt = activeOrder.waitingStartedAt
+        ? new Date(activeOrder.waitingStartedAt).getTime()
+        : Date.now();
+      const currentSeconds = Math.max(0, Math.floor((Date.now() - waitingStartedAt) / 1000));
+      setTripWaitingElapsed((Number(activeOrder.waitingAccumulatedSeconds) || 0) + currentSeconds);
+    };
+
+    if (activeOrder?.status === "in_progress") {
+      updateTripWaitingElapsed();
+      if (activeOrder.isWaiting) {
+        interval = setInterval(updateTripWaitingElapsed, 1000);
+      }
+    } else {
+      setTripWaitingElapsed(0);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [
+    activeOrder?.isWaiting,
+    activeOrder?.status,
+    activeOrder?.waitingAccumulatedSeconds,
+    activeOrder?.waitingStartedAt,
+  ]);
+
+  const WAITING_RATE_PER_MIN = 20;
+  const tripWaitingFee = Math.floor(tripWaitingElapsed / 60) * WAITING_RATE_PER_MIN;
+  const displayedTripPrice = activeOrder?.isFixedPrice
+    ? (activeOrder?.estimatedPrice ?? 0) + tripWaitingFee
+    : tripPrice + tripWaitingFee;
+  const hasTripWaitingSummary =
+    activeOrder?.status === "in_progress" &&
+    (Boolean(activeOrder?.isWaiting) || tripWaitingElapsed > 0 || Number(activeOrder?.waitingFee) > 0);
 
   const renderHome = () => {
     if (!profile) {
@@ -922,13 +989,31 @@ export default function MainScreen() {
 
           {/* Elegant Status Center Fill */}
           <View style={styles.orderStatusCenter}>
-            <View style={styles.statusPulseCircle}>
-              <Ionicons
-                name={activeOrder.status === 'assigned' ? "paper-plane" : activeOrder.status === 'arrived' ? "body" : "car-sport"}
-                size={54}
-                color="#FFD000"
-              />
-            </View>
+            {activeOrder.status === 'in_progress' ? (
+              <TouchableOpacity
+                onPress={() => toggleTripWaiting(activeOrder.isWaiting ? "stop" : "start")}
+                disabled={loading}
+                activeOpacity={0.7}
+                style={[
+                  styles.statusPulseCircle,
+                  activeOrder.isWaiting && { backgroundColor: "rgba(255, 208, 0, 0.2)", borderColor: "#FFD000" }
+                ]}
+              >
+                <Ionicons
+                  name={activeOrder.isWaiting ? "play" : "pause"}
+                  size={60}
+                  color="#FFD000"
+                />
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.statusPulseCircle}>
+                <Ionicons
+                  name={activeOrder.status === 'assigned' ? "paper-plane" : activeOrder.status === 'arrived' ? "body" : "car-sport"}
+                  size={54}
+                  color="#FFD000"
+                />
+              </View>
+            )}
             <Text style={styles.statusCenterText}>
               {activeOrder.status === 'assigned' ? "Подача автомобиля..." :
                 activeOrder.status === 'arrived' ? (
@@ -943,6 +1028,26 @@ export default function MainScreen() {
               <Ionicons name="cash-outline" size={16} color="#22c55e" />
               <Text style={styles.paymentBadgeText}>Оплата наличными</Text>
             </View>
+
+            {hasTripWaitingSummary && (
+              <View style={styles.tripWaitingCard}>
+                <View style={styles.tripWaitingHeader}>
+                  <Ionicons
+                    name={activeOrder.isWaiting ? "pause-circle" : "time-outline"}
+                    size={18}
+                    color="#FFD000"
+                  />
+                  <Text style={styles.tripWaitingTitle}>
+                    {activeOrder.isWaiting ? "Ожидание активно" : "Ожидание по заказу"}
+                  </Text>
+                </View>
+                <Text style={styles.tripWaitingTimer}>
+                  {Math.floor(tripWaitingElapsed / 60)}:{(tripWaitingElapsed % 60).toString().padStart(2, "0")}
+                </Text>
+                <Text style={styles.tripWaitingFee}>+{tripWaitingFee} ₸</Text>
+                <Text style={styles.tripWaitingHint}>20 ₸/мин во время паузы поездки</Text>
+              </View>
+            )}
           </View>
 
           {/* Meter strip — single row (preliminary / approximate values) */}
@@ -951,7 +1056,7 @@ export default function MainScreen() {
               {activeOrder.isFixedPrice ? (
                 <>
                   <Text style={styles.meterStripLabel}>Фикс. цена</Text>
-                  <Text style={styles.meterStripPrice}>{activeOrder.estimatedPrice} ₸</Text>
+                  <Text style={styles.meterStripPrice}>{displayedTripPrice} ₸</Text>
                 </>
               ) : (
                 <>
@@ -964,7 +1069,7 @@ export default function MainScreen() {
                     <Ionicons name="time-outline" size={14} color="#888" />
                     <Text style={styles.meterStripValue}>{tripElapsed} мин</Text>
                   </View>
-                  <Text style={styles.meterStripPrice}>{tripPrice}₸</Text>
+                  <Text style={styles.meterStripPrice}>{displayedTripPrice}₸</Text>
                 </>
               )}
             </View>
@@ -1380,7 +1485,46 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
   },
-
+  tripWaitingCard: {
+    marginTop: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 18,
+    backgroundColor: "rgba(255, 208, 0, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 208, 0, 0.22)",
+    alignItems: "center",
+    minWidth: 220,
+  },
+  tripWaitingHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  tripWaitingTitle: {
+    color: "#f2e3a2",
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+  tripWaitingTimer: {
+    color: "#fff",
+    fontSize: 30,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+  tripWaitingFee: {
+    color: "#FFD000",
+    fontSize: 20,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+  tripWaitingHint: {
+    color: "#b4a77a",
+    fontSize: 12,
+    marginTop: 6,
+  },
   orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 22, left: 16, right: 16 },
   curbsideButton: {
     backgroundColor: "#FFD000",

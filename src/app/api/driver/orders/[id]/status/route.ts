@@ -243,7 +243,7 @@ export async function PATCH(
   // Read back the final values to return to the driver app
   const finalOrder = await prisma.order.findUnique({
     where: { id: orderId },
-    select: { distanceKm: true, finalPrice: true },
+    select: { distanceKm: true, finalPrice: true, waitingFee: true, waitingAccumulatedSeconds: true },
   });
 
   const io = (global as Record<string, unknown>).socketIO as any;
@@ -254,6 +254,7 @@ export async function PATCH(
       driverId: auth.driverId,
       distanceKm: finalOrder?.distanceKm,
       finalPrice: finalOrder?.finalPrice,
+      waitingFee: finalOrder?.waitingFee,
     });
 
     if (status === "completed") {
@@ -269,6 +270,8 @@ export async function PATCH(
       status,
       distanceKm: finalOrder?.distanceKm ?? null,
       finalPrice: finalOrder?.finalPrice ?? null,
+      waitingFee: finalOrder?.waitingFee ?? 0,
+      waitingAccumulatedSeconds: finalOrder?.waitingAccumulatedSeconds ?? 0,
     },
   });
 }

@@ -104,9 +104,23 @@ export async function POST(req: NextRequest) {
         status: "busy",
         location: driver.currentLocation,
       });
+
+      if (Number(driver.balance) <= 100) {
+        const warningMsg = "Ваш баланс ниже 100 ₸. Пожалуйста, пополните счет во избежание блокировки!";
+        io.to(`driver:${driver.id}`).emit("chat_message", {
+          from: "Система",
+          driverId: driver.id,
+          text: warningMsg,
+          timestamp: new Date().toISOString(),
+          direction: "outbound"
+        });
+      }
     }
 
-    return NextResponse.json({ data: order });
+    return NextResponse.json({ 
+      data: order,
+      warning: Number(driver.balance) <= 100 ? "Ваш баланс ниже 100 ₸. Пожалуйста, пополните счет!" : undefined
+    });
   } catch (error) {
     console.error("[curbside] Error creating curbside order:", error);
     return NextResponse.json({ error: "Ошибка создания заказа" }, { status: 500 });
