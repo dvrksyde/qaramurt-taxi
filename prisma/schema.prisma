@@ -362,6 +362,10 @@ model Order {
   scheduledAt        DateTime?
   isUrgent           Boolean            @default(false)
   isExchange         Boolean            @default(false)
+  isWaiting          Boolean            @default(false)
+  waitingStartedAt   DateTime?
+  waitingAccumulatedSeconds Int           @default(0)
+  waitingFee         Decimal?           @db.Decimal(10, 2)
   options            Json               @default("[]")
   createdAt          DateTime           @default(now())
   assignedAt         DateTime?
