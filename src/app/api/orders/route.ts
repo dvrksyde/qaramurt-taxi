@@ -226,7 +226,7 @@ export async function POST(req: NextRequest) {
             { longitude: pickup.lng, latitude: pickup.lat },
             { radius: MAX_RADIUS_KM, unit: "km" },
             ["WITHDIST", "ASC"]
-          ) as { member: string, distance: number }[];
+          ) as any[];
 
           const nearbyDriverIds = nearbyDriverMembers.map(d => Number(d.member));
 
@@ -252,7 +252,7 @@ export async function POST(req: NextRequest) {
 
             const validWithDist = nearbyDriverMembers
               .filter(d => validDriverIds.has(Number(d.member)))
-              .map(d => ({ id: Number(d.member), dist: d.distance }));
+              .map(d => ({ id: Number(d.member), dist: Number(d.distance || 0) }));
 
             closeDrivers = validWithDist.filter((d) => d.dist <= CLOSE_RADIUS_KM);
             farDrivers = validWithDist.filter((d) => d.dist > CLOSE_RADIUS_KM);
