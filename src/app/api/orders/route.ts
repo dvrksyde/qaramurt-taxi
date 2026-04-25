@@ -225,7 +225,8 @@ export async function POST(req: NextRequest) {
             "driver_locations", 
             { longitude: pickup.lng, latitude: pickup.lat },
             { radius: MAX_RADIUS_KM, unit: "km" },
-            ["WITHDIST", "ASC"]
+            ["WITHDIST"],
+            { SORT: "ASC" }
           ) as any[];
 
           const nearbyDriverIds = nearbyDriverMembers.map(d => Number(d.member));
