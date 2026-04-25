@@ -267,11 +267,13 @@ export async function POST(req: NextRequest) {
           });
 
           // Шаг 2: Ждем 15 секунд. Если никто из ближайших не взял, расширяем радиус до 5 км
+          // Jitter ±3s so 60 simultaneous orders don't all fire at t+15s
+          const jitter = Math.floor(Math.random() * 6000) - 3000;
           await orderDistributionQueue.add("expand-radius", {
             orderId: order.id,
             alertData,
             farDriverIds: farDrivers.map((d) => d.id)
-          }, { delay: 15000 });
+          }, { delay: 15000 + jitter });
           
         } else if (farDrivers.length > 0) {
           // Если в радиусе 2.5 км никого нет, сразу отправляем тем, кто в пределах 5 км

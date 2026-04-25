@@ -16,7 +16,12 @@ declare global {
 export function getPrisma(): PrismaClient {
   if (!global.__prisma) {
     if (!connectionString) throw new Error("DATABASE_URL is missing");
-    const pool = new Pool({ connectionString });
+    const pool = new Pool({
+      connectionString,
+      max: 20,          // up from default 10 — handles concurrent order bursts
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    });
     const adapter = new PrismaPg(pool);
     global.__prisma = new PrismaClient({ adapter });
   }

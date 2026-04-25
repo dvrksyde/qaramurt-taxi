@@ -64,7 +64,8 @@ export function DriverChatPanel() {
     if (!socket) return;
 
     const handler = (msg: any) => {
-      if (msg.driverId && msg.driverId !== profile?.id) return;
+      // Only filter by driverId when profile is loaded AND message is targeted at a specific driver
+      if (profile && msg.driverId && msg.driverId !== profile.id) return;
       mergeMessages([normalizeMessage(msg)]);
     };
 

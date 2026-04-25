@@ -75,6 +75,15 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
     for (const loc of locations) {
       const { latitude: lat, longitude: lng } = loc.coords;
 
+      // Отбрасываем невалидные координаты (GPS ещё не поймал сигнал)
+      if (
+        !Number.isFinite(lat) || !Number.isFinite(lng) ||
+        (lat === 0 && lng === 0) ||
+        Math.abs(lat) > 90 || Math.abs(lng) > 180
+      ) {
+        continue;
+      }
+
       const state = useDriverStore.getState();
       console.log("status:", state.activeOrder?.status);
       console.log("lastLocation:", state.lastLocation);
@@ -114,10 +123,14 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
         });
       }
 
-      api("/api/driver/location", {
-        method: "POST",
-        body: JSON.stringify({ lat, lng }),
-      }).catch(() => { });
+      // Отправляем только последнюю точку из батча — сервер сам rate-limit-ит (3 сек)
+      // Для промежуточных точек достаточно trip-трекинга выше
+      if (loc === locations[locations.length - 1]) {
+        api("/api/driver/location", {
+          method: "POST",
+          body: JSON.stringify({ lat, lng }),
+        }).catch(() => { });
+      }
     }
   }
 });
@@ -131,7 +144,6 @@ export default function MainScreen() {
     setOnline,
     orderAlert,
     setOrderAlert,
-    orderQueue,
     enqueueOrderAlert,
     dequeueOrderAlert,
     removeOrderFromQueue,
@@ -153,6 +165,11 @@ export default function MainScreen() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tripDistanceRef = useRef(0);
   const insets = useSafeAreaInsets();
+  const loadingDashboardRef = useRef(false);
+  const soundRef = useRef<any>(null);
+  // Prevents loadDashboard from overriding status while toggle is in flight
+  const togglingOnlineRef = useRef(false);
+  const [togglingOnline, setTogglingOnline] = useState(false);
 
   // Dispatcher-assigned order modal
   const [dispatcherAssignedOrder, setDispatcherAssignedOrder] = useState<any>(null);
@@ -165,29 +182,35 @@ export default function MainScreen() {
       shouldDuckAndroid: true,
       playThroughEarpieceAndroid: false,
     }).catch(console.warn);
+
+    return () => {
+      // Unload any playing sound when screen unmounts
+      soundRef.current?.unloadAsync().catch(() => {});
+    };
   }, []);
 
   const playAppSound = async (type: 'new_order' | 'welcome' | 'trip_completed') => {
     try {
-      let source;
-      switch (type) {
-        case 'new_order':
-          source = require('../assets/sounds/new_order.mp4');
-          break;
-        case 'welcome':
-          source = require('../assets/sounds/welcome.mp4');
-          break;
-        case 'trip_completed':
-          source = require('../assets/sounds/trip_completed.mp4');
-          break;
+      // Unload previous sound before creating a new one to prevent leaks
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync().catch(() => {});
+        soundRef.current = null;
       }
 
-      const { sound } = await Audio.Sound.createAsync(source);
+      const sources = {
+        new_order: require('../assets/sounds/new_order.mp4'),
+        welcome: require('../assets/sounds/welcome.mp4'),
+        trip_completed: require('../assets/sounds/trip_completed.mp4'),
+      };
+
+      const { sound } = await Audio.Sound.createAsync(sources[type]);
+      soundRef.current = sound;
       await sound.playAsync();
 
       sound.setOnPlaybackStatusUpdate((status) => {
         if (status.isLoaded && status.didJustFinish) {
-          sound.unloadAsync();
+          sound.unloadAsync().catch(() => {});
+          soundRef.current = null;
         }
       });
     } catch (err) {
@@ -233,7 +256,7 @@ export default function MainScreen() {
     }
   }, []);
 
-  const startLocationTracking = useCallback(async (driverId: number) => {
+  const startLocationTracking = useCallback(async () => {
     // Если таск уже запущен — не перезапускаем! Иначе сбросится lastLocation
     const alreadyRunning = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
     if (alreadyRunning) return;
@@ -316,11 +339,35 @@ export default function MainScreen() {
         const hasClass = p?.vehicle?.classes?.some((c: any) => c.classId === data.classId);
         if (!hasClass) return;
       }
+
+      const state = useDriverStore.getState();
+
+      // Ignore if driver already has an active order
+      if (state.activeOrder) return;
+
+      // Drop duplicate alerts
+      if (
+        state.orderAlert?.orderId === data.orderId ||
+        state.orderQueue.some((o) => o.orderId === data.orderId)
+      ) return;
+
+      // Cap queue at 5 to prevent flooding the driver with stale orders
+      const QUEUE_LIMIT = 5;
+      const totalQueued = (state.orderAlert ? 1 : 0) + state.orderQueue.length;
+      if (totalQueued >= QUEUE_LIMIT) return;
+
       Vibration.vibrate([0, 500, 200, 500]);
       playAppSound('new_order');
       showOrderNotification(data.pickupAddress, data.pricePerKm || 80);
-      setOrderAlert(data);
-      setAlertTimer(30);
+
+      if (!state.orderAlert) {
+        // No active alert — show immediately
+        setOrderAlert(data);
+        setAlertTimer(30);
+      } else {
+        // Alert already showing — enqueue
+        enqueueOrderAlert(data);
+      }
     });
 
     sock.on("order_taken", (data: any) => {
@@ -353,10 +400,10 @@ export default function MainScreen() {
     });
 
     sock.on("order_updated", (data: any) => {
-      const state = useDriverStore.getState();
-      if (state.activeOrder?.id === data.orderId) {
+      const currentOrder = useDriverStore.getState().activeOrder;
+      if (currentOrder && currentOrder.id === data.orderId) {
         setActiveOrder({
-          ...state.activeOrder,
+          ...currentOrder,
           estimatedPrice: data.estimatedPrice,
           options: data.options,
         });
@@ -367,7 +414,7 @@ export default function MainScreen() {
       refreshProfileRank();
     });
 
-    startLocationTracking(driverId);
+    startLocationTracking();
 
     if (realtimeDriverRef.current !== driverId) {
       registerForPushNotifications();
@@ -376,45 +423,57 @@ export default function MainScreen() {
   }, [refreshProfileRank, setOrderAlert, startLocationTracking]);
 
   const loadDashboard = useCallback(async () => {
+    // Prevent concurrent calls from interval + AppState firing simultaneously
+    if (loadingDashboardRef.current) return;
+    loadingDashboardRef.current = true;
+
     const [profileRes, orderRes] = await Promise.all([
       api("/api/driver/profile"),
       api("/api/driver/orders/current"),
     ]);
 
-    if (!profileRes.data) {
-      if (!useDriverStore.getState().profile) {
-        await logout();
+    try {
+      if (!profileRes.data) {
+        if (!useDriverStore.getState().profile) {
+          await logout();
+        }
+        return;
       }
-      return;
-    }
 
-    const nextProfile = profileRes.data;
+      const nextProfile = profileRes.data;
 
-    // Игнорируем ошибки сети при получении заказа, чтобы не сбрасывать стейт
-    let nextOrder = useDriverStore.getState().activeOrder;
-    if (!orderRes.error) {
-      nextOrder = mapOrderToState(orderRes.data);
-      setActiveOrder(nextOrder);
-    }
-
-    const shouldStayConnected = nextProfile.status !== "offline" || !!nextOrder;
-
-    setProfile(nextProfile);
-    setOnline(shouldStayConnected);
-
-    if (shouldStayConnected) {
-      // Не переподключаем сокеты/GPS если идёт активная поездка — это сбросит lastLocation
-      const currentState = useDriverStore.getState();
-      const isInTrip = currentState.activeOrder?.status === "in_progress";
-      if (!isInTrip) {
-        startSocketAndGPS(nextProfile.id);
+      // Игнорируем ошибки сети при получении заказа, чтобы не сбрасывать стейт
+      let nextOrder = useDriverStore.getState().activeOrder;
+      if (!orderRes.error) {
+        nextOrder = mapOrderToState(orderRes.data);
+        setActiveOrder(nextOrder);
       }
-    } else {
-      stopLocationTracking();
-      disconnectSocket();
-      realtimeDriverRef.current = null;
+
+      // Не перезаписываем online-статус пока водитель активно переключает линию
+      // (toggleOnline ждёт API, loadDashboard не должен конкурировать)
+      if (togglingOnlineRef.current) return;
+
+      const shouldStayConnected = nextProfile.status !== "offline" || !!nextOrder;
+
+      setProfile(nextProfile);
+      setOnline(shouldStayConnected);
+
+      if (shouldStayConnected) {
+        const sock = getSocket();
+        const socketNeedsInit = !sock || !sock.connected || realtimeDriverRef.current !== nextProfile.id;
+        const isInTrip = useDriverStore.getState().activeOrder?.status === "in_progress";
+        if (socketNeedsInit && !isInTrip) {
+          startSocketAndGPS(nextProfile.id);
+        }
+      } else {
+        stopLocationTracking();
+        disconnectSocket();
+        realtimeDriverRef.current = null;
+      }
+    } finally {
+      loadingDashboardRef.current = false;
     }
-  }, [logout, mapOrderToState, refreshCurrentPosition, setActiveOrder, setOnline, setProfile, startSocketAndGPS, stopLocationTracking]);
+  }, [logout, mapOrderToState, setActiveOrder, setOnline, setProfile, startSocketAndGPS, stopLocationTracking]);
 
   useEffect(() => {
     loadDashboard();
@@ -459,14 +518,14 @@ export default function MainScreen() {
       if (AppState.currentState === "active") {
         loadDashboard();
       } else {
-        // Keep socket alive in background
+        // Background: only reconnect socket if dropped, no API polling
         const sock = getSocket();
         const storeState = useDriverStore.getState();
         if (storeState.isOnline && (!sock || !sock.connected) && storeState.profile) {
           connectSocket(storeState.profile.id);
         }
       }
-    }, 15000);
+    }, 30000);
 
     return () => {
       subscription.remove();
@@ -479,10 +538,12 @@ export default function MainScreen() {
 
   useEffect(() => {
     if (orderAlert) {
+      setAlertTimer(30);
       timerRef.current = setInterval(() => {
         setAlertTimer((prev) => {
           if (prev <= 1) {
-            setOrderAlert(null);
+            // Timer expired — show next queued alert (or null if queue empty)
+            dequeueOrderAlert();
             return 30;
           }
           return prev - 1;
@@ -495,13 +556,19 @@ export default function MainScreen() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [orderAlert, setOrderAlert]);
+  }, [orderAlert, dequeueOrderAlert]);
 
   const toggleOnline = async () => {
-    // ✅ FIX 1: Optimistic update — instant UI, server sync in background
+    // Prevent double-tap and race with loadDashboard
+    if (togglingOnlineRef.current) return;
+
     const newStatus = isOnline ? "offline" : "free";
     const newIsOnline = !isOnline;
 
+    togglingOnlineRef.current = true;
+    setTogglingOnline(true);
+
+    // Optimistic UI update
     setOnline(newIsOnline);
     setProfile(profile ? { ...profile, status: newStatus as any } : null);
 
@@ -513,11 +580,29 @@ export default function MainScreen() {
       realtimeDriverRef.current = null;
     }
 
-    // Fire-and-forget to server
-    api("/api/driver/status", {
+    // Await — not fire-and-forget, so loadDashboard can't race
+    const res = await api("/api/driver/status", {
       method: "PATCH",
       body: JSON.stringify({ status: newStatus }),
-    }).catch(() => { });
+    });
+
+    togglingOnlineRef.current = false;
+    setTogglingOnline(false);
+
+    if (res.error) {
+      // Rollback optimistic update on network error
+      setOnline(!newIsOnline);
+      setProfile(profile ? { ...profile, status: isOnline ? "free" : "offline" } : null);
+      if (!newIsOnline && profile) {
+        // Was going offline but failed — restore socket/GPS
+        startSocketAndGPS(profile.id);
+      } else {
+        stopLocationTracking();
+        disconnectSocket();
+        realtimeDriverRef.current = null;
+      }
+      Alert.alert("Ошибка", "Не удалось изменить статус. Проверьте соединение.");
+    }
   };
 
   const acceptOrder = async () => {
@@ -549,7 +634,8 @@ export default function MainScreen() {
   };
 
   const rejectOrder = () => {
-    setOrderAlert(null);
+    // Show next queued alert instead of just clearing
+    dequeueOrderAlert();
   };
 
   const handleCurbsideOrder = async () => {
@@ -804,8 +890,6 @@ export default function MainScreen() {
   };
 
   const tripElapsed = tripStartTime ? Math.floor((Date.now() - tripStartTime) / 60000) : 0;
-  const pickupCoords = parseWktPoint(activeOrder?.pickupPoint);
-  const dropoffCoords = parseWktPoint(activeOrder?.dropoffPoint);
 
   const [waitingElapsed, setWaitingElapsed] = useState(0);
   const [tripWaitingElapsed, setTripWaitingElapsed] = useState(0);
@@ -867,10 +951,6 @@ export default function MainScreen() {
   const displayedTripPrice = activeOrder?.isFixedPrice
     ? (activeOrder?.estimatedPrice ?? 0) + tripWaitingFee
     : tripPrice + tripWaitingFee;
-  const hasTripWaitingSummary =
-    activeOrder?.status === "in_progress" &&
-    (Boolean(activeOrder?.isWaiting) || tripWaitingElapsed > 0 || Number(activeOrder?.waitingFee) > 0);
-
   const renderHome = () => {
     if (!profile) {
       return (
@@ -881,147 +961,214 @@ export default function MainScreen() {
     }
 
     if (activeOrder) {
+      const isInProgress = activeOrder.status === "in_progress";
+      const isPaused = isInProgress && !!activeOrder.isWaiting;
+
+      // ── Адресный блок (адрес, телефон, опции, навигатор) ─────────────────
+      const addressBlock = (
+        <View style={styles.addressStrip}>
+          <View style={styles.addressLine}>
+            <Ionicons name="location" size={16} color="#FFD000" />
+            <Text style={styles.addressLineText} numberOfLines={1}>
+              {activeOrder.pickupAddress || "Адрес не указан"}
+            </Text>
+          </View>
+          {activeOrder.isFixedPrice && activeOrder.dropoffAddress && (
+            <View style={styles.addressLine}>
+              <Ionicons name="flag" size={16} color="#2196F3" />
+              <Text style={styles.addressLineText} numberOfLines={1}>
+                {activeOrder.dropoffAddress}
+              </Text>
+            </View>
+          )}
+          <TouchableOpacity style={styles.addressLine} onPress={callClient} activeOpacity={0.7}>
+            <Ionicons name="call" size={16} color="#FFD000" />
+            <Text style={[styles.phoneText, { color: "#FFD000", textDecorationLine: "underline" }]}>
+              {activeOrder.phone}
+            </Text>
+          </TouchableOpacity>
+
+          {Array.isArray(activeOrder.options) && activeOrder.options.length > 0 && (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4, marginLeft: 22 }}>
+              {activeOrder.options.map((opt: any) => {
+                const key = typeof opt === "string" ? opt : opt.key;
+                const label = opt.label || (key === "luggage" ? "Багаж" : key === "roof_luggage" ? "Верх. Багаж" : key === "conditioner" ? "Кондиционер" : "Опция");
+                const price = opt.price || (key === "luggage" ? 100 : key === "roof_luggage" ? 200 : key === "conditioner" ? 100 : 0);
+                return (
+                  <View key={key} style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                    <Ionicons
+                      name={key === "luggage" ? "briefcase" : key === "roof_luggage" ? "cube" : key === "conditioner" ? "snow" : "apps-outline"}
+                      size={12}
+                      color={key === "conditioner" ? "#4ade80" : "#fff"}
+                    />
+                    <Text style={{ fontSize: 10, color: key === "conditioner" ? "#4ade80" : "#fff", fontWeight: "bold" }}>
+                      {label} (+{price})
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+
+          <TouchableOpacity style={styles.navBtn} onPress={openNavigator} activeOpacity={0.85}>
+            <Ionicons name="navigate" size={18} color="#000" />
+            <Text style={styles.navBtnText}>
+              {activeOrder.status === "assigned"
+                ? "Открыть навигатор → К клиенту"
+                : "Открыть навигатор → К назначению"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      );
+
+      // ── Счётчик (км / мин / цена) ──────────────────────────────────────────
+      const meterBlock = isInProgress ? (
+        <View style={styles.meterStrip}>
+          {activeOrder.isFixedPrice ? (
+            <>
+              <Text style={styles.meterStripLabel}>Фикс. цена</Text>
+              <Text style={styles.meterStripPrice}>{displayedTripPrice} ₸</Text>
+            </>
+          ) : (
+            <>
+              <View style={styles.meterStripItem}>
+                <Ionicons name="speedometer-outline" size={14} color="#888" />
+                <Text style={styles.meterStripValue}>{tripDistance.toFixed(1)} км</Text>
+              </View>
+              <View style={styles.meterStripItem}>
+                <Ionicons name="time-outline" size={14} color="#888" />
+                <Text style={styles.meterStripValue}>{tripElapsed} мин</Text>
+              </View>
+              <Text style={styles.meterStripPrice}>{displayedTripPrice}₸</Text>
+            </>
+          )}
+        </View>
+      ) : null;
+
+      // ── Кнопка действия ───────────────────────────────────────────────────
+      const actionButton = (
+        <View style={styles.orderActions}>
+          {activeOrder.status === "assigned" && (
+            <SwipeButton title="Я на месте" onSwipeComplete={() => updateOrderStatus("arrived")} color="#FFD000" iconName="navigate" disabled={loading} />
+          )}
+          {activeOrder.status === "arrived" && (
+            <SwipeButton title="Клиент сел — поехали" onSwipeComplete={() => updateOrderStatus("in_progress")} color="#FFD000" iconName="car" disabled={loading} />
+          )}
+          {isInProgress && (
+            <SwipeButton title="Завершить поездку" onSwipeComplete={() => updateOrderStatus("completed")} color="#FFD000" iconName="checkmark-circle" disabled={loading} />
+          )}
+        </View>
+      );
+
+      // ── ПАУЗА активна: баннер выходит наверх ──────────────────────────────
+      if (isPaused) {
+        return (
+          <View style={styles.pageBlock}>
+            {/* Баннер паузы — вверху экрана */}
+            <TouchableOpacity
+              style={styles.pauseBanner}
+              onPress={() => toggleTripWaiting("stop")}
+              activeOpacity={0.85}
+              disabled={loading}
+            >
+              <View style={styles.pauseBannerLeft}>
+                <Ionicons name="pause-circle" size={36} color="#FFD000" />
+                <View>
+                  <Text style={styles.pauseBannerTitle}>ПАУЗА</Text>
+                  <Text style={styles.pauseBannerSub}>
+                    {Math.floor(tripWaitingElapsed / 60)}:{(tripWaitingElapsed % 60).toString().padStart(2, "0")}
+                    {"  "}+{tripWaitingFee} ₸
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.pauseResumeBtn}>
+                <Ionicons name="play" size={20} color="#000" />
+                <Text style={styles.pauseResumeBtnText}>Продолжить</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* Адрес, телефон, навигатор */}
+            {addressBlock}
+
+            {/* Счётчик */}
+            {meterBlock}
+
+            {/* Завершить */}
+            {actionButton}
+          </View>
+        );
+      }
+
+      // ── Обычный режим (assigned / arrived / in_progress без паузы) ────────
       return (
         <View style={styles.pageBlock}>
-          {/* Header: order id + rate + GPS + ⋯ menu */}
+          {/* Шапка: номер заказа + GPS + меню */}
           <View style={styles.orderHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.orderHeaderTitle}>  Заказ №{activeOrder.id}</Text>
-            </View>
+            <Text style={styles.orderHeaderTitle}>Заказ №{activeOrder.id}</Text>
 
             <TouchableOpacity
               style={[styles.gpsBadge, { marginRight: 8 }]}
               onPress={refreshCurrentPosition}
               disabled={refreshingGPS}
             >
-              {refreshingGPS ? (
-                <ActivityIndicator size={10} color="#fff" style={{ marginRight: 4 }} />
-              ) : (
-                <Ionicons name="locate" size={12} color="#fff" />
-              )}
+              {refreshingGPS
+                ? <ActivityIndicator size={10} color="#fff" style={{ marginRight: 4 }} />
+                : <Ionicons name="locate" size={12} color="#fff" />}
               <Text style={[styles.gpsBadgeText, { fontSize: 10 }]}>
-                {refreshingGPS ? "Обновление..." : "Обновить GPS"}
+                {refreshingGPS ? "Обновление..." : "GPS"}
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.menuBtn}
-              onPress={() => {
-                Alert.alert("Действия", "", [
-                  {
-                    text: "Отменить заказ",
-                    style: "destructive",
-                    onPress: () => {
-                      Alert.alert("Отменить заказ?", "Это действие нельзя отменить", [
-                        { text: "Нет", style: "cancel" },
-                        { text: "Да, отменить", style: "destructive", onPress: () => updateOrderStatus("canceled") },
-                      ]);
-                    },
-                  },
-                  { text: "Закрыть", style: "cancel" },
-                ]);
-              }}
+              onPress={() => Alert.alert("Действия", "", [
+                {
+                  text: "Отменить заказ",
+                  style: "destructive",
+                  onPress: () => Alert.alert("Отменить заказ?", "Это действие нельзя отменить", [
+                    { text: "Нет", style: "cancel" },
+                    { text: "Да, отменить", style: "destructive", onPress: () => updateOrderStatus("canceled") },
+                  ]),
+                },
+                { text: "Закрыть", style: "cancel" },
+              ])}
             >
               <Ionicons name="ellipsis-vertical" size={20} color="#888" />
             </TouchableOpacity>
           </View>
 
-          {/* Address + phone strip */}
-          <View style={styles.addressStrip}>
-            <View style={styles.addressLine}>
-              <Ionicons name="location" size={16} color="#FFD000" />
-              <Text style={styles.addressLineText} numberOfLines={1}>{activeOrder.pickupAddress || "Адрес не указан"}</Text>
-            </View>
-            {/* Show dropoff only for delivery (fixed price) orders */}
-            {activeOrder.isFixedPrice && activeOrder.dropoffAddress && (
-              <View style={styles.addressLine}>
-                <Ionicons name="flag" size={16} color="#2196F3" />
-                <Text style={styles.addressLineText} numberOfLines={1}>{activeOrder.dropoffAddress}</Text>
-              </View>
-            )}
-            <TouchableOpacity style={styles.addressLine} onPress={callClient} activeOpacity={0.7}>
-              <Ionicons name="call" size={16} color="#FFD000" />
-              <Text style={[styles.phoneText, { color: "#FFD000", textDecorationLine: "underline" }]}>
-                {activeOrder.phone}
-              </Text>
-            </TouchableOpacity>
+          {/* Адрес, телефон, навигатор */}
+          {addressBlock}
 
-            {/* Display Options if present */}
-            {Array.isArray(activeOrder.options) && activeOrder.options.length > 0 && (
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4, marginLeft: 22 }}>
-                {activeOrder.options.map((opt: any) => {
-                  const key = typeof opt === 'string' ? opt : opt.key;
-                  const label = opt.label || (key === 'luggage' ? 'Багаж' : key === 'roof_luggage' ? 'Верх. Багаж' : key === 'conditioner' ? 'Кондиционер' : 'Опция');
-                  const price = opt.price || (key === 'luggage' ? 100 : key === 'roof_luggage' ? 200 : key === 'conditioner' ? 100 : 0);
-
-                  return (
-                    <View key={key} style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
-                      <Ionicons
-                        name={key === 'luggage' ? 'briefcase' : key === 'roof_luggage' ? 'cube' : key === 'conditioner' ? 'snow' : 'apps-outline'}
-                        size={12}
-                        color={key === 'conditioner' ? '#4ade80' : '#fff'}
-                      />
-                      <Text style={{ fontSize: 10, color: key === 'conditioner' ? '#4ade80' : '#fff', fontWeight: "bold" }}>
-                        {label} (+{price})
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-
-            {/* Navigator button — full width */}
-            <TouchableOpacity style={styles.navBtn} onPress={openNavigator} activeOpacity={0.85}>
-              <Ionicons name="navigate" size={18} color="#000000ff" />
-              <Text style={styles.navBtnText}>
-                {
-                  activeOrder.status === "assigned"
-                    ? "Открыть навигатор → К клиенту"
-                    : activeOrder.status === "arrived"
-                      ? "Открыть навигатор → К назначению"
-                      : activeOrder.status === "in_progress"
-                        ? "Открыть навигатор → К назначению"
-                        : "Открыть навигатор"
-                }
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Elegant Status Center Fill */}
+          {/* Статус — иконка + текст + кнопка паузы */}
           <View style={styles.orderStatusCenter}>
-            {activeOrder.status === 'in_progress' ? (
+            {isInProgress ? (
               <TouchableOpacity
-                onPress={() => toggleTripWaiting(activeOrder.isWaiting ? "stop" : "start")}
+                onPress={() => toggleTripWaiting("start")}
                 disabled={loading}
                 activeOpacity={0.7}
-                style={[
-                  styles.statusPulseCircle,
-                  activeOrder.isWaiting && { backgroundColor: "rgba(255, 208, 0, 0.2)", borderColor: "#FFD000" }
-                ]}
+                style={styles.statusPulseCircle}
               >
-                <Ionicons
-                  name={activeOrder.isWaiting ? "play" : "pause"}
-                  size={60}
-                  color="#FFD000"
-                />
+                <Ionicons name="pause" size={60} color="#FFD000" />
               </TouchableOpacity>
             ) : (
               <View style={styles.statusPulseCircle}>
                 <Ionicons
-                  name={activeOrder.status === 'assigned' ? "paper-plane" : activeOrder.status === 'arrived' ? "body" : "car-sport"}
+                  name={activeOrder.status === "assigned" ? "paper-plane" : "body"}
                   size={54}
                   color="#FFD000"
                 />
               </View>
             )}
+
             <Text style={styles.statusCenterText}>
-              {activeOrder.status === 'assigned' ? "Подача автомобиля..." :
-                activeOrder.status === 'arrived' ? (
-                  waitingElapsed > 180
+              {activeOrder.status === "assigned"
+                ? "Подача автомобиля..."
+                : activeOrder.status === "arrived"
+                  ? waitingElapsed > 180
                     ? `Платное ожидание: ${Math.floor((waitingElapsed - 180) / 60) * 20} ₸ (${Math.floor(waitingElapsed / 60)} мин)`
-                    : `Ожидание: ${Math.floor(waitingElapsed / 60)}:${(waitingElapsed % 60).toString().padStart(2, '0')} (Беспл.)`
-                ) :
-                  "В пути..."}
+                    : `Ожидание: ${Math.floor(waitingElapsed / 60)}:${(waitingElapsed % 60).toString().padStart(2, "0")} (Беспл.)`
+                  : "В пути..."}
             </Text>
 
             <View style={styles.paymentBadge}>
@@ -1029,82 +1176,22 @@ export default function MainScreen() {
               <Text style={styles.paymentBadgeText}>Оплата наличными</Text>
             </View>
 
-            {hasTripWaitingSummary && (
-              <View style={styles.tripWaitingCard}>
-                <View style={styles.tripWaitingHeader}>
-                  <Ionicons
-                    name={activeOrder.isWaiting ? "pause-circle" : "time-outline"}
-                    size={18}
-                    color="#FFD000"
-                  />
-                  <Text style={styles.tripWaitingTitle}>
-                    {activeOrder.isWaiting ? "Ожидание активно" : "Ожидание по заказу"}
-                  </Text>
-                </View>
-                <Text style={styles.tripWaitingTimer}>
-                  {Math.floor(tripWaitingElapsed / 60)}:{(tripWaitingElapsed % 60).toString().padStart(2, "0")}
+            {/* Накопленное ожидание — компактно, без скачков */}
+            {!activeOrder.isWaiting && tripWaitingElapsed > 0 && (
+              <View style={styles.waitingAccBadge}>
+                <Ionicons name="time-outline" size={14} color="#FFD000" />
+                <Text style={styles.waitingAccText}>
+                  Ожидание: {Math.floor(tripWaitingElapsed / 60)}:{(tripWaitingElapsed % 60).toString().padStart(2, "0")} · +{tripWaitingFee} ₸
                 </Text>
-                <Text style={styles.tripWaitingFee}>+{tripWaitingFee} ₸</Text>
-                <Text style={styles.tripWaitingHint}>20 ₸/мин во время паузы поездки</Text>
               </View>
             )}
           </View>
 
-          {/* Meter strip — single row (preliminary / approximate values) */}
-          {activeOrder.status === "in_progress" && (
-            <View style={styles.meterStrip}>
-              {activeOrder.isFixedPrice ? (
-                <>
-                  <Text style={styles.meterStripLabel}>Фикс. цена</Text>
-                  <Text style={styles.meterStripPrice}>{displayedTripPrice} ₸</Text>
-                </>
-              ) : (
-                <>
-                  <View style={styles.meterStripItem}>
-                    <Ionicons name="speedometer-outline" size={14} color="#888" />
-                    {/* '~' indicates preliminary — server will calculate the exact figure */}
-                    <Text style={styles.meterStripValue}>{tripDistance.toFixed(1)} км</Text>
-                  </View>
-                  <View style={styles.meterStripItem}>
-                    <Ionicons name="time-outline" size={14} color="#888" />
-                    <Text style={styles.meterStripValue}>{tripElapsed} мин</Text>
-                  </View>
-                  <Text style={styles.meterStripPrice}>{displayedTripPrice}₸</Text>
-                </>
-              )}
-            </View>
-          )}
+          {/* Счётчик */}
+          {meterBlock}
 
-          {/* Action button */}
-          <View style={styles.orderActions}>
-            {activeOrder.status === "assigned" && (
-              <SwipeButton
-                title="Я на месте"
-                onSwipeComplete={() => updateOrderStatus("arrived")}
-                color="#FFD000"
-                iconName="navigate"
-                disabled={loading}
-              />
-            )}
-            {activeOrder.status === "arrived" && (
-              <SwipeButton
-                title="Клиент сел — поехали"
-                onSwipeComplete={() => updateOrderStatus("in_progress")}
-                color="#FFD000"
-                iconName="car"
-                disabled={loading}
-              />
-            )}
-            {activeOrder.status === "in_progress" && (
-              <SwipeButton
-                title="Завершить поездку"
-                onSwipeComplete={() => updateOrderStatus("completed")}
-                color="#ffd000ff"
-                iconName="checkmark-circle"
-                disabled={loading}
-              />
-            )}
-          </View>
+          {/* Кнопка действия */}
+          {actionButton}
         </View>
       );
     }
@@ -1201,14 +1288,14 @@ export default function MainScreen() {
 
         <View style={styles.homeSwipeContainer}>
           <SwipeButton
-            title={loading ? "..." : isOnline ? "Уйти с линии" : "Выйти на линию"}
+            title={togglingOnline ? "Подключение..." : isOnline ? "Уйти с линии" : "Выйти на линию"}
             onSwipeComplete={toggleOnline}
             color={isOnline ? "#cb1111ff" : "#FFD000"}
             textColor={isOnline ? "#fff" : "#000"}
             thumbColor={isOnline ? "#fff" : "#000"}
             iconColor={isOnline ? "#cb1111ff" : "#FFD000"}
             iconName={isOnline ? "power" : "flash"}
-            disabled={loading}
+            disabled={loading || togglingOnline}
           />
         </View>
       </View>
@@ -1598,4 +1685,67 @@ const styles = StyleSheet.create({
   alertActions: { flexDirection: "row", gap: 12 },
   alertBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 56, borderRadius: 14 },
   alertBtnText: { color: "#fff", fontSize: 16, fontWeight: "800" },
+
+  // ─── Pause banner (top of screen when isWaiting) ──────────
+  pauseBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(255,208,0,0.1)",
+    borderWidth: 2,
+    borderColor: "#FFD000",
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 10,
+  },
+  pauseBannerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  pauseBannerTitle: {
+    color: "#FFD000",
+    fontSize: 18,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+  pauseBannerSub: {
+    color: "#e0c84a",
+    fontSize: 14,
+    fontWeight: "600",
+    marginTop: 2,
+  },
+  pauseResumeBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#FFD000",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  pauseResumeBtnText: {
+    color: "#000",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+
+  // ─── Accumulated waiting badge (compact, no layout shift) ─
+  waitingAccBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,208,0,0.08)",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255,208,0,0.2)",
+  },
+  waitingAccText: {
+    color: "#e0c84a",
+    fontSize: 13,
+    fontWeight: "600",
+  },
 });

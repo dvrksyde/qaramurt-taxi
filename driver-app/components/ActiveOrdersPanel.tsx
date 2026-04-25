@@ -55,21 +55,27 @@ export function ActiveOrdersPanel() {
 
   useEffect(() => {
     fetchOrders();
-    const interval = setInterval(fetchOrders, 10000);
 
-    // Listen for real-time order_taken events to instantly remove taken orders
+    // Use socket events for real-time updates instead of polling
+    // order_taken: instantly remove taken orders from the list
+    // new_order_alert: a new order appeared, refresh the list
     const socket = getSocket();
     const handleOrderTaken = (data: { orderId: number }) => {
       setOrders((prev) => prev.filter((o) => o.id !== data.orderId));
     };
+    const handleNewOrder = () => {
+      fetchOrders();
+    };
+
     if (socket) {
       socket.on("order_taken", handleOrderTaken);
+      socket.on("new_order_alert", handleNewOrder);
     }
 
     return () => {
-      clearInterval(interval);
       if (socket) {
         socket.off("order_taken", handleOrderTaken);
+        socket.off("new_order_alert", handleNewOrder);
       }
     };
   }, [fetchOrders]);

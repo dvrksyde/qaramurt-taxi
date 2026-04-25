@@ -40,6 +40,15 @@ export function SwipeButton({
   const maxSlide = containerWidth - THUMB_SIZE - PADDING * 2;
   const completed = useRef(false);
 
+  // Keep latest values in refs so PanResponder (created once) always reads current state
+  const disabledRef = useRef(disabled);
+  const maxSlideRef = useRef(maxSlide);
+  const onSwipeCompleteRef = useRef(onSwipeComplete);
+
+  disabledRef.current = disabled;
+  maxSlideRef.current = maxSlide;
+  onSwipeCompleteRef.current = onSwipeComplete;
+
   const reset = useCallback(() => {
     completed.current = false;
     Animated.spring(translateX, {
@@ -50,32 +59,35 @@ export function SwipeButton({
     }).start();
   }, [translateX]);
 
+  const resetRef = useRef(reset);
+  resetRef.current = reset;
+
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => !disabled,
+      onStartShouldSetPanResponder: () => !disabledRef.current,
       onMoveShouldSetPanResponder: (_, gestureState) =>
-        !disabled && Math.abs(gestureState.dx) > 5,
+        !disabledRef.current && Math.abs(gestureState.dx) > 5,
       onPanResponderMove: (_, gestureState) => {
-        if (disabled || completed.current) return;
-        const newValue = Math.max(0, Math.min(gestureState.dx, maxSlide));
+        if (disabledRef.current || completed.current) return;
+        const newValue = Math.max(0, Math.min(gestureState.dx, maxSlideRef.current));
         translateX.setValue(newValue);
       },
       onPanResponderRelease: (_, gestureState) => {
-        if (disabled || completed.current) return;
-        const threshold = maxSlide * 0.75;
+        if (disabledRef.current || completed.current) return;
+        const threshold = maxSlideRef.current * 0.75;
         if (gestureState.dx >= threshold) {
           completed.current = true;
           Animated.spring(translateX, {
-            toValue: maxSlide,
+            toValue: maxSlideRef.current,
             useNativeDriver: true,
             tension: 80,
             friction: 10,
           }).start(() => {
-            onSwipeComplete();
-            setTimeout(reset, 500);
+            onSwipeCompleteRef.current();
+            setTimeout(() => resetRef.current(), 500);
           });
         } else {
-          reset();
+          resetRef.current();
         }
       },
     })

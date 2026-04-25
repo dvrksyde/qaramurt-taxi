@@ -6,10 +6,21 @@ let socket: Socket | null = null;
 export function connectSocket(driverId: number) {
   if (socket?.connected) return socket;
 
+  // Reuse disconnected socket instead of creating a new one
+  if (socket && !socket.connected) {
+    socket.connect();
+    return socket;
+  }
+
   socket = io(API_BASE, {
     path: "/api/socket",
     transports: ["websocket"],
     auth: { token: getToken() },
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 2000,
+    reconnectionDelayMax: 30000,
+    timeout: 20000,
   });
 
   socket.on("connect", () => {
