@@ -26,10 +26,13 @@ export async function POST(req: NextRequest) {
     }, { status: 403 });
   }
 
+<<<<<<< HEAD
   if (driver.status !== "free") {
     return NextResponse.json({ error: "Вы должны быть свободны на линии" }, { status: 400 });
   }
 
+=======
+>>>>>>> parent of 3283e3a (Updatee)
   // Check if driver is already assigned to any active order
   const activeOrder = await prisma.order.findFirst({
     where: {

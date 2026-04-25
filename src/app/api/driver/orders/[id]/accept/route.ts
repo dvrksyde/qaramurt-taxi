@@ -21,9 +21,15 @@ export async function POST(
     },
   });
 
+<<<<<<< HEAD
   if (driver && Number(driver.balance) < 30) {
     return NextResponse.json({ 
       error: "Недостаточный баланс (минимум 30 ₸). Пожалуйста, пополните счет." 
+=======
+  if (driver && Number(driver.balance) < 100) {
+    return NextResponse.json({ 
+      error: "Недостаточный баланс (минимум 100 ₸). Пожалуйста, пополните счет." 
+>>>>>>> parent of 3283e3a (Updatee)
     }, { status: 403 });
   }
 
