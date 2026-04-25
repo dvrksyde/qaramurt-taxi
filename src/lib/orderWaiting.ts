@@ -2,8 +2,8 @@ const WAITING_RATE_PER_MIN = 20;
 
 type WaitingOrderLike = {
   waitingStartedAt?: Date | string | null;
-  waitingAccumulatedSeconds?: number | null;
-  waitingFee?: number | string | null;
+  waitingAccumulatedSeconds?: number | string | any | null;
+  waitingFee?: any | null;
 };
 
 export function computeWaitingTotals(
