@@ -195,8 +195,13 @@ app.prepare().then(async () => {
       const auth = socket.data.auth as SocketAuth | undefined;
       if (auth?.kind !== "driver" || auth.driverId !== data.driverId) return;
 
-      io.to("monitor").emit("driver_location_update", data);
-      await safePub("driver_location", data);
+      if (redisAvailable) {
+        // Multi-instance: route through Redis so every node sees the update once
+        await safePub("driver_location", data);
+      } else {
+        // Single-instance or Redis down: emit directly
+        io.to("monitor").emit("driver_location_update", data);
+      }
     });
 
     socket.on("dispatch_order", async (alert: OrderAlert) => {
@@ -208,8 +213,11 @@ app.prepare().then(async () => {
         io.to(`driver:${alert.targetDriverId}`).emit("new_order_alert", alert);
       }
 
-      io.to("monitor").emit("order_updated", { orderId: alert.orderId, method: alert.method });
-      await safePub("order_dispatch", alert);
+      if (redisAvailable) {
+        await safePub("order_dispatch", { orderId: alert.orderId, method: alert.method });
+      } else {
+        io.to("monitor").emit("order_updated", { orderId: alert.orderId, method: alert.method });
+      }
     });
 
     socket.on("driver_accept_order", (data: { orderId: number; driverId: number }) => {
@@ -319,11 +327,20 @@ app.prepare().then(async () => {
       console.log(`[ALARM] Driver ${data.driverId} triggered emergency!`);
     });
 
-    socket.on("request_counts", () => {
+    socket.on("request_counts", async () => {
       const auth = socket.data.auth as SocketAuth | undefined;
       if (auth?.kind !== "operator") return;
 
-      socket.emit("tab_counts", { current: 0, chat: 0, system: 0 });
+      try {
+        const prisma = getPrisma();
+        const [current, chat] = await Promise.all([
+          prisma.order.count({ where: { status: { in: ["pending", "assigned", "arrived", "in_progress"] } } }),
+          prisma.chatMessage.count({ where: { direction: "inbound", createdAt: { gte: new Date(Date.now() - 3600_000) } } }),
+        ]);
+        socket.emit("tab_counts", { current, chat, system: 0 });
+      } catch {
+        socket.emit("tab_counts", { current: 0, chat: 0, system: 0 });
+      }
     });
 
     socket.on("disconnect", () => {

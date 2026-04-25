@@ -21,7 +21,9 @@ services:
     container_name: qaramurt_redis
     restart: unless-stopped
     env_file: .env
-    command: redis-server --requirepass ${REDIS_PASSWORD:-""}
+    command: redis-server --requirepass ${REDIS_PASSWORD:-""} --appendonly yes
+    volumes:
+      - redisdata:/data
     ports:
       - "6379:6379"
     healthcheck:

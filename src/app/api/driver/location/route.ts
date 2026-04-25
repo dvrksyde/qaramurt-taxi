@@ -10,6 +10,13 @@ export async function POST(req: NextRequest) {
   const auth = verifyDriverToken(req);
   if (!auth) return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
 
+  // Rate limit: max 1 update per 3 seconds per driver
+  const rateLimitKey = `driver:${auth.driverId}:loc_rl`;
+  const blocked = await redis.set(rateLimitKey, "1", { NX: true, EX: 3 });
+  if (!blocked) {
+    return NextResponse.json({ ok: true, skipped: true });
+  }
+
   const { lat, lng } = await req.json();
 
   if (typeof lat !== "number" || typeof lng !== "number") {

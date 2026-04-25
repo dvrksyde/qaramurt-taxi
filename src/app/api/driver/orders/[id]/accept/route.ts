@@ -30,25 +30,19 @@ export async function POST(
   const activeVehicleId = driver?.vehicles?.[0]?.id ?? null;
 
 
-  // Check if driver is already on another active order
-  const existingOrder = await prisma.order.findFirst({
-    where: {
-      driverId: auth.driverId,
-      status: { in: ["assigned", "arrived", "in_progress"] },
-    }
-  });
-
-  if (existingOrder) {
-    return NextResponse.json({
-      error: "У вас уже есть активный заказ. Сначала завершите текущую поездку."
-    }, { status: 403 });
-  }
-
   const { id } = await params;
   const orderId = parseInt(id);
 
-  // Atomic: accept order AND set driver to busy in one transaction
+  // Atomic: accept order AND check for existing active orders inside one transaction
+  // This prevents the race condition where a driver accepts two orders simultaneously
   const result = await prisma.$transaction(async (tx) => {
+    // Check for existing active order inside transaction to prevent TOCTOU race
+    const existingOrder = await tx.order.findFirst({
+      where: { driverId: auth.driverId, status: { in: ["assigned", "arrived", "in_progress"] } },
+      select: { id: true },
+    });
+    if (existingOrder) return "has_active";
+
     const updated = await tx.order.updateMany({
       where: { id: orderId, status: "pending" },
       data: {
@@ -72,6 +66,12 @@ export async function POST(
 
     return updated;
   });
+
+  if (result === "has_active") {
+    return NextResponse.json({
+      error: "У вас уже есть активный заказ. Сначала завершите текущую поездку."
+    }, { status: 403 });
+  }
 
   if (!result) {
     return NextResponse.json({ error: "Заказ уже занят" }, { status: 409 });

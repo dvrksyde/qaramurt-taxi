@@ -19,8 +19,8 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const statusParam = searchParams.get("status");
-  const page = parseInt(searchParams.get("page") || "1");
-  const pageSize = parseInt(searchParams.get("pageSize") || "50");
+  const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
+  const pageSize = Math.min(200, Math.max(1, parseInt(searchParams.get("pageSize") || "50")));
   const driverId = searchParams.get("driverId");
   const operatorIdParam = searchParams.get("operatorId");
   const phone = searchParams.get("phone");

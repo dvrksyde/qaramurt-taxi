@@ -44,14 +44,18 @@ export async function POST(req: NextRequest) {
 
   const activeVehicle = driver.vehicles.find((v) => v.isActive);
   const classObj = activeVehicle?.classes?.[0]?.class;
-  const isComfort = classObj?.name === "Комфорт";
 
-  let pricePerKm = driver.tariffGroup ?
-    Number(driver.tariffGroup.description?.match(/(\d+) ₸\/км/)?.[1] || 80) : 80;
-
-  if (isComfort) {
-    if (pricePerKm === 80) pricePerKm = 100;
-    else if (pricePerKm === 120) pricePerKm = 140;
+  // Look up the actual tariff for the driver's vehicle class (most reliable source)
+  let pricePerKm = 80;
+  if (classObj?.id) {
+    const tariff = await prisma.tariff.findFirst({
+      where: { classId: classObj.id, isActive: true },
+      orderBy: { id: "asc" },
+      select: { pricePerKm: true },
+    });
+    if (tariff && Number(tariff.pricePerKm) > 0) {
+      pricePerKm = Number(tariff.pricePerKm);
+    }
   }
 
   try {

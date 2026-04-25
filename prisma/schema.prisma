@@ -388,7 +388,9 @@ model Order {
 
   @@index([status])
   @@index([driverId])
+  @@index([driverId, status])
   @@index([operatorId])
+  @@index([status, createdAt])
   @@index([createdAt])
   @@map("orders")
 }

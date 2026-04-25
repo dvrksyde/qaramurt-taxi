@@ -11,13 +11,18 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+
 COPY --from=builder /app/package*.json ./
 RUN npm ci --omit=dev
+
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/server.js ./server.js
 COPY --from=builder /app/prisma ./prisma
-# Копируем скомпилированную библиотеку для driverAuth (нужна в server.js)
-COPY --from=builder /app/src/lib/driverAuth.js ./src/lib/driverAuth.js
+
+# Копируем ВСЕ скомпилированные файлы src/lib (server.js импортирует несколько модулей)
+# tsc -p tsconfig.server.json генерирует .js рядом с .ts (outDir = rootDir = ".")
+COPY --from=builder /app/src/lib ./src/lib
+
 EXPOSE 3000
 CMD ["npm", "run", "start:prod"]

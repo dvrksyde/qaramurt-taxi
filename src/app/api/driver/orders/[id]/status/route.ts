@@ -48,6 +48,24 @@ export async function PATCH(
     return NextResponse.json({ error: "Заказ не найден" }, { status: 404 });
   }
 
+  // Guard against re-processing terminal states — prevents double commission
+  if (order.status === "completed" || order.status === "canceled") {
+    return NextResponse.json({ error: "Заказ уже завершён" }, { status: 409 });
+  }
+
+  // Validate status transition
+  const allowedTransitions: Record<string, string[]> = {
+    assigned:    ["arrived", "canceled"],
+    arrived:     ["in_progress", "canceled"],
+    in_progress: ["completed", "canceled"],
+  };
+  if (!allowedTransitions[order.status]?.includes(status)) {
+    return NextResponse.json(
+      { error: `Переход ${order.status} → ${status} недопустим` },
+      { status: 422 }
+    );
+  }
+
   const updateData: Record<string, unknown> = { status };
   const fixedPriceOrder = isDeliveryOrder(order);
   const currentBaseFare = order.class?.name === "Комфорт" ? 390 : BASE_FARE;
@@ -121,39 +139,46 @@ export async function PATCH(
 
           if (calc.distanceKm > 0) {
             // GPS session has enough points — use server calculation
-            await completeSession(activeSession.id, calc.distanceKm, calc.finalPrice);
+            const serverPrice = Math.max(calc.finalPrice, currentBaseFare);
+            await completeSession(activeSession.id, calc.distanceKm, serverPrice);
             updateData.distanceKm = calc.distanceKm;
-            updateData.finalPrice = calc.finalPrice;
+            updateData.finalPrice = serverPrice;
           } else {
             // < 2 GPS points (bad GPS / very short trip) — use client backup
             console.warn(`[trip/complete] Session ${activeSession.id} has < 2 points; using client fallback`);
-            await completeSession(
-              activeSession.id,
-              clientDistanceKm ?? 0,
-              clientFinalPrice ?? roundTo5(currentBaseFare)
+            const fallbackPrice = Math.max(
+              clientFinalPrice ?? roundTo5(currentBaseFare),
+              currentBaseFare
             );
+            await completeSession(activeSession.id, clientDistanceKm ?? 0, fallbackPrice);
             if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
-            updateData.finalPrice =
-              clientFinalPrice ??
-              roundTo5(currentBaseFare + Number(clientDistanceKm ?? 0) * Number(order.pricePerKm));
+            updateData.finalPrice = fallbackPrice;
           }
         } catch (err) {
           console.error("[trip/complete] Server calc failed:", err);
           // Graceful fallback: use client values if server calc throws
           if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
-          updateData.finalPrice =
-            clientFinalPrice ??
-            (clientDistanceKm !== undefined
-              ? roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm))
-              : undefined);
+          const fallbackPrice = clientDistanceKm !== undefined
+            ? roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm))
+            : currentBaseFare;
+          updateData.finalPrice = Math.max(
+            clientFinalPrice ?? fallbackPrice,
+            currentBaseFare
+          );
         }
       } else {
         // No GPS session — fall back to client-reported values
         if (clientDistanceKm !== undefined) {
           updateData.distanceKm = clientDistanceKm;
-          updateData.finalPrice = roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm));
+          // Enforce minimum: client cannot report a price below base fare
+          const computed = roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm));
+          updateData.finalPrice = Math.max(computed, currentBaseFare);
         } else if (clientFinalPrice !== undefined) {
-          updateData.finalPrice = clientFinalPrice;
+          // Enforce minimum regardless of what client sends
+          updateData.finalPrice = Math.max(Number(clientFinalPrice), currentBaseFare);
+        } else {
+          // Absolute fallback — never leave finalPrice null on completion
+          updateData.finalPrice = currentBaseFare;
         }
       }
       // ────────────────────────────────────────────────────────────────────────
@@ -211,21 +236,46 @@ export async function PATCH(
     }
 
     if (status === "canceled") {
-      const penalty = 50;
-      await tx.driver.update({
-        where: { id: auth.driverId },
-        data: { balance: { decrement: penalty } },
-      });
-      await tx.cashTransaction.create({
-        data: {
-          driverId: auth.driverId,
-          operatorId,
-          orderId,
-          amount: penalty,
-          type: "penalty",
-          description: `Штраф за отмену заказа #${orderId}`,
-        },
-      });
+      // Tiered penalty based on what stage the driver canceled at
+      // order.status is the PREVIOUS status (before this update)
+      let penalty = 0;
+      let penaltyDesc = "";
+
+      if (order.status === "assigned") {
+        // Grace period: no penalty within 2 minutes of assignment
+        const assignedMs = order.assignedAt
+          ? Date.now() - new Date(order.assignedAt).getTime()
+          : Infinity;
+        if (assignedMs < 2 * 60 * 1000) {
+          penalty = 0; // grace period
+        } else {
+          penalty = 50;
+          penaltyDesc = `Штраф за отмену заказа #${orderId} (принят, но не выехал)`;
+        }
+      } else if (order.status === "arrived") {
+        penalty = 100;
+        penaltyDesc = `Штраф за отмену заказа #${orderId} (доехал, но клиента не взял)`;
+      } else if (order.status === "in_progress") {
+        penalty = 150;
+        penaltyDesc = `Штраф за отмену заказа #${orderId} (отмена во время поездки)`;
+      }
+
+      if (penalty > 0) {
+        await tx.driver.update({
+          where: { id: auth.driverId },
+          data: { balance: { decrement: penalty } },
+        });
+        await tx.cashTransaction.create({
+          data: {
+            driverId: auth.driverId,
+            operatorId,
+            orderId,
+            amount: penalty,
+            type: "penalty",
+            description: penaltyDesc,
+          },
+        });
+      }
     }
 
     if (status === "completed" || status === "canceled") {
