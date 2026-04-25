@@ -134,12 +134,15 @@ export async function PATCH(
       });
 
       if (activeSession) {
+        // Session baseFare already includes arrival waiting fee (set in trip/start route)
+        const sessionBaseFare = Number(activeSession.baseFare) || currentBaseFare;
+
         try {
           const calc = await calculateSessionDistance(activeSession.id);
 
           if (calc.distanceKm > 0) {
             // GPS session has enough points — use server calculation
-            const serverPrice = Math.max(calc.finalPrice, currentBaseFare);
+            const serverPrice = Math.max(calc.finalPrice, sessionBaseFare);
             await completeSession(activeSession.id, calc.distanceKm, serverPrice);
             updateData.distanceKm = calc.distanceKm;
             updateData.finalPrice = serverPrice;
@@ -147,8 +150,8 @@ export async function PATCH(
             // < 2 GPS points (bad GPS / very short trip) — use client backup
             console.warn(`[trip/complete] Session ${activeSession.id} has < 2 points; using client fallback`);
             const fallbackPrice = Math.max(
-              clientFinalPrice ?? roundTo5(currentBaseFare),
-              currentBaseFare
+              clientFinalPrice ?? roundTo5(sessionBaseFare),
+              sessionBaseFare
             );
             await completeSession(activeSession.id, clientDistanceKm ?? 0, fallbackPrice);
             if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
@@ -156,14 +159,13 @@ export async function PATCH(
           }
         } catch (err) {
           console.error("[trip/complete] Server calc failed:", err);
-          // Graceful fallback: use client values if server calc throws
           if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
           const fallbackPrice = clientDistanceKm !== undefined
-            ? roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm))
-            : currentBaseFare;
+            ? roundTo5(sessionBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm))
+            : sessionBaseFare;
           updateData.finalPrice = Math.max(
             clientFinalPrice ?? fallbackPrice,
-            currentBaseFare
+            sessionBaseFare
           );
         }
       } else {

@@ -70,9 +70,11 @@ interface DriverState {
   setActiveOrder: (o: ActiveOrder | null) => void;
   tripDistance: number;
   tripPrice: number;
+  tripBaseFare: number;
   tripStartTime: number | null;
   lastLocation: { lat: number; lng: number } | null;
   setTripMeter: (d: number, p: number) => void;
+  setTripBaseFare: (fare: number) => void;
   setLastLocation: (loc: { lat: number; lng: number } | null) => void;
   resetTrip: () => void;
   startTrip: () => void;
@@ -104,10 +106,12 @@ export const useDriverStore = create<DriverState>((set) => ({
   setActiveOrder: (activeOrder) => set({ activeOrder }),
   tripDistance: 0,
   tripPrice: 0,
+  tripBaseFare: 290,
   tripStartTime: null,
   lastLocation: null,
   setTripMeter: (tripDistance, tripPrice) => set({ tripDistance, tripPrice }),
+  setTripBaseFare: (tripBaseFare) => set({ tripBaseFare }),
   setLastLocation: (lastLocation) => set({ lastLocation }),
-  resetTrip: () => set({ tripDistance: 0, tripPrice: 0, tripStartTime: null, lastLocation: null }),
+  resetTrip: () => set({ tripDistance: 0, tripPrice: 0, tripBaseFare: 290, tripStartTime: null, lastLocation: null }),
   startTrip: () => set({ tripStartTime: Date.now(), lastLocation: null }),
 }));

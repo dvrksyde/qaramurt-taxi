@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useRef, useState } from "react";
+import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import {
   View,
   Text,
@@ -94,10 +95,11 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
 
         if (d > 0.015) {
           const newDist = state.tripDistance + d;
-          const currentBaseFare = state.activeOrder?.class?.name === "Комфорт" ? 390 : BASE_FARE;
+          // Используем сохранённую базовую ставку — она уже включает ожидание у клиента
+          const baseFare = state.tripBaseFare || (state.activeOrder?.class?.name === "Комфорт" ? 390 : BASE_FARE);
           const options: any[] = Array.isArray(state.activeOrder?.options) ? state.activeOrder.options : [];
           const extrasTotal = options.reduce((sum, opt) => sum + (Number(opt.price) || 0), 0);
-          const newPrice = roundTo5(currentBaseFare + extrasTotal + newDist * Number(state.activeOrder.pricePerKm));
+          const newPrice = roundTo5(baseFare + extrasTotal + newDist * Number(state.activeOrder.pricePerKm));
           useDriverStore.getState().setTripMeter(newDist, newPrice);
         }
       }
@@ -184,10 +186,19 @@ export default function MainScreen() {
     }).catch(console.warn);
 
     return () => {
-      // Unload any playing sound when screen unmounts
       soundRef.current?.unloadAsync().catch(() => {});
     };
   }, []);
+
+  // Держим экран включённым пока водитель на линии или везёт клиента
+  useEffect(() => {
+    const shouldStayOn = isOnline || !!activeOrder;
+    if (shouldStayOn) {
+      activateKeepAwakeAsync().catch(() => {});
+    } else {
+      deactivateKeepAwake();
+    }
+  }, [isOnline, activeOrder]);
 
   const playAppSound = async (type: 'new_order' | 'welcome' | 'trip_completed') => {
     try {
@@ -725,7 +736,10 @@ export default function MainScreen() {
         }
       }
 
-      // Обнуляем оба счётчика синхронно
+      // Сохраняем реальную базовую ставку (с учётом ожидания у клиента)
+      // чтобы фоновый таск и fallback при завершении использовали правильное значение
+      useDriverStore.getState().setTripBaseFare(baseTripFare);
+
       tripDistanceRef.current = 0;
       useDriverStore.getState().setTripMeter(0, baseTripFare);
       setTripMeter(0, baseTripFare);
@@ -746,11 +760,13 @@ export default function MainScreen() {
 
         // Резервные значения с телефона — сервер использует их только если
         // GPS-сессии нет или точек оказалось меньше 2 (плохой GPS / короткая поездка)
+        const storeState = useDriverStore.getState();
         const fallbackDist =
-          Math.round(Math.max(useDriverStore.getState().tripDistance, tripDistanceRef.current) * 10) / 10;
-        const currentBaseFare = activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE;
+          Math.round(Math.max(storeState.tripDistance, tripDistanceRef.current) * 10) / 10;
+        // Берём реальную базовую ставку (с ожиданием у клиента), не константу
+        const baseFare = storeState.tripBaseFare || (activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE);
         body.clientDistanceKm = fallbackDist;
-        body.clientFinalPrice = roundTo5(currentBaseFare + fallbackDist * activeOrder.pricePerKm) + tripWaitingFee + 10;
+        body.clientFinalPrice = roundTo5(baseFare + fallbackDist * activeOrder.pricePerKm) + tripWaitingFee;
       } else {
         // Fixed-price: явно передаём цену
         if (activeOrder.distanceKm > 0) {
