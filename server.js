@@ -11,6 +11,7 @@ const redis_1 = require("redis");
 const socket_io_1 = require("socket.io");
 const driverAuth_1 = require("./src/lib/driverAuth");
 const prisma_1 = require("./src/lib/prisma");
+require("./src/lib/queue"); // Start BullMQ worker
 const dev = process.env.NODE_ENV !== "production";
 const app = (0, next_1.default)({ dev });
 const handle = app.getRequestHandler();
@@ -149,8 +150,14 @@ app.prepare().then(async () => {
             const auth = socket.data.auth;
             if (auth?.kind !== "driver" || auth.driverId !== data.driverId)
                 return;
-            io.to("monitor").emit("driver_location_update", data);
-            await safePub("driver_location", data);
+            if (redisAvailable) {
+                // Multi-instance: route through Redis so every node sees the update once
+                await safePub("driver_location", data);
+            }
+            else {
+                // Single-instance or Redis down: emit directly
+                io.to("monitor").emit("driver_location_update", data);
+            }
         });
         socket.on("dispatch_order", async (alert) => {
             if (!hasOperatorPermission(socket, "current_orders"))
@@ -161,8 +168,12 @@ app.prepare().then(async () => {
             else if (alert.targetDriverId) {
                 io.to(`driver:${alert.targetDriverId}`).emit("new_order_alert", alert);
             }
-            io.to("monitor").emit("order_updated", { orderId: alert.orderId, method: alert.method });
-            await safePub("order_dispatch", alert);
+            if (redisAvailable) {
+                await safePub("order_dispatch", { orderId: alert.orderId, method: alert.method });
+            }
+            else {
+                io.to("monitor").emit("order_updated", { orderId: alert.orderId, method: alert.method });
+            }
         });
         socket.on("driver_accept_order", (data) => {
             const auth = socket.data.auth;
@@ -261,11 +272,21 @@ app.prepare().then(async () => {
             io.to("monitor").emit("driver_alarm", { ...data, timestamp: new Date().toISOString() });
             console.log(`[ALARM] Driver ${data.driverId} triggered emergency!`);
         });
-        socket.on("request_counts", () => {
+        socket.on("request_counts", async () => {
             const auth = socket.data.auth;
             if (auth?.kind !== "operator")
                 return;
-            socket.emit("tab_counts", { current: 0, scheduled: 0, exchange: 0, chat: 0, system: 0, alarms: 0 });
+            try {
+                const prisma = (0, prisma_1.getPrisma)();
+                const [current, chat] = await Promise.all([
+                    prisma.order.count({ where: { status: { in: ["pending", "assigned", "arrived", "in_progress"] } } }),
+                    prisma.chatMessage.count({ where: { direction: "inbound", createdAt: { gte: new Date(Date.now() - 3600000) } } }),
+                ]);
+                socket.emit("tab_counts", { current, chat, system: 0 });
+            }
+            catch {
+                socket.emit("tab_counts", { current: 0, chat: 0, system: 0 });
+            }
         });
         socket.on("disconnect", () => {
             const driverId = socket.data.driverId;

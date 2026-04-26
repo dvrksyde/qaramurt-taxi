@@ -23,7 +23,8 @@ const NAV_LINKS = [
   { href: "/drivers",                   label: "Водители",        requiredPerms: [] as string[] },
   { href: "/clients",                   label: "Клиенты",         requiredPerms: ["clients"] },
   { href: "/journal",                   label: "Журнал заказов",  requiredPerms: ["journal_own", "journal_all"] },
-  { href: "/settings/tariffs-driver",   label: "Тарифы",          requiredPerms: ["admin"] },
+  { href: "/settings/tariffs",           label: "Тарифы",          requiredPerms: ["admin"] },
+  { href: "/settings/tariffs-driver",   label: "Комиссии",        requiredPerms: ["admin"] },
   { href: "/settings/address-book",     label: "Адреса",          requiredPerms: ["admin"] },
   { href: "/reports",                   label: "Отчеты",          requiredPerms: ["admin", "kassa_report_all"] },
 ];
