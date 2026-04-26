@@ -25,7 +25,7 @@ export async function GET() {
     const geozones = await prisma.$queryRaw<
       Array<{ id: number; name: string; type: string; polygon: string; isActive: boolean; createdAt: Date }>
     >`
-      SELECT id, name, type, polygon, "isActive", "createdAt"
+      SELECT id, name, "type", polygon, "isActive", "createdAt"
       FROM geozones
       ORDER BY "createdAt" DESC
     `;
