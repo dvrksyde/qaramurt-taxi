@@ -19,6 +19,10 @@ type StoredTripSyncState = {
   sessionId: number | null;
   nextSequenceNumber: number;
   pendingPoints: PendingTripPoint[];
+  // Server-resolved rates (correct for "Любой" orders with Comfort driver)
+  effectiveBaseFare?: number;
+  effectiveCityRatePerKm?: number;
+  outOfCityKmRate?: number;
 };
 
 let cachedState: StoredTripSyncState | null | undefined;
@@ -53,17 +57,21 @@ async function ensureSession(orderId: number): Promise<StoredTripSyncState | nul
   if (!state || state.orderId !== orderId) return state;
   if (state.sessionId) return state;
 
-  const res = await api<{ sessionId: number }>(`/api/driver/orders/${orderId}/trip/start`, {
-    method: "POST",
-  });
+  const res = await api<{
+    sessionId: number;
+    effectiveBaseFare?: number;
+    effectiveCityRatePerKm?: number;
+    outOfCityKmRate?: number;
+  }>(`/api/driver/orders/${orderId}/trip/start`, { method: "POST" });
 
-  if (!res.data?.sessionId) {
-    return state;
-  }
+  if (!res.data?.sessionId) return state;
 
   const nextState: StoredTripSyncState = {
     ...state,
     sessionId: res.data.sessionId,
+    effectiveBaseFare: res.data.effectiveBaseFare,
+    effectiveCityRatePerKm: res.data.effectiveCityRatePerKm,
+    outOfCityKmRate: res.data.outOfCityKmRate,
   };
   await writeState(nextState);
   return nextState;
@@ -161,6 +169,21 @@ export async function flushTripPoints(orderId: number): Promise<boolean> {
   })();
 
   return activeFlushPromise;
+}
+
+/** Returns server-resolved rates for the active trip session (or null if not started yet). */
+export async function getTripRates(orderId: number): Promise<{
+  effectiveBaseFare: number;
+  effectiveCityRatePerKm: number;
+  outOfCityKmRate: number;
+} | null> {
+  const state = await readState();
+  if (!state || state.orderId !== orderId || !state.sessionId) return null;
+  return {
+    effectiveBaseFare: state.effectiveBaseFare ?? 290,
+    effectiveCityRatePerKm: state.effectiveCityRatePerKm ?? 80,
+    outOfCityKmRate: state.outOfCityKmRate ?? 0,
+  };
 }
 
 export async function clearTripSync(orderId?: number): Promise<void> {

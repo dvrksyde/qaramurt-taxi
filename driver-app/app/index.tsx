@@ -29,7 +29,7 @@ import { DriverProfilePanel } from "../components/DriverProfilePanel";
 import { ActiveOrdersPanel } from "../components/ActiveOrdersPanel";
 import { SwipeButton } from "../components/SwipeButton";
 import { mapOrderToActiveOrder } from "../lib/orderPricing";
-import { clearTripSync, flushTripPoints, queueTripPoint, startTripSync } from "../services/tripSync";
+import { clearTripSync, flushTripPoints, getTripRates, queueTripPoint, startTripSync } from "../services/tripSync";
 
 const BASE_FARE = 290;
 type DriverTab = "home" | "orders" | "history" | "chat" | "profile";
@@ -100,17 +100,19 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
           const options: any[] = Array.isArray(state.activeOrder?.options) ? state.activeOrder.options : [];
           const extrasTotal = options.reduce((sum, opt) => sum + (Number(opt.price) || 0), 0);
 
+          // Use server-resolved city rate (correct for "Любой" orders with Comfort driver)
+          // Falls back to order.pricePerKm if not set yet
+          const cityRate = state.tripCityRatePerKm || Number(state.activeOrder.pricePerKm) || 80;
+
           let newPrice: number;
           if (state.isOutOfCity && state.outOfCityStartTime !== null) {
-            // За городом: продолжаем от цены на момент выезда + расстояние по загородному тарифу + 25₸/мин
             const distSinceZone = newDist - state.tripDistanceAtZoneChange;
-            const outRate = state.outOfCityRatePerKm || Number(state.activeOrder.pricePerKm);
+            const outRate = state.outOfCityRatePerKm || cityRate;
             const outTimeFee = Math.floor((Date.now() - state.outOfCityStartTime) / 60000) * 25;
             newPrice = roundTo5(state.tripPriceAtZoneChange + extrasTotal + distSinceZone * outRate + outTimeFee);
           } else {
-            // Внутри города: стандартный расчёт
             const baseFare = state.tripBaseFare || (state.activeOrder?.class?.name === "Комфорт" ? 390 : BASE_FARE);
-            newPrice = roundTo5(baseFare + extrasTotal + newDist * Number(state.activeOrder.pricePerKm));
+            newPrice = roundTo5(baseFare + extrasTotal + newDist * cityRate);
           }
           useDriverStore.getState().setTripMeter(newDist, newPrice);
         }
@@ -796,10 +798,11 @@ export default function MainScreen() {
         const storeState = useDriverStore.getState();
         const fallbackDist =
           Math.round(Math.max(storeState.tripDistance, tripDistanceRef.current) * 10) / 10;
-        // Берём реальную базовую ставку (с ожиданием у клиента), не константу
         const baseFare = storeState.tripBaseFare || (activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE);
+        // Use server-resolved city rate for fallback (correct for "Любой" orders)
+        const cityRate = storeState.tripCityRatePerKm || Number(activeOrder.pricePerKm) || 80;
         body.clientDistanceKm = fallbackDist;
-        body.clientFinalPrice = roundTo5(baseFare + fallbackDist * activeOrder.pricePerKm) + tripWaitingFee;
+        body.clientFinalPrice = roundTo5(baseFare + fallbackDist * cityRate) + tripWaitingFee;
       } else {
         // Fixed-price: явно передаём цену
         if (activeOrder.distanceKm > 0) {
@@ -867,6 +870,19 @@ export default function MainScreen() {
       if (status === "in_progress" && !activeOrder.isFixedPrice) {
         void (async () => {
           await startTripSync(activeOrder.id);
+
+          // Apply server-resolved rates (correct for "Любой" orders with Comfort driver)
+          const rates = await getTripRates(activeOrder.id);
+          if (rates) {
+            const store = useDriverStore.getState();
+            // Update base fare if server returned a different value (e.g., Comfort driver)
+            if (rates.effectiveBaseFare && rates.effectiveBaseFare !== store.tripBaseFare) {
+              store.setTripBaseFare(rates.effectiveBaseFare);
+              store.setTripMeter(0, rates.effectiveBaseFare);
+            }
+            store.setTripCityRate(rates.effectiveCityRatePerKm);
+          }
+
           try {
             const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
             const seedPoint = {
