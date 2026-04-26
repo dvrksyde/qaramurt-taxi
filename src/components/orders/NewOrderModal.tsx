@@ -47,6 +47,12 @@ export function NewOrderModal({ onClose }: Props) {
   // Route state
   const [route, setRoute] = useState<[number, number][] | null>(null);
 
+  // City boundary polygon for split pricing estimate
+  // Stored as [[lng, lat], ...] GeoJSON format
+  const [cityPolygon, setCityPolygon] = useState<number[][] | null>(null);
+  // Split result: km inside city vs outside
+  const [routeSplit, setRouteSplit] = useState<{ cityKm: number; outKm: number } | null>(null);
+
   const { register, handleSubmit, watch, setValue, control, setFocus } = useForm<NewOrderFormData>({
     defaultValues: {
       phone: "+7",
@@ -101,8 +107,41 @@ export function NewOrderModal({ onClose }: Props) {
     return () => clearTimeout(timer);
   }, [watchedPhone]);
 
-  // Load initial data
+  // Ray-casting point-in-polygon (polygon is [[lng, lat], ...] GeoJSON)
+  const pointInPolygon = useCallback((lat: number, lng: number, polygon: number[][]): boolean => {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i][0], yi = polygon[i][1];
+      const xj = polygon[j][0], yj = polygon[j][1];
+      const intersect = ((yi > lat) !== (yj > lat)) &&
+        (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }, []);
+
+  // Haversine for segment distance (km)
+  const segKm = useCallback((lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }, []);
+
+  // Load initial data + city boundary
   useEffect(() => {
+    // Load city boundary for split pricing
+    fetch("/api/geozones")
+      .then((r) => r.json())
+      .then((data: any[]) => {
+        const boundary = data.find((z) => z.type === "city_boundary" && z.isActive && z.geojson);
+        if (boundary?.geojson?.coordinates?.[0]) {
+          setCityPolygon(boundary.geojson.coordinates[0]);
+        }
+      })
+      .catch(() => {});
+
     Promise.all([
       fetch("/api/services").then((r) => r.json()),
       fetch("/api/vehicle-classes").then((r) => r.json()),
@@ -175,10 +214,11 @@ export function NewOrderModal({ onClose }: Props) {
     return () => clearTimeout(timer);
   }, [watchedPickup, watchedDropoff, activeField]);
 
-  // Route & Distance logic (OSRM)
+  // Route & Distance logic (OSRM) + city/out-of-city split
   useEffect(() => {
     if (!watchedPickupPoint || !watchedDropoffPoint) {
       setRoute(null);
+      setRouteSplit(null);
       return;
     }
 
@@ -192,12 +232,39 @@ export function NewOrderModal({ onClose }: Props) {
 
         if (data.code === "Ok" && data.routes?.[0]) {
           const routeData = data.routes[0];
-          // Convert [lng, lat] to [lat, lng]
-          const coords = routeData.geometry.coordinates.map((c: [number, number]) => [c[1], c[0]]);
+          // OSRM returns [lng, lat] — convert to [lat, lng] for Leaflet
+          const coords: [number, number][] = routeData.geometry.coordinates.map(
+            (c: [number, number]) => [c[1], c[0]] as [number, number]
+          );
           setRoute(coords);
 
           const distKm = routeData.distance / 1000;
           setValue("distanceKm", Number(distKm.toFixed(3)));
+
+          // Split route into city / out-of-city segments using city boundary polygon
+          if (cityPolygon && cityPolygon.length > 2) {
+            let cityKm = 0;
+            let outKm = 0;
+            for (let i = 1; i < coords.length; i++) {
+              const [pLat, pLng] = coords[i - 1];
+              const [cLat, cLng] = coords[i];
+              const d = segKm(pLat, pLng, cLat, cLng);
+              // Use midpoint of segment to determine zone
+              const midLat = (pLat + cLat) / 2;
+              const midLng = (pLng + cLng) / 2;
+              if (pointInPolygon(midLat, midLng, cityPolygon)) {
+                cityKm += d;
+              } else {
+                outKm += d;
+              }
+            }
+            setRouteSplit({
+              cityKm: Math.ceil(cityKm * 10) / 10,
+              outKm: Math.ceil(outKm * 10) / 10,
+            });
+          } else {
+            setRouteSplit(null);
+          }
         }
       } catch (e) {
         console.error("OSRM fetch failed", e);
@@ -205,28 +272,44 @@ export function NewOrderModal({ onClose }: Props) {
     };
 
     fetchRoute();
-  }, [watchedPickupPoint, watchedDropoffPoint, setValue]);
+  }, [watchedPickupPoint, watchedDropoffPoint, setValue, cityPolygon, pointInPolygon, segKm]);
 
-  // Price calculation
+  // Price calculation — uses route split when city boundary is available
   useEffect(() => {
     if (distanceKm == null) return;
 
-    // Auto-calculate price
     const pricePerKm = Number(watchedPricePerKm);
-    let basePrice = 290;
     const selectedClass = classGroups.flatMap(g => g.classes ?? []).find(c => c.id === Number(watchedClass));
-    if (selectedClass?.name === "Комфорт") {
-      basePrice = 390;
-    }
+    const basePrice = selectedClass?.name === "Комфорт" ? 390 : 290;
 
-    let estimated = Math.round((basePrice + distanceKm * pricePerKm) / 5) * 5;
+    // Get out-of-city rate from selected tariff
+    const selectedTariff = tariffs.find((t) => t.id === Number(watchedTariff));
+    const outOfCityRate = Number((selectedTariff as any)?.outOfCityKmRate ?? 0);
+
+    // When no tariff selected (class = "Любой"), derive out-of-city rate from city rate:
+    // 80 ₸/km (эконом город) → 120 ₸/km (эконом загород)
+    // 100 ₸/km (комфорт город) → 140 ₸/km (комфорт загород)
+    const effectiveOutRate = outOfCityRate > 0
+      ? outOfCityRate
+      : (pricePerKm === 80 ? 120 : pricePerKm === 100 ? 140 : 0);
+
+    let estimated: number;
+    if (routeSplit && effectiveOutRate > 0 && routeSplit.outKm > 0) {
+      // Split pricing: city km × city rate + out-of-city km × out-of-city rate
+      estimated = Math.round(
+        (basePrice + routeSplit.cityKm * pricePerKm + routeSplit.outKm * effectiveOutRate) / 5
+      ) * 5;
+    } else {
+      estimated = Math.round((basePrice + distanceKm * pricePerKm) / 5) * 5;
+    }
 
     if (watchedHasLuggage) estimated += 100;
     if (watchedHasRoofLuggage) estimated += 200;
     if (watchedHasConditioner) estimated += 100;
 
     setValue("estimatedPrice", estimated);
-  }, [distanceKm, watchedPricePerKm, watchedClass, classGroups, watchedHasLuggage, watchedHasRoofLuggage, watchedHasConditioner, setValue]);
+  }, [distanceKm, watchedPricePerKm, watchedClass, watchedTariff, classGroups, tariffs,
+      routeSplit, watchedHasLuggage, watchedHasRoofLuggage, watchedHasConditioner, setValue]);
 
   // pricePerKm is now auto-set from tariff when class changes — no manual sync needed
 
@@ -538,9 +621,9 @@ export function NewOrderModal({ onClose }: Props) {
                 </select>
               </div>
 
-              <div className="form-row" style={{ alignItems: "flex-start", flexWrap: "wrap", gap: 6 }}>
-                <span className="form-label" style={{ paddingTop: 4 }}>Тариф:</span>
-                {tariffs.length > 0 ? (
+              {tariffs.length > 0 && (
+                <div className="form-row" style={{ alignItems: "flex-start", flexWrap: "wrap", gap: 6 }}>
+                  <span className="form-label" style={{ paddingTop: 4 }}>Тариф:</span>
                   <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1 }}>
                     {tariffs.map((t) => {
                       const outRate = Number((t as any).outOfCityKmRate ?? 0);
@@ -576,17 +659,8 @@ export function NewOrderModal({ onClose }: Props) {
                       );
                     })}
                   </div>
-                ) : (
-                  // No class selected — show simple radio for pricePerKm
-                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                    {["80", "100", "120", "140"].map((v) => (
-                      <label key={v} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer" }}>
-                        <input type="radio" value={v} {...register("pricePerKm")} /> {v} ₸/км
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
+                </div>
+              )}
 
 
 
@@ -683,6 +757,10 @@ export function NewOrderModal({ onClose }: Props) {
                 const selectedTariff = tariffs.find((t) => t.id === Number(watchedTariff));
                 const outRate = Number((selectedTariff as any)?.outOfCityKmRate ?? 0);
                 const cityRate = Number(watchedPricePerKm || 80);
+                // Derive out-of-city rate if no tariff: 80→120, 100→140
+                const effectiveOutRate = outRate > 0
+                  ? outRate
+                  : (cityRate === 80 ? 120 : cityRate === 100 ? 140 : 0);
                 return (
                   <div style={{ background: "var(--color-surface-2)", padding: 12, borderRadius: 8, marginBottom: 16 }}>
                     <div style={{ fontSize: 11, color: "var(--color-text-2)", marginBottom: 4 }}>Расчёт стоимости:</div>
@@ -695,23 +773,49 @@ export function NewOrderModal({ onClose }: Props) {
                       </div>
                     )}
 
-                    {/* Zone pricing info */}
-                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--color-border)", display: "flex", flexDirection: "column", gap: 3 }}>
-                      <div style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
-                        <span>🏙</span>
-                        <span style={{ color: "var(--color-text-2)" }}>В городе:</span>
-                        <strong style={{ color: "var(--color-text)" }}>{cityRate} ₸/км</strong>
-                      </div>
-                      {outRate > 0 ? (
-                        <div style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
-                          <span>🚗</span>
-                          <span style={{ color: "#e67e22" }}>За городом:</span>
-                          <strong style={{ color: "#e67e22" }}>{outRate} ₸/км + 25 ₸/мин</strong>
-                        </div>
+                    {/* Zone pricing info + route split breakdown */}
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--color-border)", display: "flex", flexDirection: "column", gap: 4 }}>
+
+                      {/* Route split breakdown when boundary is loaded */}
+                      {routeSplit && cityPolygon ? (
+                        <>
+                          {routeSplit.cityKm > 0 && (
+                            <div style={{ fontSize: 11, display: "flex", justifyContent: "space-between" }}>
+                              <span>🏙 В городе ({routeSplit.cityKm} км × {cityRate} ₸)</span>
+                              <strong>{Math.round(routeSplit.cityKm * cityRate)} ₸</strong>
+                            </div>
+                          )}
+                          {routeSplit.outKm > 0 && (
+                            <div style={{ fontSize: 11, display: "flex", justifyContent: "space-between", color: "#e67e22" }}>
+                              <span>🚗 За городом ({routeSplit.outKm} км × {effectiveOutRate > 0 ? effectiveOutRate : cityRate} ₸)</span>
+                              <strong>{Math.round(routeSplit.outKm * (effectiveOutRate > 0 ? effectiveOutRate : cityRate))} ₸</strong>
+                            </div>
+                          )}
+                          {routeSplit.outKm > 0 && effectiveOutRate === 0 && (
+                            <div style={{ fontSize: 10, color: "#e67e22", fontStyle: "italic" }}>
+                              ⚠️ Выберите класс для загородной ставки
+                            </div>
+                          )}
+                        </>
                       ) : (
-                        <div style={{ fontSize: 10, color: "var(--color-text-3)", fontStyle: "italic" }}>
-                          ⚠️ Загородная ставка не настроена
-                        </div>
+                        <>
+                          <div style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
+                            <span>🏙</span>
+                            <span style={{ color: "var(--color-text-2)" }}>В городе:</span>
+                            <strong>{cityRate} ₸/км</strong>
+                          </div>
+                          {effectiveOutRate > 0 ? (
+                            <div style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 6 }}>
+                              <span>🚗</span>
+                              <span style={{ color: "#e67e22" }}>За городом:</span>
+                              <strong style={{ color: "#e67e22" }}>{effectiveOutRate} ₸/км</strong>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 10, color: "var(--color-text-3)", fontStyle: "italic" }}>
+                              ⚠️ Загородная ставка не настроена
+                            </div>
+                          )}
+                        </>
                       )}
                       <div style={{ fontSize: 10, color: "var(--color-text-3)", marginTop: 2 }}>
                         Смена тарифа при пересечении границы города — автоматически

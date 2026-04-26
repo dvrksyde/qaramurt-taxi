@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 // Convert WKT POLYGON((lng lat, ...)) to GeoJSON — no PostGIS required
 function wktPolygonToGeoJSON(wkt: string): object | null {
   try {
-    const match = wkt.match(/POLYGON\s*\(\((.*)\)\)/is);
+    const match = wkt.match(/POLYGON\s*\(\(([\s\S]*)\)\)/i);
     if (!match) return null;
     const coords = match[1].split(",").map((pair) => {
       const [lng, lat] = pair.trim().split(/\s+/).map(Number);

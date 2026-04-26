@@ -134,7 +134,12 @@ export async function calculateSessionDistance(sessionId: number): Promise<TripC
       const currTime = curr.captured_at ? new Date(curr.captured_at).getTime() : 0;
       const gapSec = currTime && prevTime ? (currTime - prevTime) / 1000 : 0;
 
-      if (gapSec > 0 && segKm > 2 && gapSec < 20) continue; // GPS jump
+      // Sanity cap: physically impossible at any car speed (max ~200 km/h)
+      const maxPossibleKm = gapSec > 0 ? 200 * (gapSec / 3600) : 2;
+      if (segKm > maxPossibleKm) continue; // GPS jump
+
+      // Old short-gap jump filter (kept as additional safety)
+      if (gapSec > 0 && segKm > 2 && gapSec < 20) continue;
 
       const segIsOutOfCity = prev.is_out_of_city ?? false;
       let effectiveKm = segKm;
@@ -145,6 +150,7 @@ export async function calculateSessionDistance(sessionId: number): Promise<TripC
           const interpolated = speedKmh * (gapSec / 3600);
           if (interpolated > segKm) effectiveKm = interpolated;
         } else if (speedKmh === null && segKm > 0.1) {
+          // No speed from Android but distance is physically plausible
           effectiveKm = segKm;
         }
       }

@@ -93,7 +93,9 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
       if (state.activeOrder?.status === "in_progress" && state.lastLocation && !state.activeOrder.isFixedPrice) {
         const d = haversine(state.lastLocation.lat, state.lastLocation.lng, lat, lng);
 
-        if (d > 0.005) {
+        // Max car speed ~200 km/h. GPS updates every 3s → max 0.167 km per update.
+        // Cap at 0.5 km (allows up to 600 km/h — very generous, catches real jumps)
+        if (d > 0.005 && d < 0.5) {
           const newDist = state.tripDistance + d;
           const options: any[] = Array.isArray(state.activeOrder?.options) ? state.activeOrder.options : [];
           const extrasTotal = options.reduce((sum, opt) => sum + (Number(opt.price) || 0), 0);
