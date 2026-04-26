@@ -128,7 +128,13 @@ export async function calculateSessionDistance(sessionId: number): Promise<TripC
         Number(prev.lat), Number(prev.lng),
         Number(curr.lat), Number(curr.lng)
       );
-      if (segKm < 0.005) continue;
+      if (segKm < 0.010) continue; // raised from 5m to 10m to filter GPS jitter
+
+      // Skip if both endpoints indicate stationary (speed < 2 km/h) and segment < 15m
+      const prevSpeed = prev.speed_kmh !== null ? Number(prev.speed_kmh) : null;
+      const currSpeed = curr.speed_kmh !== null ? Number(curr.speed_kmh) : null;
+      const bothStopped = (prevSpeed !== null && prevSpeed < 2) && (currSpeed !== null && currSpeed < 2);
+      if (bothStopped && segKm < 0.015) continue;
 
       const prevTime = prev.captured_at ? new Date(prev.captured_at).getTime() : 0;
       const currTime = curr.captured_at ? new Date(curr.captured_at).getTime() : 0;

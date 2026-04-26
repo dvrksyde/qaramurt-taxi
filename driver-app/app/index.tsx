@@ -29,7 +29,7 @@ import { DriverProfilePanel } from "../components/DriverProfilePanel";
 import { ActiveOrdersPanel } from "../components/ActiveOrdersPanel";
 import { SwipeButton } from "../components/SwipeButton";
 import { mapOrderToActiveOrder } from "../lib/orderPricing";
-import { clearTripSync, flushTripPoints, getTripRates, queueTripPoint, startTripSync } from "../services/tripSync";
+import { clearTripSync, flushTripPoints, getTripRates, injectSessionId, queueTripPoint, startTripSync } from "../services/tripSync";
 
 const BASE_FARE = 290;
 type DriverTab = "home" | "orders" | "history" | "chat" | "profile";
@@ -95,7 +95,13 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
 
         // Max car speed ~200 km/h. GPS updates every 3s → max 0.167 km per update.
         // Cap at 0.5 km (allows up to 600 km/h — very generous, catches real jumps)
-        if (d > 0.005 && d < 0.5) {
+        // GPS noise filter: skip if stationary (speed < 1 m/s) AND movement < 15m
+        const speedMs = typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed)
+          ? loc.coords.speed : null;
+        const isStationary = speedMs !== null && speedMs < 1.0;
+        if (isStationary && d < 0.015) continue; // GPS jitter while stopped
+
+        if (d > 0.010 && d < 0.5) {
           const newDist = state.tripDistance + d;
           const options: any[] = Array.isArray(state.activeOrder?.options) ? state.activeOrder.options : [];
           const extrasTotal = options.reduce((sum, opt) => sum + (Number(opt.price) || 0), 0);
@@ -696,12 +702,22 @@ export default function MainScreen() {
       return;
     }
 
-    setActiveOrder(mapOrderToState(res.data));
+    const order = res.data;
+    const serverSessionId: number | null = order._sessionId ?? null;
+
+    // Determine correct baseFare from vehicle class
+    const isComfort = order.class?.name === "Комфорт";
+    const initialBaseFare = isComfort ? 390 : 290;
+
+    setActiveOrder(mapOrderToState(order));
     resetTrip();
+    useDriverStore.getState().setTripBaseFare(initialBaseFare);
+    useDriverStore.getState().setTripCityRate(Number(order.pricePerKm) || (isComfort ? 100 : 80));
     startTrip();
     tripDistanceRef.current = 0;
-    useDriverStore.getState().setTripMeter(0, 290); // BASE_FARE
-    setTripMeter(0, 290);
+    useDriverStore.getState().setTripMeter(0, initialBaseFare);
+    setTripMeter(0, initialBaseFare);
+
     Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest }).then((loc) => {
       useDriverStore.getState().setLastLocation({
         lat: loc.coords.latitude,
@@ -710,7 +726,11 @@ export default function MainScreen() {
     });
 
     void (async () => {
-      await startTripSync(res.data.id);
+      // If server already created a session, inject it so /trip/start is skipped
+      if (serverSessionId) {
+        await injectSessionId(order.id, serverSessionId);
+      }
+      await startTripSync(order.id);
       try {
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
         const seedPoint = {
@@ -722,7 +742,7 @@ export default function MainScreen() {
           headingDeg: typeof loc.coords.heading === "number" && Number.isFinite(loc.coords.heading) ? loc.coords.heading : null,
         };
         useDriverStore.getState().setLastLocation({ lat: seedPoint.lat, lng: seedPoint.lng });
-        await queueTripPoint(res.data.id, seedPoint);
+        await queueTripPoint(order.id, seedPoint);
       } catch { }
     })();
   };

@@ -121,8 +121,53 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ 
-      data: order,
+    // Create trip session immediately — don't wait for app to call /trip/start
+    // This ensures GPS distance is tracked even if app restarts mid-trip
+    const baseFare = classObj?.name === "Комфорт" ? 390 : 290;
+    let outOfCityKmRate = 0;
+    if (classObj?.id) {
+      try {
+        const rows = await prisma.$queryRaw<Array<{ r: string }>>`
+          SELECT "outOfCityKmRate" AS r FROM tariffs
+          WHERE "classId" = ${classObj.id} AND "isActive" = true
+          ORDER BY id ASC LIMIT 1
+        `;
+        outOfCityKmRate = Number(rows[0]?.r ?? 0);
+      } catch { /* column not yet created */ }
+    }
+
+    let sessionId: number | null = null;
+    try {
+      const rows = await prisma.$queryRaw<Array<{ id: number }>>`
+        INSERT INTO order_trip_sessions
+          ("orderId", "driverId", "tariffPerKm", "outOfCityKmRate", "baseFare", "startedAt", status,
+           "preliminaryDistanceKm", "pointsReceived", "lastIsOutOfCity", "outOfCityKm", "outOfCitySeconds",
+           "createdAt", "updatedAt")
+        VALUES
+          (${order.id}, ${driver.id}, ${pricePerKm}, ${outOfCityKmRate}, ${baseFare},
+           ${order.startedAt ?? new Date()}, 'active', 0, 0, false, 0, 0, NOW(), NOW())
+        RETURNING id
+      `;
+      sessionId = rows[0]?.id ?? null;
+    } catch {
+      // Fallback: create without new columns (before db:push)
+      try {
+        const session = await prisma.orderTripSession.create({
+          data: {
+            orderId: order.id,
+            driverId: driver.id,
+            tariffPerKm: pricePerKm,
+            baseFare,
+            startedAt: order.startedAt ?? new Date(),
+            status: "active",
+          },
+        });
+        sessionId = session.id;
+      } catch { /* session creation failed — app will retry via /trip/start */ }
+    }
+
+    return NextResponse.json({
+      data: { ...order, _sessionId: sessionId },
       warning: Number(driver.balance) <= 100 ? "Ваш баланс ниже 100 ₸. Пожалуйста, пополните счет!" : undefined
     });
   } catch (error) {

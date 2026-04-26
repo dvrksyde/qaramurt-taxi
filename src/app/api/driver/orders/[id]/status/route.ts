@@ -236,46 +236,21 @@ export async function PATCH(
     }
 
     if (status === "canceled") {
-      // Tiered penalty based on what stage the driver canceled at
-      // order.status is the PREVIOUS status (before this update)
-      let penalty = 0;
-      let penaltyDesc = "";
-
-      if (order.status === "assigned") {
-        // Grace period: no penalty within 2 minutes of assignment
-        const assignedMs = order.assignedAt
-          ? Date.now() - new Date(order.assignedAt).getTime()
-          : Infinity;
-        if (assignedMs < 2 * 60 * 1000) {
-          penalty = 0; // grace period
-        } else {
-          penalty = 50;
-          penaltyDesc = `Штраф за отмену заказа #${orderId} (принят, но не выехал)`;
-        }
-      } else if (order.status === "arrived") {
-        penalty = 100;
-        penaltyDesc = `Штраф за отмену заказа #${orderId} (доехал, но клиента не взял)`;
-      } else if (order.status === "in_progress") {
-        penalty = 150;
-        penaltyDesc = `Штраф за отмену заказа #${orderId} (отмена во время поездки)`;
-      }
-
-      if (penalty > 0) {
-        await tx.driver.update({
-          where: { id: auth.driverId },
-          data: { balance: { decrement: penalty } },
-        });
-        await tx.cashTransaction.create({
-          data: {
-            driverId: auth.driverId,
-            operatorId,
-            orderId,
-            amount: penalty,
-            type: "penalty",
-            description: penaltyDesc,
-          },
-        });
-      }
+      const penalty = 50;
+      await tx.driver.update({
+        where: { id: auth.driverId },
+        data: { balance: { decrement: penalty } },
+      });
+      await tx.cashTransaction.create({
+        data: {
+          driverId: auth.driverId,
+          operatorId,
+          orderId,
+          amount: penalty,
+          type: "penalty",
+          description: `Штраф за отмену заказа #${orderId}`,
+        },
+      });
     }
 
     if (status === "completed" || status === "canceled") {
