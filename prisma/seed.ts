@@ -71,8 +71,8 @@ async function main() {
         pricePerKm: d.city,
         pricePerMin: 0,
         minPrice: d.min,
-        freeWaitMinutes: 5,
-        extraWaitPrice: 5,
+        freeWaitMinutes: 3,
+        extraWaitPrice: 3,
       };
       return prisma.tariff.upsert({
         where: { id: cls.id },
