@@ -134,14 +134,17 @@ export async function PATCH(
       });
 
       if (activeSession) {
-        // Session baseFare already includes arrival waiting fee (set in trip/start route)
+        // Session baseFare includes: class base fare + arrival wait + options (set in trip/start)
         const sessionBaseFare = Number(activeSession.baseFare) || currentBaseFare;
+        // Mid-trip waiting fee (driver pressed ⏸ during the ride)
+        const midTripWaitFee = Number(order.waitingFee || 0);
 
         try {
           const calc = await calculateSessionDistance(activeSession.id);
 
           if (calc.distanceKm > 0) {
-            const serverPrice = Math.max(calc.finalPrice, sessionBaseFare);
+            // Add mid-trip waiting fee to server-calculated price
+            const serverPrice = Math.max(calc.finalPrice, sessionBaseFare) + midTripWaitFee;
             await completeSession(activeSession.id, calc.distanceKm, serverPrice, calc.outOfCityKm, calc.outOfCitySeconds);
             updateData.distanceKm = calc.distanceKm;
             updateData.finalPrice = serverPrice;
@@ -159,8 +162,8 @@ export async function PATCH(
           console.error("[trip/complete] Server calc failed:", err);
           if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
           const fallbackPrice = clientDistanceKm !== undefined
-            ? roundTo5(sessionBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm))
-            : sessionBaseFare;
+            ? roundTo5(sessionBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm)) + midTripWaitFee
+            : sessionBaseFare + midTripWaitFee;
           updateData.finalPrice = Math.max(
             clientFinalPrice ?? fallbackPrice,
             sessionBaseFare

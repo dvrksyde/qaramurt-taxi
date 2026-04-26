@@ -74,7 +74,7 @@ export async function POST(
   // Base fare by effective class
   const currentBaseFare = effectiveClassName === "Комфорт" ? COMFORT_FARE : BASE_FARE;
 
-  // Apply waiting fee
+  // Apply waiting fee (arrived → in_progress)
   let baseFareWithWaiting = currentBaseFare;
   if (order.arrivedAt) {
     const startedAtTime = order.startedAt ? order.startedAt.getTime() : Date.now();
@@ -84,6 +84,12 @@ export async function POST(
       baseFareWithWaiting += (waitMins - 3) * 20;
     }
   }
+
+  // Add order options (luggage, conditioner, etc.) to baseFare so server calc matches client
+  const OPTION_PRICES: Record<string, number> = { luggage: 100, roof_luggage: 200, conditioner: 100 };
+  const orderOptions = Array.isArray(order.options) ? (order.options as string[]) : [];
+  const optionsTotal = orderOptions.reduce((sum, opt) => sum + (OPTION_PRICES[opt] ?? 0), 0);
+  baseFareWithWaiting += optionsTotal;
 
   // ── Effective city rate per km ────────────────────────────────────────────
   // For orders with a specific class: use order.pricePerKm (set by dispatcher from tariff)

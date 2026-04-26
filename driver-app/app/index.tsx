@@ -28,6 +28,7 @@ import { DriverChatPanel } from "../components/DriverChatPanel";
 import { DriverProfilePanel } from "../components/DriverProfilePanel";
 import { ActiveOrdersPanel } from "../components/ActiveOrdersPanel";
 import { SwipeButton } from "../components/SwipeButton";
+import { YandexMapView, type YandexMapViewHandle } from "../components/YandexMapView";
 import { mapOrderToActiveOrder } from "../lib/orderPricing";
 import { clearTripSync, flushTripPoints, getTripRates, injectSessionId, queueTripPoint, startTripSync } from "../services/tripSync";
 
@@ -86,41 +87,37 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
       }
 
       const state = useDriverStore.getState();
-      console.log("status:", state.activeOrder?.status);
-      console.log("lastLocation:", state.lastLocation);
-      console.log("isFixedPrice:", state.activeOrder?.isFixedPrice);
 
       if (state.activeOrder?.status === "in_progress" && state.lastLocation && !state.activeOrder.isFixedPrice) {
         const d = haversine(state.lastLocation.lat, state.lastLocation.lng, lat, lng);
 
-        // Max car speed ~200 km/h. GPS updates every 3s → max 0.167 km per update.
-        // Cap at 0.5 km (allows up to 600 km/h — very generous, catches real jumps)
-        // GPS noise filter: skip if stationary (speed < 1 m/s) AND movement < 15m
-        const speedMs = typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed)
-          ? loc.coords.speed : null;
-        const isStationary = speedMs !== null && speedMs < 1.0;
-        if (isStationary && d < 0.015) continue; // GPS jitter while stopped
+        // ✅ FIX: threshold back to 5m (was wrongly raised to 10m — missed steps at slow city speeds)
+        // ✅ FIX: stationary check moved INSIDE — no `continue` so lastLocation is always updated below
+        if (d > 0.005 && d < 0.5) {
+          // GPS noise filter: don't count distance if clearly stationary (GPS speed < 1 m/s AND d < 15m)
+          // lastLocation is still updated at line below — no jump accumulation when car starts moving
+          const speedMs = typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed)
+            ? loc.coords.speed : null;
+          const isStationary = speedMs !== null && speedMs < 1.0 && d < 0.015;
 
-        if (d > 0.010 && d < 0.5) {
-          const newDist = state.tripDistance + d;
-          const options: any[] = Array.isArray(state.activeOrder?.options) ? state.activeOrder.options : [];
-          const extrasTotal = options.reduce((sum, opt) => sum + (Number(opt.price) || 0), 0);
+          if (!isStationary) {
+            const newDist = state.tripDistance + d;
+            const cityRate = state.tripCityRatePerKm || Number(state.activeOrder.pricePerKm) || 80;
 
-          // Use server-resolved city rate (correct for "Любой" orders with Comfort driver)
-          // Falls back to order.pricePerKm if not set yet
-          const cityRate = state.tripCityRatePerKm || Number(state.activeOrder.pricePerKm) || 80;
-
-          let newPrice: number;
-          if (state.isOutOfCity && state.outOfCityStartTime !== null) {
-            const distSinceZone = newDist - state.tripDistanceAtZoneChange;
-            const outRate = state.outOfCityRatePerKm || cityRate;
-            const outTimeFee = Math.floor((Date.now() - state.outOfCityStartTime) / 60000) * 25;
-            newPrice = roundTo5(state.tripPriceAtZoneChange + extrasTotal + distSinceZone * outRate + outTimeFee);
-          } else {
-            const baseFare = state.tripBaseFare || (state.activeOrder?.class?.name === "Комфорт" ? 390 : BASE_FARE);
-            newPrice = roundTo5(baseFare + extrasTotal + newDist * cityRate);
+            let newPrice: number;
+            if (state.isOutOfCity && state.outOfCityStartTime !== null) {
+              const distSinceZone = newDist - state.tripDistanceAtZoneChange;
+              const outRate = state.outOfCityRatePerKm || cityRate;
+              const outTimeFee = Math.floor((Date.now() - state.outOfCityStartTime) / 60000) * 25;
+              // tripPriceAtZoneChange уже включает baseFare+extras — не добавляем extras снова
+              newPrice = roundTo5(state.tripPriceAtZoneChange + distSinceZone * outRate + outTimeFee);
+            } else {
+              // tripBaseFare уже включает extras+waitFee — НЕ добавляем extras отдельно
+              const baseFare = state.tripBaseFare || (state.activeOrder?.class?.name === "Комфорт" ? 390 : BASE_FARE);
+              newPrice = roundTo5(baseFare + newDist * cityRate);
+            }
+            useDriverStore.getState().setTripMeter(newDist, newPrice);
           }
-          useDriverStore.getState().setTripMeter(newDist, newPrice);
         }
       }
 
@@ -189,6 +186,7 @@ export default function MainScreen() {
   const insets = useSafeAreaInsets();
   const loadingDashboardRef = useRef(false);
   const soundRef = useRef<any>(null);
+  const mapRef = useRef<YandexMapViewHandle>(null);
   // Prevents loadDashboard from overriding status while toggle is in flight
   const togglingOnlineRef = useRef(false);
   const [togglingOnline, setTogglingOnline] = useState(false);
@@ -868,9 +866,11 @@ export default function MainScreen() {
           );
         } else {
           // Резервный показ из предварительного счётчика
-          const fallbackDist = Math.round(Math.max(useDriverStore.getState().tripDistance, tripDistanceRef.current) * 10) / 10;
-          const currentBaseFare = activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE;
-          const fallbackPrice = roundTo5(currentBaseFare + fallbackDist * activeOrder.pricePerKm) + 10;
+          const storeState = useDriverStore.getState();
+          const fallbackDist = Math.round(Math.max(storeState.tripDistance, tripDistanceRef.current) * 10) / 10;
+          const fallbackBaseFare = storeState.tripBaseFare || (activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE);
+          const fallbackCityRate = storeState.tripCityRatePerKm || Number(activeOrder.pricePerKm) || 80;
+          const fallbackPrice = roundTo5(fallbackBaseFare + fallbackDist * fallbackCityRate);
           Alert.alert(
             "Поездка завершена",
             `Расстояние: ${fallbackDist} км\nСумма: ${fallbackPrice} ₸`,
@@ -893,14 +893,20 @@ export default function MainScreen() {
 
           // Apply server-resolved rates (correct for "Любой" orders with Comfort driver)
           const rates = await getTripRates(activeOrder.id);
-          if (rates) {
+          if (rates && rates.effectiveBaseFare) {
             const store = useDriverStore.getState();
-            // Update base fare if server returned a different value (e.g., Comfort driver)
-            if (rates.effectiveBaseFare && rates.effectiveBaseFare !== store.tripBaseFare) {
-              store.setTripBaseFare(rates.effectiveBaseFare);
-              store.setTripMeter(0, rates.effectiveBaseFare);
+            // The server's effectiveBaseFare already includes options (fixed in trip/start).
+            // We use it directly as the new tripBaseFare.
+            const serverBaseFare = rates.effectiveBaseFare;
+            if (serverBaseFare !== store.tripBaseFare) {
+              store.setTripBaseFare(serverBaseFare);
+              const currentDist = store.tripDistance;
+              const cityRate = rates.effectiveCityRatePerKm || 80;
+              store.setTripMeter(currentDist, roundTo5(serverBaseFare + currentDist * cityRate));
             }
             store.setTripCityRate(rates.effectiveCityRatePerKm);
+          } else if (rates) {
+            useDriverStore.getState().setTripCityRate(rates.effectiveCityRatePerKm);
           }
 
           try {
@@ -1049,60 +1055,78 @@ export default function MainScreen() {
       const isInProgress = activeOrder.status === "in_progress";
       const isPaused = isInProgress && !!activeOrder.isWaiting;
 
-      // ── Адресный блок (адрес, телефон, опции, навигатор) ─────────────────
+      // ── Адресный блок (адрес, телефон, опции, навигатор + кнопка паузы) ───
       const addressBlock = (
-        <View style={styles.addressStrip}>
-          <View style={styles.addressLine}>
-            <Ionicons name="location" size={16} color="#FFD000" />
-            <Text style={styles.addressLineText} numberOfLines={1}>
-              {activeOrder.pickupAddress || "Адрес не указан"}
-            </Text>
-          </View>
-          {activeOrder.isFixedPrice && activeOrder.dropoffAddress && (
+        <View style={[styles.addressStrip, { flexDirection: "row", alignItems: "flex-start" }]}>
+          {/* Левая часть: весь контент */}
+          <View style={{ flex: 1, gap: 10 }}>
             <View style={styles.addressLine}>
-              <Ionicons name="flag" size={16} color="#2196F3" />
+              <Ionicons name="location" size={16} color="#FFD000" />
               <Text style={styles.addressLineText} numberOfLines={1}>
-                {activeOrder.dropoffAddress}
+                {activeOrder.pickupAddress || "Адрес не указан"}
               </Text>
             </View>
-          )}
-          <TouchableOpacity style={styles.addressLine} onPress={callClient} activeOpacity={0.7}>
-            <Ionicons name="call" size={16} color="#FFD000" />
-            <Text style={[styles.phoneText, { color: "#FFD000", textDecorationLine: "underline" }]}>
-              {activeOrder.phone}
-            </Text>
-          </TouchableOpacity>
+            {activeOrder.isFixedPrice && activeOrder.dropoffAddress && (
+              <View style={styles.addressLine}>
+                <Ionicons name="flag" size={16} color="#2196F3" />
+                <Text style={styles.addressLineText} numberOfLines={1}>
+                  {activeOrder.dropoffAddress}
+                </Text>
+              </View>
+            )}
+            <TouchableOpacity style={styles.addressLine} onPress={callClient} activeOpacity={0.7}>
+              <Ionicons name="call" size={16} color="#FFD000" />
+              <Text style={[styles.phoneText, { color: "#FFD000", textDecorationLine: "underline" }]}>
+                {activeOrder.phone}
+              </Text>
+            </TouchableOpacity>
 
-          {Array.isArray(activeOrder.options) && activeOrder.options.length > 0 && (
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4, marginLeft: 22 }}>
-              {activeOrder.options.map((opt: any) => {
-                const key = typeof opt === "string" ? opt : opt.key;
-                const label = opt.label || (key === "luggage" ? "Багаж" : key === "roof_luggage" ? "Верх. Багаж" : key === "conditioner" ? "Кондиционер" : "Опция");
-                const price = opt.price || (key === "luggage" ? 100 : key === "roof_luggage" ? 200 : key === "conditioner" ? 100 : 0);
-                return (
-                  <View key={key} style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
-                    <Ionicons
-                      name={key === "luggage" ? "briefcase" : key === "roof_luggage" ? "cube" : key === "conditioner" ? "snow" : "apps-outline"}
-                      size={12}
-                      color={key === "conditioner" ? "#4ade80" : "#fff"}
-                    />
-                    <Text style={{ fontSize: 10, color: key === "conditioner" ? "#4ade80" : "#fff", fontWeight: "bold" }}>
-                      {label} (+{price})
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
-          )}
+            {activeOrder.status === "arrived" && waitingElapsed > 0 && (
+              <View style={styles.addressLine}>
+                <Ionicons name="time-outline" size={15} color={waitingElapsed > 180 ? "#ef4444" : "#888"} />
+                <Text style={{ fontSize: 13, color: waitingElapsed > 180 ? "#ef4444" : "#aaa", fontWeight: "600" }}>
+                  {waitingElapsed > 180
+                    ? `Платное: ${Math.floor((waitingElapsed - 180) / 60) * 20} ₸ (${Math.floor(waitingElapsed / 60)} мин)`
+                    : `Ожидание: ${Math.floor(waitingElapsed / 60)}:${(waitingElapsed % 60).toString().padStart(2, "0")} (Беспл.)`}
+                </Text>
+              </View>
+            )}
 
-          <TouchableOpacity style={styles.navBtn} onPress={openNavigator} activeOpacity={0.85}>
-            <Ionicons name="navigate" size={18} color="#000" />
-            <Text style={styles.navBtnText}>
-              {activeOrder.status === "assigned"
-                ? "Открыть навигатор → К клиенту"
-                : "Открыть навигатор → К назначению"}
-            </Text>
-          </TouchableOpacity>
+            {Array.isArray(activeOrder.options) && activeOrder.options.length > 0 && (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginLeft: 22 }}>
+                {activeOrder.options.map((opt: any) => {
+                  const key = typeof opt === "string" ? opt : opt.key;
+                  const label = opt.label || (key === "luggage" ? "Багаж" : key === "roof_luggage" ? "Верх. Багаж" : key === "conditioner" ? "Кондиционер" : "Опция");
+                  const price = opt.price || (key === "luggage" ? 100 : key === "roof_luggage" ? 200 : key === "conditioner" ? 100 : 0);
+                  return (
+                    <View key={key} style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <Ionicons name={key === "luggage" ? "briefcase" : key === "roof_luggage" ? "cube" : key === "conditioner" ? "snow" : "apps-outline"} size={12} color={key === "conditioner" ? "#4ade80" : "#fff"} />
+                      <Text style={{ fontSize: 10, color: key === "conditioner" ? "#4ade80" : "#fff", fontWeight: "bold" }}>{label} (+{price})</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            <TouchableOpacity style={styles.navBtn} onPress={openNavigator} activeOpacity={0.85}>
+              <Ionicons name="navigate" size={18} color="#000" />
+              <Text style={styles.navBtnText}>
+                {activeOrder.status === "assigned" ? "Открыть навигатор → К клиенту" : "Открыть навигатор → К назначению"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Правая часть: кнопка паузы (только во время поездки, не на паузе) */}
+          {isInProgress && !isPaused && (
+            <TouchableOpacity
+              style={styles.pauseBtn}
+              onPress={() => toggleTripWaiting("start")}
+              disabled={loading}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="pause" size={24} color="#FFD000" />
+            </TouchableOpacity>
+          )}
         </View>
       );
 
@@ -1222,51 +1246,47 @@ export default function MainScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Адрес, телефон, навигатор */}
+          {/* Адрес, телефон, навигатор + кнопка паузы */}
           {addressBlock}
 
-          {/* Статус — иконка + текст + кнопка паузы */}
-          <View style={styles.orderStatusCenter}>
-            {isInProgress ? (
-              <TouchableOpacity
-                onPress={() => toggleTripWaiting("start")}
-                disabled={loading}
-                activeOpacity={0.7}
-                style={styles.statusPulseCircle}
-              >
-                <Ionicons name="pause" size={60} color="#FFD000" />
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.statusPulseCircle}>
-                <Ionicons
-                  name={activeOrder.status === "assigned" ? "paper-plane" : "body"}
-                  size={54}
-                  color="#FFD000"
-                />
-              </View>
-            )}
+          {/* Карта — занимает всё свободное пространство */}
+          <View style={styles.mapContainer}>
+            <YandexMapView
+              ref={mapRef}
+              userLocation={currentCoords}
+              pickupLocation={parseWktPoint(activeOrder.pickupPoint)}
+              zoom={15}
+              showCenterButton
+            />
 
-            <Text style={styles.statusCenterText}>
-              {activeOrder.status === "assigned"
-                ? "Подача автомобиля..."
-                : activeOrder.status === "arrived"
-                  ? waitingElapsed > 180
-                    ? `Платное ожидание: ${Math.floor((waitingElapsed - 180) / 60) * 20} ₸ (${Math.floor(waitingElapsed / 60)} мин)`
-                    : `Ожидание: ${Math.floor(waitingElapsed / 60)}:${(waitingElapsed % 60).toString().padStart(2, "0")} (Беспл.)`
-                  : "В пути..."}
-            </Text>
-
-            <View style={styles.paymentBadge}>
-              <Ionicons name="cash-outline" size={16} color="#22c55e" />
-              <Text style={styles.paymentBadgeText}>Оплата наличными</Text>
+            {/* Статус поверх карты */}
+            <View style={styles.mapStatusOverlay}>
+              <Ionicons
+                name={activeOrder.status === "assigned" ? "paper-plane" : activeOrder.status === "arrived" ? "body" : "car-sport"}
+                size={14}
+                color="#FFD000"
+              />
+              <Text style={styles.mapStatusText}>
+                {activeOrder.status === "assigned"
+                  ? "Подача автомобиля..."
+                  : activeOrder.status === "arrived"
+                    ? "Ожидание клиента"
+                    : "В пути..."}
+              </Text>
             </View>
 
-            {/* Накопленное ожидание — компактно, без скачков */}
+            {/* Способ оплаты */}
+            <View style={styles.mapPaymentOverlay}>
+              <Ionicons name="cash-outline" size={12} color="#22c55e" />
+              <Text style={styles.mapPaymentText}>Наличными</Text>
+            </View>
+
+            {/* Накопленное ожидание при поездке */}
             {!activeOrder.isWaiting && tripWaitingElapsed > 0 && (
-              <View style={styles.waitingAccBadge}>
-                <Ionicons name="time-outline" size={14} color="#FFD000" />
-                <Text style={styles.waitingAccText}>
-                  Ожидание: {Math.floor(tripWaitingElapsed / 60)}:{(tripWaitingElapsed % 60).toString().padStart(2, "0")} · +{tripWaitingFee} ₸
+              <View style={styles.mapWaitingOverlay}>
+                <Ionicons name="time-outline" size={12} color="#e0c84a" />
+                <Text style={styles.mapWaitingText}>
+                  +{tripWaitingFee} ₸
                 </Text>
               </View>
             )}
@@ -1320,56 +1340,36 @@ export default function MainScreen() {
           </View>
         </View>
 
-        <View style={styles.centerArea}>
-          {/* GPS status card replacing the map */}
-          <View style={styles.gpsStatusCard}>
-            <View style={styles.gpsStatusIcon}>
-              <Ionicons
-                name={currentCoords ? "locate" : "locate-outline"}
-                size={48}
-                color={currentCoords ? "#FFD000" : "#444"}
-              />
-            </View>
-            <Text style={styles.gpsStatusTitle}>
+        {/* Карта — занимает всё свободное пространство */}
+        <View style={styles.mapContainer}>
+          <YandexMapView
+            ref={mapRef}
+            userLocation={currentCoords}
+            zoom={15}
+            showCenterButton
+          />
+
+          {/* Статус поверх карты */}
+          <View style={styles.mapStatusOverlay}>
+            <View style={[styles.statusDot, { width: 8, height: 8, borderRadius: 4 }, isOnline ? styles.dotOnline : styles.dotOffline]} />
+            <Text style={styles.mapStatusText}>
               {isOnline ? "Ожидание заказа..." : "Вы вне линии"}
             </Text>
-            {currentCoords ? (
-              <Text style={styles.gpsStatusCoords}>
-                📍 {currentCoords.latitude.toFixed(5)}, {currentCoords.longitude.toFixed(5)}
-              </Text>
-            ) : (
-              <Text style={styles.gpsStatusCoords}>Поиск GPS...</Text>
-            )}
-            <TouchableOpacity
-              style={styles.gpsRefreshBtn}
-              onPress={refreshCurrentPosition}
-              disabled={refreshingGPS}
-              activeOpacity={0.7}
-            >
-              {refreshingGPS ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Ionicons name="refresh" size={16} color="#fff" />
-              )}
-              <Text style={styles.gpsRefreshBtnText}>
-                {refreshingGPS ? "Обновление..." : "Обновить GPS"}
-              </Text>
-            </TouchableOpacity>
           </View>
-
-          {/* Curbside Button */}
-          {isOnline && profile?.status === "free" && (
-            <TouchableOpacity
-              style={styles.curbsideButton}
-              onPress={handleCurbsideOrder}
-              disabled={loading}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="car-sport" size={24} color="#000" />
-              <Text style={styles.curbsideButtonText}>Пассажир с бордюра</Text>
-            </TouchableOpacity>
-          )}
         </View>
+
+        {/* Кнопка бордюра — отдельной строкой под картой */}
+        {isOnline && profile?.status === "free" && (
+          <TouchableOpacity
+            style={styles.curbsideButton}
+            onPress={handleCurbsideOrder}
+            disabled={loading}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="car-sport" size={24} color="#000" />
+            <Text style={styles.curbsideButtonText}>Пассажир с бордюра</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.homeSwipeContainer}>
           <SwipeButton
@@ -1540,7 +1540,7 @@ const styles = StyleSheet.create({
   contentArea: { flex: 1 },
   loadingWrap: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0a0a0a" },
   loadingText: { color: "#666", fontSize: 16 },
-  pageBlock: { flex: 1, paddingHorizontal: 16, paddingBottom: 90 },
+  pageBlock: { flex: 1, paddingHorizontal: 16, paddingBottom: 90, overflow: "hidden" },
 
   // ─── Header (waiting) ─────────────────────────────────────
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14, paddingTop: 4 },
@@ -1562,33 +1562,7 @@ const styles = StyleSheet.create({
   statLabel: { color: "#555", fontSize: 11, marginBottom: 4, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.5 },
   statValue: { color: "#fff", fontSize: 18, fontWeight: "800" },
 
-  // ─── GPS status card (center area) ────────────────────────
-  centerArea: { flex: 1, marginBottom: 14 },
-  gpsStatusCard: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#111",
-    borderRadius: 24,
-    gap: 14,
-    borderWidth: 1,
-    borderColor: "#1e1e1e",
-  },
-  gpsStatusIcon: {
-    width: 100, height: 100, borderRadius: 50,
-    backgroundColor: "#161616",
-    justifyContent: "center", alignItems: "center",
-    borderWidth: 2, borderColor: "#2a2a2a",
-  },
-  gpsStatusTitle: { color: "#fff", fontSize: 20, fontWeight: "800", letterSpacing: 0.3 },
-  gpsStatusCoords: { color: "#444", fontSize: 11, fontFamily: "monospace" },
-  gpsRefreshBtn: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "#1c1c1c",
-    paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24,
-    borderWidth: 1, borderColor: "#2a2a2a", marginTop: 4,
-  },
-  gpsRefreshBtnText: { color: "#aaa", fontSize: 13, fontWeight: "600" },
+  // ─── (GPS status card replaced by map) ───────────────────
 
   // ─── Order header ─────────────────────────────────────────
   orderHeader: { flexDirection: "row", alignItems: "center", gap: 0, marginBottom: 10, paddingTop: 3 },
@@ -1621,98 +1595,22 @@ const styles = StyleSheet.create({
   meterStripValue: { color: "#ddd", fontSize: 18, fontWeight: "700" },
   meterStripPrice: { color: "#FFD000", fontSize: 52, fontWeight: "900", letterSpacing: -1 },
 
-  // ─── Status Center Overlay ────────────────────────────────
-  orderStatusCenter: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 15,
-  },
-  statusPulseCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: "rgba(255, 208, 0, 0.05)",
-    borderWidth: 2,
-    borderColor: "rgba(255, 208, 0, 0.15)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  statusCenterText: {
-    color: "#eed535ff",
-    fontSize: 16,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  paymentBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  paymentBadgeText: {
-    color: "#22c55e",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  tripWaitingCard: {
-    marginTop: 4,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 18,
-    backgroundColor: "rgba(255, 208, 0, 0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 208, 0, 0.22)",
-    alignItems: "center",
-    minWidth: 220,
-  },
-  tripWaitingHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 8,
-  },
-  tripWaitingTitle: {
-    color: "#f2e3a2",
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 0.3,
-  },
-  tripWaitingTimer: {
-    color: "#fff",
-    fontSize: 30,
-    fontWeight: "900",
-    letterSpacing: 1,
-  },
-  tripWaitingFee: {
-    color: "#FFD000",
-    fontSize: 20,
-    fontWeight: "800",
-    marginTop: 2,
-  },
-  tripWaitingHint: {
-    color: "#b4a77a",
-    fontSize: 12,
-    marginTop: 6,
-  },
+  // ─── (Status center replaced by map overlay) ─────────────
   orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 22, left: 16, right: 16 },
   curbsideButton: {
     backgroundColor: "#FFD000",
     borderRadius: 16,
-    paddingVertical: 18,
+    paddingVertical: 16,
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
     gap: 12,
-    marginTop: 20,
-    marginHorizontal: 16,
+    marginTop: 10,
     shadowColor: "#FFD000",
-    shadowOffset: { width: 0, height: 10 },
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 8,
+    shadowRadius: 12,
+    elevation: 6,
   },
   curbsideButtonText: {
     color: "#000",
@@ -1832,5 +1730,82 @@ const styles = StyleSheet.create({
     color: "#e0c84a",
     fontSize: 13,
     fontWeight: "600",
+  },
+
+  // ─── Pause button inside address block ────────────────────
+  pauseBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255,208,0,0.1)",
+    borderWidth: 2,
+    borderColor: "#FFD000",
+    justifyContent: "center",
+    alignItems: "center",
+    marginLeft: 10,
+    marginTop: 4,
+    flexShrink: 0,
+  },
+
+  // ─── Map container ────────────────────────────────────────
+  mapContainer: {
+    flex: 1,
+    borderRadius: 20,
+    overflow: "hidden",
+    marginHorizontal: -16,
+    marginBottom: 10,
+  },
+  mapStatusOverlay: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  mapStatusText: {
+    color: "#FFD000",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  mapPaymentOverlay: {
+    position: "absolute",
+    bottom: 12,
+    left: 12,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  mapPaymentText: {
+    color: "#22c55e",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  mapWaitingOverlay: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    backgroundColor: "rgba(255,208,0,0.12)",
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: "rgba(255,208,0,0.3)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  mapWaitingText: {
+    color: "#e0c84a",
+    fontSize: 11,
+    fontWeight: "700",
   },
 });
