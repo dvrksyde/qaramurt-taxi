@@ -163,6 +163,7 @@ export function NewOrderModal({ onClose }: Props) {
     if (!watchedClass) {
       setTariffs([]);
       setValue("tariffId", null);
+      setValue("pricePerKm", "80"); // reset to economy default when "Любой"
       return;
     }
     const svcId = watch("serviceId");
@@ -176,6 +177,13 @@ export function NewOrderModal({ onClose }: Props) {
         if (match) {
           setValue("tariffId", match.id);
           setValue("pricePerKm", String(match.pricePerKm));
+        } else {
+          // No tariff configured in DB for this class — derive from class name
+          // so effectiveOutRate calculation stays correct (80→120, 100→140)
+          setValue("tariffId", null);
+          const cls = allClasses.find((c) => c.id === Number(watchedClass));
+          if (cls?.name === "Комфорт") setValue("pricePerKm", "100");
+          else setValue("pricePerKm", "80"); // Эконом or unknown
         }
       })
       .catch(console.error);
