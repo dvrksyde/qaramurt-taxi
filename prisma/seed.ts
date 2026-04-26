@@ -49,104 +49,55 @@ async function main() {
   const classes = await Promise.all([
     prisma.vehicleClass.upsert({ where: { id: 1 }, update: {}, create: { groupId: group.id, name: "Эконом", icon: "economy", sortOrder: 1 } }),
     prisma.vehicleClass.upsert({ where: { id: 2 }, update: {}, create: { groupId: group.id, name: "Комфорт", icon: "comfort", sortOrder: 2 } }),
-    prisma.vehicleClass.upsert({ where: { id: 3 }, update: {}, create: { groupId: group.id, name: "Бизнес", icon: "business", sortOrder: 3 } }),
-    prisma.vehicleClass.upsert({ where: { id: 4 }, update: {}, create: { groupId: group.id, name: "Минивэн", icon: "minivan", sortOrder: 4 } }),
   ]);
   console.log("✓ Vehicle classes:", classes.map((c) => c.name).join(", "));
 
   // ── Tariffs ────────────────────────────────────────────────────────────────
+  // Rates: Эконом 80₸/km city / 120₸/km out-of-city
+  //        Комфорт 100₸/km city / 140₸/km out-of-city
+  const TARIFF_DATA: Record<number, { base: number; city: number; outCity: number; min: number }> = {
+    1: { base: 290, city: 80, outCity: 120, min: 290 }, // Эконом
+    2: { base: 390, city: 100, outCity: 140, min: 390 }, // Комфорт
+  };
+
   const tariffs = await Promise.all(
-    classes.map((cls) =>
-      prisma.tariff.upsert({
+    classes.map((cls) => {
+      const d = TARIFF_DATA[cls.id] ?? { base: 290, city: 80, outCity: 120, min: 290 };
+      const data = {
+        serviceId: service.id,
+        classId: cls.id,
+        name: `${cls.name}`,
+        basePrice: d.base,
+        pricePerKm: d.city,
+        pricePerMin: 0,
+        minPrice: d.min,
+        freeWaitMinutes: 5,
+        extraWaitPrice: 5,
+      };
+      return prisma.tariff.upsert({
         where: { id: cls.id },
-        update: {},
-        create: {
-          serviceId: service.id,
-          classId: cls.id,
-          name: `${cls.name} — Стандарт`,
-          basePrice: cls.id === 1 ? 150 : cls.id === 2 ? 200 : cls.id === 3 ? 350 : 280,
-          pricePerKm: cls.id === 1 ? 20 : cls.id === 2 ? 25 : cls.id === 3 ? 40 : 32,
-          pricePerMin: cls.id === 1 ? 3 : cls.id === 2 ? 4 : cls.id === 3 ? 6 : 5,
-          minPrice: cls.id === 1 ? 150 : cls.id === 2 ? 200 : cls.id === 3 ? 350 : 280,
-          freeWaitMinutes: 5,
-          extraWaitPrice: 5,
-        },
-      })
-    )
+        update: data, // ← обновляем существующие записи
+        create: data,
+      });
+    })
   );
   console.log("✓ Tariffs:", tariffs.length);
 
+  // Set outOfCityKmRate via raw SQL (new field, might not exist before db:push)
+  try {
+    for (const cls of classes) {
+      const d = TARIFF_DATA[cls.id];
+      if (!d) continue;
+      await prisma.$executeRaw`
+        UPDATE tariffs SET "outOfCityKmRate" = ${d.outCity}
+        WHERE "classId" = ${cls.id} AND "serviceId" = ${service.id}
+      `;
+    }
+    console.log("✓ outOfCityKmRate updated");
+  } catch {
+    console.log("⚠ outOfCityKmRate column not yet created — run db:push first");
+  }
 
-  // ── Driver Tariff Group ────────────────────────────────────────────────────
-  await prisma.driverTariffGroup.upsert({
-    where: { id: 1 },
-    update: {},
-    create: { name: "Сдельная 15%", type: "commission", value: 15, description: "Комиссия 15% с каждого заказа" },
-  });
-  await prisma.driverTariffGroup.upsert({
-    where: { id: 2 },
-    update: {},
-    create: { name: "Безлимит 2500₽/неделя", type: "unlimited", value: 2500, description: "Фиксированный платёж 2500р/нед" },
-  });
-  console.log("✓ Tariff groups: 2");
-
-  // ── Admin Operator ─────────────────────────────────────────────────────────
-  const admin = await prisma.operator.upsert({
-    where: { login: "admin" },
-    update: { passwordHash: await hashPassword("admin123") },
-    create: {
-      login: "admin",
-      name: "Администратор",
-      passwordHash: await hashPassword("admin123"), // Real scrypt hash
-      role: "admin",
-      cashBalance: 0,
-      advanceBalance: 0,
-      isActive: true,
-    },
-  });
-  console.log("✓ Admin operator:", admin.login);
-
-  // ── Demo Driver ────────────────────────────────────────────────────────────
-  const driver = await prisma.driver.upsert({
-    where: { login: "driver001" },
-    update: {},
-    create: {
-      login: "driver001",
-      passwordHash: await hashPassword("driver123"),
-      firstName: "Асхат",
-      lastName: "Жумабеков",
-      phone: "+77001234567",
-      callsign: "001",
-      status: "offline",
-      balance: 0,
-      rating: 4.8,
-      isActive: true,
-    },
-  });
-  console.log("✓ Demo driver:", driver.login);
-
-  // ── Demo Vehicle ───────────────────────────────────────────────────────────
-  await prisma.vehicle.upsert({
-    where: { plate: "777AAA01" },
-    update: {},
-    create: {
-      plate: "777AAA01",
-      make: "Toyota",
-      model: "Camry",
-      color: "белый",
-      year: 2020,
-      ownershipType: "driver",
-      driverId: driver.id,
-      isActive: true,
-    },
-  });
-  console.log("✓ Demo vehicle: 777AAA01");
-
-  console.log("\n✅ Seed complete!");
-  console.log("   Login: admin / admin123");
-  console.log("   Driver app: driver001 / driver123");
-}
-
-main()
-  .catch((e) => { console.error("Seed failed:", e); process.exit(1); })
-  .finally(async () => { await prisma.$disconnect(); });
+  main()
+    .catch((e) => { console.error("Seed failed:", e); process.exit(1); })
+    .finally(async () => { await prisma.$disconnect(); });

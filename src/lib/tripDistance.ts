@@ -59,33 +59,58 @@ type RawSession = {
  * Segment zone = zone of its PREVIOUS point (isOutOfCity flag).
  */
 export async function calculateSessionDistance(sessionId: number): Promise<TripCalcResult> {
-  // Fetch session via raw SQL to access new fields before Prisma regen
-  const sessions = await prisma.$queryRaw<RawSession[]>`
-    SELECT id,
-           "tariffPerKm"       AS tariff_per_km,
-           "outOfCityKmRate"   AS out_of_city_km_rate,
-           "baseFare"          AS base_fare
-    FROM order_trip_sessions
-    WHERE id = ${sessionId}
-    LIMIT 1
-  `;
+  // Fetch session — try with new columns first, fall back if schema not updated
+  let sessions: RawSession[] = [];
+  try {
+    sessions = await prisma.$queryRaw<RawSession[]>`
+      SELECT id,
+             "tariffPerKm"       AS tariff_per_km,
+             "outOfCityKmRate"   AS out_of_city_km_rate,
+             "baseFare"          AS base_fare
+      FROM order_trip_sessions
+      WHERE id = ${sessionId}
+      LIMIT 1
+    `;
+  } catch {
+    // outOfCityKmRate column doesn't exist yet — fetch without it
+    const fallback = await prisma.$queryRaw<Array<{ id: number; tariff_per_km: string; base_fare: string }>>`
+      SELECT id, "tariffPerKm" AS tariff_per_km, "baseFare" AS base_fare
+      FROM order_trip_sessions WHERE id = ${sessionId} LIMIT 1
+    `;
+    sessions = fallback.map((r) => ({ ...r, out_of_city_km_rate: "0" }));
+  }
 
   if (!sessions.length) throw new Error(`Trip session ${sessionId} not found`);
   const session = sessions[0];
 
-  // Fetch points via raw SQL to access isOutOfCity
-  const pts = await prisma.$queryRaw<RawPoint[]>`
-    SELECT lat,
-           lng,
-           "sequenceNumber"  AS sequence_number,
-           "capturedAt"      AS captured_at,
-           "speedKmh"        AS speed_kmh,
-           "accuracyM"       AS accuracy_m,
-           "isOutOfCity"     AS is_out_of_city
-    FROM order_trip_points
-    WHERE "tripSessionId" = ${sessionId}
-    ORDER BY "sequenceNumber" ASC
-  `;
+  // Fetch points — try with isOutOfCity first, fall back if column not yet added
+  let pts: RawPoint[] = [];
+  try {
+    pts = await prisma.$queryRaw<RawPoint[]>`
+      SELECT lat, lng,
+             "sequenceNumber" AS sequence_number,
+             "capturedAt"     AS captured_at,
+             "speedKmh"       AS speed_kmh,
+             "accuracyM"      AS accuracy_m,
+             "isOutOfCity"    AS is_out_of_city
+      FROM order_trip_points
+      WHERE "tripSessionId" = ${sessionId}
+      ORDER BY "sequenceNumber" ASC
+    `;
+  } catch {
+    // isOutOfCity column doesn't exist yet — fetch without it, treat all as city
+    const fallback = await prisma.$queryRaw<Array<Omit<RawPoint, "is_out_of_city">>>`
+      SELECT lat, lng,
+             "sequenceNumber" AS sequence_number,
+             "capturedAt"     AS captured_at,
+             "speedKmh"       AS speed_kmh,
+             "accuracyM"      AS accuracy_m
+      FROM order_trip_points
+      WHERE "tripSessionId" = ${sessionId}
+      ORDER BY "sequenceNumber" ASC
+    `;
+    pts = fallback.map((p) => ({ ...p, is_out_of_city: false }));
+  }
 
   let cityKm = 0;
   let outOfCityKm = 0;
@@ -159,15 +184,27 @@ export async function completeSession(
   outOfCityKm = 0,
   outOfCitySeconds = 0,
 ): Promise<void> {
-  // Use raw SQL until Prisma client is regenerated with new fields
-  await prisma.$executeRaw`
-    UPDATE order_trip_sessions
-    SET status            = 'completed',
-        "finalDistanceKm" = ${distanceKm},
-        "finalPrice"      = ${finalPrice},
-        "outOfCityKm"     = ${outOfCityKm},
-        "outOfCitySeconds" = ${outOfCitySeconds},
-        "completedAt"     = NOW()
-    WHERE id = ${sessionId}
-  `;
+  try {
+    // Try with new columns (after db:push)
+    await prisma.$executeRaw`
+      UPDATE order_trip_sessions
+      SET status             = 'completed',
+          "finalDistanceKm"  = ${distanceKm},
+          "finalPrice"       = ${finalPrice},
+          "outOfCityKm"      = ${outOfCityKm},
+          "outOfCitySeconds" = ${outOfCitySeconds},
+          "completedAt"      = NOW()
+      WHERE id = ${sessionId}
+    `;
+  } catch {
+    // New columns don't exist yet — fall back to minimal update
+    await prisma.$executeRaw`
+      UPDATE order_trip_sessions
+      SET status            = 'completed',
+          "finalDistanceKm" = ${distanceKm},
+          "finalPrice"      = ${finalPrice},
+          "completedAt"     = NOW()
+      WHERE id = ${sessionId}
+    `;
+  }
 }
