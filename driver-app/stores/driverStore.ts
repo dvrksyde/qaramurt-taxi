@@ -74,6 +74,8 @@ interface DriverState {
   tripCityRatePerKm: number;   // server-resolved city rate (correct for "Любой" orders)
   tripStartTime: number | null;
   lastLocation: { lat: number; lng: number } | null;
+  lastHeading: number | null;
+  setLastHeading: (heading: number | null) => void;
   // Zone tracking
   isOutOfCity: boolean;
   outOfCityRatePerKm: number;
@@ -115,10 +117,11 @@ export const useDriverStore = create<DriverState>((set) => ({
   setActiveOrder: (activeOrder) => set({ activeOrder }),
   tripDistance: 0,
   tripPrice: 0,
-  tripBaseFare: 290,
+  tripBaseFare: 0,
   tripCityRatePerKm: 80,
   tripStartTime: null,
   lastLocation: null,
+  lastHeading: null,
   isOutOfCity: false,
   outOfCityRatePerKm: 0,
   outOfCityStartTime: null,
@@ -128,6 +131,7 @@ export const useDriverStore = create<DriverState>((set) => ({
   setTripBaseFare: (tripBaseFare) => set({ tripBaseFare }),
   setTripCityRate: (tripCityRatePerKm) => set({ tripCityRatePerKm }),
   setLastLocation: (lastLocation) => set({ lastLocation }),
+  setLastHeading: (lastHeading) => set({ lastHeading }),
   setZoneChange: ({ isOutOfCity, outOfCityRatePerKm, currentPrice, currentDistance }) => set({
     isOutOfCity,
     outOfCityRatePerKm,
@@ -136,8 +140,8 @@ export const useDriverStore = create<DriverState>((set) => ({
     tripDistanceAtZoneChange: currentDistance,
   }),
   resetTrip: () => set({
-    tripDistance: 0, tripPrice: 0, tripBaseFare: 290, tripCityRatePerKm: 80,
-    tripStartTime: null, lastLocation: null,
+    tripDistance: 0, tripPrice: 0, tripBaseFare: 0, tripCityRatePerKm: 80,
+    tripStartTime: null, lastLocation: null, lastHeading: null,
     isOutOfCity: false, outOfCityRatePerKm: 0, outOfCityStartTime: null,
     tripPriceAtZoneChange: 0, tripDistanceAtZoneChange: 0,
   }),

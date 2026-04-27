@@ -174,14 +174,27 @@ export async function flushTripPoints(orderId: number): Promise<boolean> {
 /**
  * Inject a pre-created session ID (e.g. from curbside route) so app doesn't
  * make a redundant /trip/start request.
+ * Also stores server-resolved rates so getTripRates() works correctly.
  */
-export async function injectSessionId(orderId: number, sessionId: number): Promise<void> {
+export async function injectSessionId(
+  orderId: number,
+  sessionId: number,
+  effectiveBaseFare?: number,
+  effectiveCityRatePerKm?: number,
+  outOfCityKmRate?: number,
+): Promise<void> {
   let state = await readState();
   if (!state || state.orderId !== orderId) {
     state = { orderId, sessionId: null, nextSequenceNumber: 1, pendingPoints: [] };
   }
   if (!state.sessionId) {
-    await writeState({ ...state, sessionId });
+    await writeState({
+      ...state,
+      sessionId,
+      effectiveBaseFare,
+      effectiveCityRatePerKm,
+      outOfCityKmRate,
+    });
   }
 }
 

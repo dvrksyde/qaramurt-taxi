@@ -167,7 +167,14 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({
-      data: { ...order, _sessionId: sessionId },
+      data: {
+        ...order,
+        _sessionId: sessionId,
+        _baseFare: baseFare,       // server-computed base fare (class-aware)
+        _cityRate: pricePerKm,     // server-computed city rate per km
+        // Include class explicitly so client can determine correct baseFare
+        class: classObj ? { id: classObj.id, name: classObj.name } : null,
+      },
       warning: Number(driver.balance) <= 100 ? "Ваш баланс ниже 100 ₸. Пожалуйста, пополните счет!" : undefined
     });
   } catch (error) {

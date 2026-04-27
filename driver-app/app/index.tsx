@@ -33,6 +33,29 @@ import { mapOrderToActiveOrder } from "../lib/orderPricing";
 import { clearTripSync, flushTripPoints, getTripRates, injectSessionId, queueTripPoint, startTripSync } from "../services/tripSync";
 
 const BASE_FARE = 290;
+
+/**
+ * Resolve the correct base fare using two-priority rules:
+ *  1. If the order has a specific named class (not "Любой") → use that class's fare.
+ *  2. "Any class" or no class → use the driver's highest vehicle class.
+ *     Comfort ≥ Econom: if driver has Comfort (among others) → 390, else → 290.
+ *
+ * `vehicleClasses` comes from profile.vehicle.classes — each element has
+ * { classId, class: { id, name, ... } } (Prisma include of the VehicleClass join row).
+ */
+function resolveBaseFare(
+  orderClass: { name?: string | null } | null | undefined,
+  vehicleClasses: Array<{ class?: { name?: string | null } | null }> | null | undefined
+): number {
+  // Rule 1: order specifies a concrete class
+  if (orderClass?.name && orderClass.name !== "Любой") {
+    return orderClass.name === "Комфорт" ? 390 : BASE_FARE;
+  }
+  // Rule 2: "any class" → pick the driver's best class
+  const classes = vehicleClasses ?? [];
+  const hasComfort = classes.some((c) => c.class?.name === "Комфорт");
+  return hasComfort ? 390 : BASE_FARE;
+}
 type DriverTab = "home" | "orders" | "history" | "chat" | "profile";
 
 function roundTo5(n: number): number {
@@ -105,13 +128,15 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
             // Do NOT add extrasTotal again here — it would double/triple count options like Bag +100
             let newPrice: number;
             if (state.isOutOfCity && state.outOfCityStartTime !== null) {
-              // ✅ tripPriceAtZoneChange already has baseFare+extras baked in
+              // outOfCityTimeFee (+25₸/мин) добавляется отдельным real-time таймером в displayedTripPrice
               const distSinceZone = newDist - state.tripDistanceAtZoneChange;
               const outRate = state.outOfCityRatePerKm || cityRate;
-              const outTimeFee = Math.floor((Date.now() - state.outOfCityStartTime) / 60000) * 25;
-              newPrice = roundTo5(state.tripPriceAtZoneChange + distSinceZone * outRate + outTimeFee);
+              newPrice = roundTo5(state.tripPriceAtZoneChange + distSinceZone * outRate);
             } else {
-              const baseFare = state.tripBaseFare || (state.activeOrder?.class?.name === "Комфорт" ? 390 : BASE_FARE);
+              const baseFare = state.tripBaseFare || resolveBaseFare(
+                state.activeOrder?.class,
+                state.profile?.vehicle?.classes
+              );
               newPrice = roundTo5(baseFare + newDist * cityRate);
             }
             useDriverStore.getState().setTripMeter(newDist, newPrice);
@@ -119,8 +144,15 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
         }
       }
 
-      // Обновляем lastLocation после каждой точки из пачки
+      // Обновляем lastLocation (и heading) после каждой точки из пачки
       useDriverStore.getState().setLastLocation({ lat, lng });
+      if (
+        typeof loc.coords.heading === "number" &&
+        Number.isFinite(loc.coords.heading) &&
+        loc.coords.heading >= 0
+      ) {
+        useDriverStore.getState().setLastHeading(loc.coords.heading);
+      }
 
       // Отправляем последнюю точку на сервер
       if (state.activeOrder?.status === "in_progress" && !state.activeOrder.isFixedPrice) {
@@ -172,6 +204,8 @@ export default function MainScreen() {
     setTripMeter,
     resetTrip,
     startTrip,
+    isOutOfCity,
+    outOfCityStartTime,
   } = useDriverStore();
 
   const [loading, setLoading] = useState(false);
@@ -188,6 +222,8 @@ export default function MainScreen() {
   // Prevents loadDashboard from overriding status while toggle is in flight
   const togglingOnlineRef = useRef(false);
   const [togglingOnline, setTogglingOnline] = useState(false);
+  // Throttle route rebuilds during in_progress trips (max 1 per 30s)
+  const routeThrottleRef = useRef<number>(0);
 
   // Dispatcher-assigned order modal
   const [dispatcherAssignedOrder, setDispatcherAssignedOrder] = useState<any>(null);
@@ -202,7 +238,7 @@ export default function MainScreen() {
     }).catch(console.warn);
 
     return () => {
-      soundRef.current?.unloadAsync().catch(() => {});
+      soundRef.current?.unloadAsync().catch(() => { });
     };
   }, []);
 
@@ -210,7 +246,7 @@ export default function MainScreen() {
   useEffect(() => {
     const shouldStayOn = isOnline || !!activeOrder;
     if (shouldStayOn) {
-      activateKeepAwakeAsync().catch(() => {});
+      activateKeepAwakeAsync().catch(() => { });
     } else {
       deactivateKeepAwake();
     }
@@ -220,7 +256,7 @@ export default function MainScreen() {
     try {
       // Unload previous sound before creating a new one to prevent leaks
       if (soundRef.current) {
-        await soundRef.current.unloadAsync().catch(() => {});
+        await soundRef.current.unloadAsync().catch(() => { });
         soundRef.current = null;
       }
 
@@ -236,7 +272,7 @@ export default function MainScreen() {
 
       sound.setOnPlaybackStatusUpdate((status) => {
         if (status.isLoaded && status.didJustFinish) {
-          sound.unloadAsync().catch(() => {});
+          sound.unloadAsync().catch(() => { });
           soundRef.current = null;
         }
       });
@@ -251,6 +287,16 @@ export default function MainScreen() {
       setCurrentCoords({ latitude: lastLocationState.lat, longitude: lastLocationState.lng });
     }
   }, [lastLocationState]);
+
+  // Sync heading from store → local state for map icon rotation
+  const [currentHeading, setCurrentHeading] = useState<number | null>(null);
+  const lastHeadingState = useDriverStore((s) => s.lastHeading);
+  useEffect(() => {
+    if (lastHeadingState !== null) {
+      setCurrentHeading(lastHeadingState);
+    }
+  }, [lastHeadingState]);
+
   const realtimeDriverRef = useRef<number | null>(null);
 
   const refreshCurrentPosition = useCallback(async () => {
@@ -336,7 +382,9 @@ export default function MainScreen() {
 
   const mapOrderToState = useCallback((order: any) => {
     if (!order) return null;
-    const currentBaseFare = order.class?.name === "Комфорт" ? 390 : BASE_FARE;
+    // Read vehicle classes at call time to avoid stale-closure issues
+    const vehicleClasses = useDriverStore.getState().profile?.vehicle?.classes;
+    const currentBaseFare = resolveBaseFare(order.class, vehicleClasses);
     return mapOrderToActiveOrder(order, currentBaseFare);
   }, []);
 
@@ -535,6 +583,55 @@ export default function MainScreen() {
     void startTripSync(activeOrder.id).then(() => flushTripPoints(activeOrder.id));
   }, [activeOrder]);
 
+  // ── Map route: build or clear depending on order status ──────────────────
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    if (!activeOrder) {
+      // No active order — wipe any leftover route
+      mapRef.current.clearRoute();
+      return;
+    }
+
+    const pickup  = parseWktPoint(activeOrder.pickupPoint);
+    const dropoff = parseWktPoint(activeOrder.dropoffPoint);
+
+    if (activeOrder.status === "assigned" && pickup && currentCoords) {
+      // Driver heading to client → route: my position → pickup
+      mapRef.current.buildRoute(currentCoords, pickup, true);
+    } else if (activeOrder.status === "arrived") {
+      // Driver is on-site — no route needed
+      mapRef.current.clearRoute();
+    } else if (activeOrder.status === "in_progress" && dropoff && currentCoords) {
+      // Trip started → route: my position → dropoff
+      routeThrottleRef.current = Date.now();
+      mapRef.current.buildRoute(currentCoords, dropoff, true);
+    } else {
+      mapRef.current.clearRoute();
+    }
+  // Only re-run when the order status changes, not on every coords update
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeOrder?.status, activeOrder?.id]);
+
+  // ── Map route: periodic rebuild during trip (max 1 per 30 s) ─────────────
+  useEffect(() => {
+    if (!activeOrder || activeOrder.status !== "in_progress") return;
+    if (!currentCoords || !mapRef.current) return;
+
+    const dropoff = parseWktPoint(activeOrder.dropoffPoint);
+    if (!dropoff) return;
+
+    const THROTTLE_MS = 30_000;
+    const elapsed = Date.now() - routeThrottleRef.current;
+    if (elapsed < THROTTLE_MS) return;
+
+    routeThrottleRef.current = Date.now();
+    // fitBounds=false to keep the viewport where the driver is
+    mapRef.current.buildRoute(currentCoords, dropoff, false);
+  // Runs whenever currentCoords changes, but the throttle gate limits actual rebuilds
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentCoords]);
+
   // Ref to track the offline-on-background timeout
   const bgOfflineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -701,18 +798,19 @@ export default function MainScreen() {
     const order = res.data;
     const serverSessionId: number | null = order._sessionId ?? null;
 
-    // Determine correct baseFare from vehicle class
-    const isComfort = order.class?.name === "Комфорт";
-    const initialBaseFare = isComfort ? 390 : 290;
+    // Use server-resolved base fare and city rate (class-aware, already computed)
+    const vehicleClasses = useDriverStore.getState().profile?.vehicle?.classes;
+    const serverBaseFare = Number(order._baseFare) || resolveBaseFare(order.class, vehicleClasses);
+    const serverCityRate = Number(order._cityRate) || Number(order.pricePerKm) || 80;
 
     setActiveOrder(mapOrderToState(order));
     resetTrip();
-    useDriverStore.getState().setTripBaseFare(initialBaseFare);
-    useDriverStore.getState().setTripCityRate(Number(order.pricePerKm) || (isComfort ? 100 : 80));
+    useDriverStore.getState().setTripBaseFare(serverBaseFare);
+    useDriverStore.getState().setTripCityRate(serverCityRate);
     startTrip();
     tripDistanceRef.current = 0;
-    useDriverStore.getState().setTripMeter(0, initialBaseFare);
-    setTripMeter(0, initialBaseFare);
+    useDriverStore.getState().setTripMeter(0, serverBaseFare);
+    setTripMeter(0, serverBaseFare);
 
     Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest }).then((loc) => {
       useDriverStore.getState().setLastLocation({
@@ -722,9 +820,9 @@ export default function MainScreen() {
     });
 
     void (async () => {
-      // If server already created a session, inject it so /trip/start is skipped
+      // Inject session + server-resolved rates so getTripRates() works without extra /trip/start call
       if (serverSessionId) {
-        await injectSessionId(order.id, serverSessionId);
+        await injectSessionId(order.id, serverSessionId, serverBaseFare, serverCityRate, 0);
       }
       await startTripSync(order.id);
       try {
@@ -774,7 +872,7 @@ export default function MainScreen() {
       playAppSound('welcome');
       startTrip();
 
-      const currentBaseFare = activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE;
+      const currentBaseFare = resolveBaseFare(activeOrder.class, profile?.vehicle?.classes);
       const options: any[] = Array.isArray(activeOrder.options) ? activeOrder.options : [];
       const extrasTotal = options.reduce((sum, opt) => sum + (Number(opt.price) || 0), 0);
       let baseTripFare = activeOrder.isFixedPrice ? activeOrder.estimatedPrice! : (currentBaseFare + extrasTotal);
@@ -814,11 +912,17 @@ export default function MainScreen() {
         const storeState = useDriverStore.getState();
         const fallbackDist =
           Math.round(Math.max(storeState.tripDistance, tripDistanceRef.current) * 10) / 10;
-        const baseFare = storeState.tripBaseFare || (activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE);
-        // Use server-resolved city rate for fallback (correct for "Любой" orders)
+        const baseFare = storeState.tripBaseFare || resolveBaseFare(
+          activeOrder.class,
+          storeState.profile?.vehicle?.classes
+        );
         const cityRate = storeState.tripCityRatePerKm || Number(activeOrder.pricePerKm) || 80;
+        // Out-of-city time fee at moment of completion
+        const outTimeFeeAtCompletion = storeState.isOutOfCity && storeState.outOfCityStartTime
+          ? Math.floor((Date.now() - storeState.outOfCityStartTime) / 60000) * 25
+          : 0;
         body.clientDistanceKm = fallbackDist;
-        body.clientFinalPrice = roundTo5(baseFare + fallbackDist * cityRate) + tripWaitingFee;
+        body.clientFinalPrice = roundTo5(baseFare + fallbackDist * cityRate) + tripWaitingFee + outTimeFeeAtCompletion;
       } else {
         // Fixed-price: явно передаём цену
         if (activeOrder.distanceKm > 0) {
@@ -866,7 +970,10 @@ export default function MainScreen() {
           // Резервный показ из предварительного счётчика
           const storeState = useDriverStore.getState();
           const fallbackDist = Math.round(Math.max(storeState.tripDistance, tripDistanceRef.current) * 10) / 10;
-          const fallbackBaseFare = storeState.tripBaseFare || (activeOrder.class?.name === "Комфорт" ? 390 : BASE_FARE);
+          const fallbackBaseFare = storeState.tripBaseFare || resolveBaseFare(
+            activeOrder.class,
+            storeState.profile?.vehicle?.classes
+          );
           const fallbackCityRate = storeState.tripCityRatePerKm || Number(activeOrder.pricePerKm) || 80;
           const fallbackPrice = roundTo5(fallbackBaseFare + fallbackDist * fallbackCityRate);
           Alert.alert(
@@ -1037,9 +1144,26 @@ export default function MainScreen() {
 
   const WAITING_RATE_PER_MIN = 20;
   const tripWaitingFee = Math.floor(tripWaitingElapsed / 60) * WAITING_RATE_PER_MIN;
+
+  // Real-time out-of-city time surcharge (+25₸/мин) — updates every 15 sec independently from GPS
+  const [outOfCityTimeFee, setOutOfCityTimeFee] = useState(0);
+  useEffect(() => {
+    if (!isOutOfCity || !outOfCityStartTime || activeOrder?.status !== "in_progress") {
+      setOutOfCityTimeFee(0);
+      return;
+    }
+    const calc = () => {
+      const mins = Math.floor((Date.now() - outOfCityStartTime) / 60000);
+      setOutOfCityTimeFee(mins * 25);
+    };
+    calc();
+    const interval = setInterval(calc, 15000);
+    return () => clearInterval(interval);
+  }, [isOutOfCity, outOfCityStartTime, activeOrder?.status]);
+
   const displayedTripPrice = activeOrder?.isFixedPrice
     ? (activeOrder?.estimatedPrice ?? 0) + tripWaitingFee
-    : tripPrice + tripWaitingFee;
+    : tripPrice + tripWaitingFee + outOfCityTimeFee;
   const renderHome = () => {
     if (!profile) {
       return (
@@ -1252,7 +1376,10 @@ export default function MainScreen() {
             <YandexMapView
               ref={mapRef}
               userLocation={currentCoords}
+              userHeading={currentHeading}
               pickupLocation={parseWktPoint(activeOrder.pickupPoint)}
+              dropoffLocation={parseWktPoint(activeOrder.dropoffPoint)}
+              autoFollow={activeOrder.status === "in_progress"}
               zoom={15}
               showCenterButton
             />
@@ -1343,6 +1470,7 @@ export default function MainScreen() {
           <YandexMapView
             ref={mapRef}
             userLocation={currentCoords}
+            userHeading={currentHeading}
             zoom={15}
             showCenterButton
           />
