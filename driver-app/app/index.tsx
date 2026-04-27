@@ -91,11 +91,8 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
       if (state.activeOrder?.status === "in_progress" && state.lastLocation && !state.activeOrder.isFixedPrice) {
         const d = haversine(state.lastLocation.lat, state.lastLocation.lng, lat, lng);
 
-        // ✅ FIX: threshold back to 5m (was wrongly raised to 10m — missed steps at slow city speeds)
-        // ✅ FIX: stationary check moved INSIDE — no `continue` so lastLocation is always updated below
-        if (d > 0.005 && d < 0.5) {
-          // GPS noise filter: don't count distance if clearly stationary (GPS speed < 1 m/s AND d < 15m)
-          // lastLocation is still updated at line below — no jump accumulation when car starts moving
+        // ✅ threshold = 10m to match backend tripDistance.ts (segKm < 0.010)
+        if (d > 0.010 && d < 0.5) {
           const speedMs = typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed)
             ? loc.coords.speed : null;
           const isStationary = speedMs !== null && speedMs < 1.0 && d < 0.015;
@@ -104,15 +101,16 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
             const newDist = state.tripDistance + d;
             const cityRate = state.tripCityRatePerKm || Number(state.activeOrder.pricePerKm) || 80;
 
+            // ✅ FIX: tripBaseFare already includes extras (set in updateOrderStatus)
+            // Do NOT add extrasTotal again here — it would double/triple count options like Bag +100
             let newPrice: number;
             if (state.isOutOfCity && state.outOfCityStartTime !== null) {
+              // ✅ tripPriceAtZoneChange already has baseFare+extras baked in
               const distSinceZone = newDist - state.tripDistanceAtZoneChange;
               const outRate = state.outOfCityRatePerKm || cityRate;
               const outTimeFee = Math.floor((Date.now() - state.outOfCityStartTime) / 60000) * 25;
-              // tripPriceAtZoneChange уже включает baseFare+extras — не добавляем extras снова
               newPrice = roundTo5(state.tripPriceAtZoneChange + distSinceZone * outRate + outTimeFee);
             } else {
-              // tripBaseFare уже включает extras+waitFee — НЕ добавляем extras отдельно
               const baseFare = state.tripBaseFare || (state.activeOrder?.class?.name === "Комфорт" ? 390 : BASE_FARE);
               newPrice = roundTo5(baseFare + newDist * cityRate);
             }

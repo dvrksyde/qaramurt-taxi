@@ -85,10 +85,10 @@ export async function POST(
     }
   }
 
-  // Add order options (luggage, conditioner, etc.) to baseFare so server calc matches client
-  const OPTION_PRICES: Record<string, number> = { luggage: 100, roof_luggage: 200, conditioner: 100 };
-  const orderOptions = Array.isArray(order.options) ? (order.options as string[]) : [];
-  const optionsTotal = orderOptions.reduce((sum, opt) => sum + (OPTION_PRICES[opt] ?? 0), 0);
+  // Add order options (luggage, conditioner, etc.) to baseFare so server calc matches client.
+  // Options are stored as [{name, price, ...}] objects — same formula as client extrasTotal.
+  const orderOptions = Array.isArray(order.options) ? (order.options as Array<{ price?: number }>) : [];
+  const optionsTotal = orderOptions.reduce((sum: number, opt: any) => sum + (Number(opt.price) || 0), 0);
   baseFareWithWaiting += optionsTotal;
 
   // ── Effective city rate per km ────────────────────────────────────────────
