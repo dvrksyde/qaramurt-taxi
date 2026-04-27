@@ -136,8 +136,24 @@ export async function PATCH(
       if (activeSession) {
         // Session baseFare includes: class base fare + arrival wait + options (set in trip/start)
         const sessionBaseFare = Number(activeSession.baseFare) || currentBaseFare;
+        const sessionCityRate = Number(activeSession.tariffPerKm) || Number(order.pricePerKm) || 80;
         // Mid-trip waiting fee (driver pressed ⏸ during the ride)
         const midTripWaitFee = Number(order.waitingFee || 0);
+
+        // Read out-of-city rate from the session (added via raw SQL column)
+        let sessionOutOfCityRate = 0;
+        try {
+          const rr = await prisma.$queryRaw<Array<{ r: string }>>`
+            SELECT "outOfCityKmRate" AS r FROM order_trip_sessions WHERE id = ${activeSession.id} LIMIT 1
+          `;
+          sessionOutOfCityRate = Number(rr[0]?.r ?? 0);
+        } catch { /* column not yet created — leave 0 */ }
+
+        // Breakdown payload — populated after calculateSessionDistance
+        let tripBreakdown: {
+          baseFare: number; cityKm: number; cityRatePerKm: number;
+          outOfCityKm: number; outOfCityKmRate: number; outOfCitySeconds: number;
+        } | null = null;
 
         try {
           const calc = await calculateSessionDistance(activeSession.id);
@@ -148,6 +164,14 @@ export async function PATCH(
             await completeSession(activeSession.id, calc.distanceKm, serverPrice, calc.outOfCityKm, calc.outOfCitySeconds);
             updateData.distanceKm = calc.distanceKm;
             updateData.finalPrice = serverPrice;
+            tripBreakdown = {
+              baseFare: sessionBaseFare,
+              cityKm: calc.cityKm,
+              cityRatePerKm: sessionCityRate,
+              outOfCityKm: calc.outOfCityKm,
+              outOfCityKmRate: sessionOutOfCityRate || sessionCityRate,
+              outOfCitySeconds: calc.outOfCitySeconds,
+            };
           } else {
             console.warn(`[trip/complete] Session ${activeSession.id} has < 2 points; using client fallback`);
             const fallbackPrice = Math.max(
@@ -157,6 +181,15 @@ export async function PATCH(
             await completeSession(activeSession.id, clientDistanceKm ?? 0, fallbackPrice);
             if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
             updateData.finalPrice = fallbackPrice;
+            // Provide a basic breakdown even for fallback
+            tripBreakdown = {
+              baseFare: sessionBaseFare,
+              cityKm: clientDistanceKm ?? 0,
+              cityRatePerKm: sessionCityRate,
+              outOfCityKm: 0,
+              outOfCityKmRate: sessionOutOfCityRate || sessionCityRate,
+              outOfCitySeconds: 0,
+            };
           }
         } catch (err) {
           console.error("[trip/complete] Server calc failed:", err);
@@ -168,7 +201,18 @@ export async function PATCH(
             clientFinalPrice ?? fallbackPrice,
             sessionBaseFare
           );
+          tripBreakdown = {
+            baseFare: sessionBaseFare,
+            cityKm: clientDistanceKm ?? 0,
+            cityRatePerKm: sessionCityRate,
+            outOfCityKm: 0,
+            outOfCityKmRate: sessionOutOfCityRate || sessionCityRate,
+            outOfCitySeconds: 0,
+          };
         }
+
+        // Store breakdown on the outer scope so it's available for the response
+        (updateData as any)._breakdown = tripBreakdown;
       } else {
         // No GPS session — fall back to client-reported values
         if (clientDistanceKm !== undefined) {
@@ -300,6 +344,8 @@ export async function PATCH(
       finalPrice: finalOrder?.finalPrice ?? null,
       waitingFee: finalOrder?.waitingFee ?? 0,
       waitingAccumulatedSeconds: finalOrder?.waitingAccumulatedSeconds ?? 0,
+      // Trip breakdown for the driver app summary modal (only on completion)
+      breakdown: status === "completed" ? ((updateData as any)._breakdown ?? null) : undefined,
     },
   });
 }

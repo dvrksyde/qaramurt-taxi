@@ -59,7 +59,11 @@ export function OrderDetailsModal({ orderId, onClose }: { orderId: number; onClo
         // Restore saved extras from order.options
         const savedOptions = data.data.options;
         if (Array.isArray(savedOptions)) {
-          setExtras(savedOptions.map((o: any) => o.key).filter(Boolean));
+          setExtras(
+            savedOptions
+              .map((o: any) => (typeof o === "string" ? o : o?.key))
+              .filter(Boolean)
+          );
         }
 
         // Load GPS track if order is active or completed

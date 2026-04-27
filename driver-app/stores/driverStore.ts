@@ -82,6 +82,11 @@ interface DriverState {
   outOfCityStartTime: number | null;
   tripPriceAtZoneChange: number;
   tripDistanceAtZoneChange: number;
+  // Client-side zone detection
+  cityBoundary: number[][] | null;         // [[lng, lat], ...] GeoJSON polygon
+  configuredOutOfCityRate: number;         // tariff-configured rate from trip/start
+  setCityBoundary: (b: number[][] | null) => void;
+  setConfiguredOutOfCityRate: (rate: number) => void;
   setTripMeter: (d: number, p: number) => void;
   setTripBaseFare: (fare: number) => void;
   setTripCityRate: (rate: number) => void;
@@ -127,6 +132,10 @@ export const useDriverStore = create<DriverState>((set) => ({
   outOfCityStartTime: null,
   tripPriceAtZoneChange: 0,
   tripDistanceAtZoneChange: 0,
+  cityBoundary: null,
+  configuredOutOfCityRate: 0,
+  setCityBoundary: (cityBoundary) => set({ cityBoundary }),
+  setConfiguredOutOfCityRate: (configuredOutOfCityRate) => set({ configuredOutOfCityRate }),
   setTripMeter: (tripDistance, tripPrice) => set({ tripDistance, tripPrice }),
   setTripBaseFare: (tripBaseFare) => set({ tripBaseFare }),
   setTripCityRate: (tripCityRatePerKm) => set({ tripCityRatePerKm }),
@@ -144,6 +153,8 @@ export const useDriverStore = create<DriverState>((set) => ({
     tripStartTime: null, lastLocation: null, lastHeading: null,
     isOutOfCity: false, outOfCityRatePerKm: 0, outOfCityStartTime: null,
     tripPriceAtZoneChange: 0, tripDistanceAtZoneChange: 0,
+    configuredOutOfCityRate: 0,
+    // cityBoundary NOT reset — same city boundary applies every trip
   }),
   startTrip: () => set({ tripStartTime: Date.now(), lastLocation: null }),
 }));

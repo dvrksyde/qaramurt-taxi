@@ -170,8 +170,9 @@ export async function POST(req: NextRequest) {
       data: {
         ...order,
         _sessionId: sessionId,
-        _baseFare: baseFare,       // server-computed base fare (class-aware)
-        _cityRate: pricePerKm,     // server-computed city rate per km
+        _baseFare: baseFare,           // server-computed base fare (class-aware)
+        _cityRate: pricePerKm,         // server-computed city rate per km
+        _outOfCityRate: outOfCityKmRate, // server-computed out-of-city rate (for client zone detection)
         // Include class explicitly so client can determine correct baseFare
         class: classObj ? { id: classObj.id, name: classObj.name } : null,
       },

@@ -111,10 +111,15 @@ export async function POST(req: NextRequest) {
   // Use operator ID from session
   const resolvedOperatorId = currentOpId;
 
-  const optionsArr: string[] = [];
-  if (hasLuggage) optionsArr.push("luggage");
-  if (hasRoofLuggage) optionsArr.push("roof_luggage");
-  if (hasConditioner) optionsArr.push("conditioner");
+  const EXTRAS_MAP: Record<string, { key: string; label: string; price: number }> = {
+    luggage:      { key: "luggage",      label: "Багаж",         price: 100 },
+    roof_luggage: { key: "roof_luggage", label: "Верхний багаж", price: 200 },
+    conditioner:  { key: "conditioner",  label: "Кондиционер",   price: 100 },
+  };
+  const optionsArr: { key: string; label: string; price: number }[] = [];
+  if (hasLuggage)     optionsArr.push(EXTRAS_MAP.luggage);
+  if (hasRoofLuggage) optionsArr.push(EXTRAS_MAP.roof_luggage);
+  if (hasConditioner) optionsArr.push(EXTRAS_MAP.conditioner);
 
   // If dispatcher picked a driver manually (list_pick or map_pick)
   let assignedDriverId: number | null = null;

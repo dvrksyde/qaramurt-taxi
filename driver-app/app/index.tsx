@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { api, clearToken } from "../services/api";
+import { api, clearToken, API_BASE } from "../services/api";
 import { connectSocket, disconnectSocket, getSocket } from "../services/socket";
 import { useDriverStore } from "../stores/driverStore";
 import { Audio } from "expo-av";
@@ -85,6 +85,23 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+/**
+ * Ray-casting point-in-polygon. polygon is [[lng, lat], ...] (GeoJSON order).
+ * Runs synchronously in the GPS background task — no async needed.
+ */
+function pointInPolygon(lat: number, lng: number, polygon: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0], yi = polygon[i][1]; // GeoJSON: [lng, lat]
+    const xj = polygon[j][0], yj = polygon[j][1];
+    if (((yi > lat) !== (yj > lat)) &&
+        (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 const LOCATION_TASK_NAME = "background-location-task";
 
 TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
@@ -142,6 +159,29 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
             useDriverStore.getState().setTripMeter(newDist, newPrice);
           }
         }
+
+        // ── Client-side zone detection ────────────────────────────────────────
+        // Primary mechanism: runs locally using cached GeoJSON polygon.
+        // Fixes PostGIS zone detection failing silently (which caused 770₸ instead
+        // of 945₸ and missing +25₸/min for out-of-city trips).
+        const freshState = useDriverStore.getState();
+        const boundary = freshState.cityBoundary;
+        if (boundary && boundary.length > 2) {
+          const insideCity = pointInPolygon(lat, lng, boundary);
+          const nowOutOfCity = !insideCity;
+          if (nowOutOfCity !== freshState.isOutOfCity) {
+            const outRate = freshState.configuredOutOfCityRate > 0
+              ? freshState.configuredOutOfCityRate
+              : (freshState.profile?.vehicle?.classes?.some((c: any) => c.class?.name === "Комфорт") ? 140 : 120);
+            freshState.setZoneChange({
+              isOutOfCity: nowOutOfCity,
+              outOfCityRatePerKm: outRate,
+              currentPrice: freshState.tripPrice,
+              currentDistance: freshState.tripDistance,
+            });
+          }
+        }
+        // ─────────────────────────────────────────────────────────────────────
       }
 
       // Обновляем lastLocation (и heading) после каждой точки из пачки
@@ -227,6 +267,22 @@ export default function MainScreen() {
 
   // Dispatcher-assigned order modal
   const [dispatcherAssignedOrder, setDispatcherAssignedOrder] = useState<any>(null);
+
+  type TripSummary = {
+    distanceKm: number | null;
+    finalPrice: number;
+    waitingFee: number;
+    waitingAccumulatedSeconds: number;
+    breakdown: {
+      baseFare: number;
+      cityKm: number;
+      cityRatePerKm: number;
+      outOfCityKm: number;
+      outOfCityKmRate: number;
+      outOfCitySeconds: number;
+    } | null;
+  };
+  const [tripSummary, setTripSummary] = useState<TripSummary | null>(null);
 
   useEffect(() => {
     Audio.setAudioModeAsync({
@@ -475,13 +531,35 @@ export default function MainScreen() {
     });
 
     sock.on("order_updated", (data: any) => {
-      const currentOrder = useDriverStore.getState().activeOrder;
+      const state = useDriverStore.getState();
+      const currentOrder = state.activeOrder;
       if (currentOrder && currentOrder.id === data.orderId) {
         setActiveOrder({
           ...currentOrder,
           estimatedPrice: data.estimatedPrice,
           options: data.options,
         });
+
+        // For in_progress metered trips: re-sync tripBaseFare to include new options
+        // so the running price counter reflects the dispatcher's change immediately.
+        if (currentOrder.status === "in_progress" && !currentOrder.isFixedPrice) {
+          const newOptions: any[] = Array.isArray(data.options) ? data.options : [];
+          const extrasTotal = newOptions.reduce(
+            (sum: number, o: any) => sum + (Number(o.price) || 0), 0
+          );
+          const classBaseFare = resolveBaseFare(
+            currentOrder.class,
+            state.profile?.vehicle?.classes
+          );
+          const newBaseFare = classBaseFare + extrasTotal;
+          state.setTripBaseFare(newBaseFare);
+          // Immediately update the displayed price
+          const cityRate = state.tripCityRatePerKm || Number(currentOrder.pricePerKm) || 80;
+          state.setTripMeter(
+            state.tripDistance,
+            roundTo5(newBaseFare + state.tripDistance * cityRate)
+          );
+        }
       }
     });
 
@@ -821,8 +899,23 @@ export default function MainScreen() {
 
     void (async () => {
       // Inject session + server-resolved rates so getTripRates() works without extra /trip/start call
+      const serverOutOfCityRate = Number(order._outOfCityRate ?? 0);
       if (serverSessionId) {
-        await injectSessionId(order.id, serverSessionId, serverBaseFare, serverCityRate, 0);
+        await injectSessionId(order.id, serverSessionId, serverBaseFare, serverCityRate, serverOutOfCityRate);
+      }
+      // Store configured rate + fetch city boundary for client-side zone detection
+      if (serverOutOfCityRate > 0) {
+        useDriverStore.getState().setConfiguredOutOfCityRate(serverOutOfCityRate);
+      }
+      if (!useDriverStore.getState().cityBoundary) {
+        try {
+          const resp = await fetch(`${API_BASE}/api/geozones`);
+          const geoData: any[] = await resp.json();
+          const bd = geoData.find((z: any) => z.type === "city_boundary" && z.isActive && z.geojson);
+          if (bd?.geojson?.coordinates?.[0]) {
+            useDriverStore.getState().setCityBoundary(bd.geojson.coordinates[0]);
+          }
+        } catch { }
       }
       await startTripSync(order.id);
       try {
@@ -960,14 +1053,16 @@ export default function MainScreen() {
           `Итого: ${serverPrice ?? activeOrder.estimatedPrice} ₸`,
         );
       } else if (status === "completed") {
-        // Сервер вернул точные данные по GPS
         if (serverDist !== null && serverPrice !== null) {
-          Alert.alert(
-            "Поездка завершена",
-            `Расстояние: ${serverDist.toFixed(1)} км\nИтого: ${serverPrice} ₸`,
-          );
+          setTripSummary({
+            distanceKm: serverDist,
+            finalPrice: serverPrice,
+            waitingFee: res.data?.waitingFee ?? 0,
+            waitingAccumulatedSeconds: res.data?.waitingAccumulatedSeconds ?? 0,
+            breakdown: res.data?.breakdown ?? null,
+          });
         } else {
-          // Резервный показ из предварительного счётчика
+          // Fallback: no GPS data — build from store snapshot
           const storeState = useDriverStore.getState();
           const fallbackDist = Math.round(Math.max(storeState.tripDistance, tripDistanceRef.current) * 10) / 10;
           const fallbackBaseFare = storeState.tripBaseFare || resolveBaseFare(
@@ -976,10 +1071,20 @@ export default function MainScreen() {
           );
           const fallbackCityRate = storeState.tripCityRatePerKm || Number(activeOrder.pricePerKm) || 80;
           const fallbackPrice = roundTo5(fallbackBaseFare + fallbackDist * fallbackCityRate);
-          Alert.alert(
-            "Поездка завершена",
-            `Расстояние: ${fallbackDist} км\nСумма: ${fallbackPrice} ₸`,
-          );
+          setTripSummary({
+            distanceKm: fallbackDist,
+            finalPrice: fallbackPrice,
+            waitingFee: res.data?.waitingFee ?? 0,
+            waitingAccumulatedSeconds: res.data?.waitingAccumulatedSeconds ?? 0,
+            breakdown: {
+              baseFare: fallbackBaseFare,
+              cityKm: fallbackDist,
+              cityRatePerKm: fallbackCityRate,
+              outOfCityKm: 0,
+              outOfCityKmRate: storeState.configuredOutOfCityRate || 120,
+              outOfCitySeconds: 0,
+            },
+          });
         }
       } else {
         Alert.alert("Заказ отменен", "");
@@ -1012,6 +1117,23 @@ export default function MainScreen() {
             store.setTripCityRate(rates.effectiveCityRatePerKm);
           } else if (rates) {
             useDriverStore.getState().setTripCityRate(rates.effectiveCityRatePerKm);
+          }
+
+          // Store out-of-city rate for client-side zone detection in GPS task
+          if (rates?.outOfCityKmRate && rates.outOfCityKmRate > 0) {
+            useDriverStore.getState().setConfiguredOutOfCityRate(rates.outOfCityKmRate);
+          }
+
+          // Fetch city boundary GeoJSON once (cached in store across trips)
+          if (!useDriverStore.getState().cityBoundary) {
+            try {
+              const resp = await fetch(`${API_BASE}/api/geozones`);
+              const geoData: any[] = await resp.json();
+              const boundary = geoData.find((z) => z.type === "city_boundary" && z.isActive && z.geojson);
+              if (boundary?.geojson?.coordinates?.[0]) {
+                useDriverStore.getState().setCityBoundary(boundary.geojson.coordinates[0]);
+              }
+            } catch { /* non-critical — GPS fallback still works via server zone detection */ }
           }
 
           try {
@@ -1550,6 +1672,107 @@ export default function MainScreen() {
         })}
       </View>
 
+      {/* ─── Trip Summary Modal ──────────────────────────────────────────── */}
+      <Modal visible={!!tripSummary} transparent animationType="fade" onRequestClose={() => setTripSummary(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.summaryCard}>
+            {/* Header */}
+            <View style={styles.summaryHeader}>
+              <Ionicons name="checkmark-circle" size={32} color="#22c55e" />
+              <Text style={styles.summaryTitle}>ПОЕЗДКА ЗАВЕРШЕНА</Text>
+            </View>
+
+            {/* Distance */}
+            {tripSummary?.distanceKm != null && (
+              <Text style={styles.summaryDistance}>
+                Расстояние: {Number(tripSummary.distanceKm).toFixed(1)} км
+              </Text>
+            )}
+
+            {/* Breakdown divider */}
+            <View style={styles.summaryDivider} />
+            <Text style={styles.summaryBreakdownTitle}>Детализация</Text>
+
+            {tripSummary?.breakdown ? (
+              <View style={styles.summaryRows}>
+                {/* Base fare */}
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryRowLabel}>Подача</Text>
+                  <Text style={styles.summaryRowValue}>{tripSummary.breakdown.baseFare} ₸</Text>
+                </View>
+
+                {/* City km */}
+                {tripSummary.breakdown.cityKm > 0 && (
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryRowLabel}>
+                      Город: {Number(tripSummary.breakdown.cityKm).toFixed(1)} км × {tripSummary.breakdown.cityRatePerKm} ₸/км
+                    </Text>
+                    <Text style={styles.summaryRowValue}>
+                      {Math.round(tripSummary.breakdown.cityKm * tripSummary.breakdown.cityRatePerKm)} ₸
+                    </Text>
+                  </View>
+                )}
+
+                {/* Out-of-city km — only if drove outside city */}
+                {tripSummary.breakdown.outOfCityKm > 0 && (
+                  <View style={styles.summaryRow}>
+                    <Text style={[styles.summaryRowLabel, styles.summaryOutLabel]}>
+                      Загород: {Number(tripSummary.breakdown.outOfCityKm).toFixed(1)} км × {tripSummary.breakdown.outOfCityKmRate} ₸/км
+                    </Text>
+                    <Text style={[styles.summaryRowValue, styles.summaryOutValue]}>
+                      {Math.round(tripSummary.breakdown.outOfCityKm * tripSummary.breakdown.outOfCityKmRate)} ₸
+                    </Text>
+                  </View>
+                )}
+
+                {/* Out-of-city time fee */}
+                {tripSummary.breakdown.outOfCitySeconds > 0 && (
+                  <View style={styles.summaryRow}>
+                    <Text style={[styles.summaryRowLabel, styles.summaryOutLabel]}>
+                      Время за городом: {Math.floor(tripSummary.breakdown.outOfCitySeconds / 60)} мин × 25 ₸/мин
+                    </Text>
+                    <Text style={[styles.summaryRowValue, styles.summaryOutValue]}>
+                      {Math.floor(tripSummary.breakdown.outOfCitySeconds / 60) * 25} ₸
+                    </Text>
+                  </View>
+                )}
+
+                {/* Waiting fee */}
+                {(tripSummary.waitingFee > 0) && (
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryRowLabel}>
+                      Ожидание: {Math.floor(tripSummary.waitingAccumulatedSeconds / 60)} мин × 20 ₸/мин
+                    </Text>
+                    <Text style={styles.summaryRowValue}>{tripSummary.waitingFee} ₸</Text>
+                  </View>
+                )}
+              </View>
+            ) : (
+              <View style={styles.summaryRows}>
+                <Text style={styles.summaryRowLabel}>Данные поездки загружаются...</Text>
+              </View>
+            )}
+
+            {/* Total */}
+            <View style={styles.summaryDivider} />
+            <View style={styles.summaryTotalRow}>
+              <Text style={styles.summaryTotalLabel}>ИТОГО</Text>
+              <Text style={styles.summaryTotalValue}>{tripSummary?.finalPrice} ₸</Text>
+            </View>
+
+            {/* Close button */}
+            <TouchableOpacity
+              style={styles.summaryCloseBtn}
+              onPress={() => setTripSummary(null)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.summaryCloseBtnText}>Закрыть</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ─── Order Alert Modal ───────────────────────────────────────────── */}
       <Modal visible={!!orderAlert} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.alertCard}>
@@ -1934,4 +2157,114 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
   },
+
+  // ─── Trip Summary Modal ────────────────────────────────────────────
+  summaryCard: {
+    backgroundColor: "#1a1a2e",
+    borderRadius: 20,
+    padding: 24,
+    width: "90%",
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  summaryHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+  summaryTitle: {
+    color: "#22c55e",
+    fontSize: 18,
+    fontWeight: "800",
+    letterSpacing: 1,
+  },
+  summaryDistance: {
+    color: "#aaa",
+    fontSize: 13,
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  summaryDivider: {
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    marginVertical: 14,
+  },
+  summaryBreakdownTitle: {
+    color: "#666",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
+    marginBottom: 10,
+  },
+  summaryRows: {
+    gap: 10,
+  },
+  summaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 10,
+  },
+  summaryRowLabel: {
+    color: "#ccc",
+    fontSize: 13,
+    flex: 1,
+    flexWrap: "wrap",
+    marginRight: 8,
+  },
+  summaryRowValue: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+    minWidth: 60,
+    textAlign: "right",
+  },
+  summaryOutLabel: {
+    color: "#f59e0b",
+  },
+  summaryOutValue: {
+    color: "#f59e0b",
+  },
+  summaryTotalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  summaryTotalLabel: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "800",
+    letterSpacing: 1,
+  },
+  summaryTotalValue: {
+    color: "#FFD000",
+    fontSize: 26,
+    fontWeight: "900",
+  },
+  summaryCloseBtn: {
+    marginTop: 20,
+    backgroundColor: "#FFD000",
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  summaryCloseBtnText: {
+    color: "#111",
+    fontSize: 15,
+    fontWeight: "800",
+    letterSpacing: 0.5,
+  },
 });
+
