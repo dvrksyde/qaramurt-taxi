@@ -141,22 +141,27 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
             const newDist = state.tripDistance + d;
             const cityRate = state.tripCityRatePerKm || Number(state.activeOrder.pricePerKm) || 80;
 
-            // ✅ FIX: tripBaseFare already includes extras (set in updateOrderStatus)
-            // Do NOT add extrasTotal again here — it would double/triple count options like Bag +100
-            let newPrice: number;
-            if (state.isOutOfCity && state.outOfCityStartTime !== null) {
-              // outOfCityTimeFee (+25₸/мин) добавляется отдельным real-time таймером в displayedTripPrice
-              const distSinceZone = newDist - state.tripDistanceAtZoneChange;
-              const outRate = state.outOfCityRatePerKm || cityRate;
-              newPrice = roundTo5(state.tripPriceAtZoneChange + distSinceZone * outRate);
-            } else {
-              const baseFare = state.tripBaseFare || resolveBaseFare(
-                state.activeOrder?.class,
-                state.profile?.vehicle?.classes
-              );
-              newPrice = roundTo5(baseFare + newDist * cityRate);
-            }
-            useDriverStore.getState().setTripMeter(newDist, newPrice);
+            // ── Component-based pricing (matches server tripDistance.ts formula exactly) ───
+            // Accumulate out-of-city km while in out-of-city zone
+            const updatedOutKm = state.isOutOfCity
+              ? state.outOfCityAccumulatedKm + d
+              : state.outOfCityAccumulatedKm;
+
+            const cityKm  = Math.max(0, newDist - updatedOutKm);
+            const outRate = state.outOfCityRatePerKm || cityRate;
+            const baseFare = state.tripBaseFare || resolveBaseFare(
+              state.activeOrder?.class,
+              state.profile?.vehicle?.classes
+            );
+            // outOfCityTimeFee (+25₸/мин) is tracked separately by the real-time timer
+            const newPrice = roundTo5(baseFare + cityKm * cityRate + updatedOutKm * outRate);
+
+            // Atomic update: distance + price + out-of-city km in one setState call
+            useDriverStore.setState({
+              tripDistance: newDist,
+              tripPrice: newPrice,
+              outOfCityAccumulatedKm: updatedOutKm,
+            });
           }
         }
 
@@ -1026,15 +1031,23 @@ export default function MainScreen() {
           storeState.profile?.vehicle?.classes
         );
         const cityRate = storeState.tripCityRatePerKm || Number(activeOrder.pricePerKm) || 80;
-        // Out-of-city time fee at moment of completion
-        const outTimeFeeAtCompletion = storeState.isOutOfCity && storeState.outOfCityStartTime
-          ? Math.floor((Date.now() - storeState.outOfCityStartTime) / 60000) * 25
+        // Out-of-city time fee: accumulated seconds from all past out-of-city periods
+        // + current period (if driver is still out of city at completion time).
+        // This correctly handles round trips: out → city → out → complete.
+        const accSec = storeState.outOfCityAccumulatedSeconds;
+        const currentOutSec = storeState.isOutOfCity && storeState.outOfCityStartTime
+          ? Math.floor((Date.now() - storeState.outOfCityStartTime) / 1000)
           : 0;
+        const outTimeFeeAtCompletion = Math.floor((accSec + currentOutSec) / 60) * 25;
+
+        // Out-of-city km: accumulated across all out-of-city periods (same as time tracking)
+        const clientOutOfCityKm = storeState.outOfCityAccumulatedKm +
+          (storeState.isOutOfCity ? 0 : 0); // outOfCityAccumulatedKm already includes current period
+
         body.clientDistanceKm = fallbackDist;
-        // Use tripPrice from store — it already has the correct zone-aware price
-        // (out-of-city km charged at higher rate by the GPS task).
-        // Recalculating from baseFare+dist*cityRate would lose the out-of-city premium.
+        body.clientOutOfCityKm = Math.round(clientOutOfCityKm * 10) / 10;
         body.clientFinalPrice = storeState.tripPrice + tripWaitingFee + outTimeFeeAtCompletion;
+
       } else {
         // Fixed-price: явно передаём цену
         if (activeOrder.distanceKm > 0) {
@@ -1289,16 +1302,20 @@ export default function MainScreen() {
   // Real-time out-of-city time surcharge (+25₸/мин) — updates every 15 sec independently from GPS
   const [outOfCityTimeFee, setOutOfCityTimeFee] = useState(0);
   useEffect(() => {
-    if (!isOutOfCity || !outOfCityStartTime || activeOrder?.status !== "in_progress") {
+    if (activeOrder?.status !== "in_progress") {
       setOutOfCityTimeFee(0);
       return;
     }
-    const calc = () => {
-      const mins = Math.floor((Date.now() - outOfCityStartTime) / 60000);
-      setOutOfCityTimeFee(mins * 25);
+    const calcFee = () => {
+      // Total = accumulated seconds from past out-of-city periods + current period (if still out)
+      const accSec = useDriverStore.getState().outOfCityAccumulatedSeconds;
+      const currentSec = isOutOfCity && outOfCityStartTime
+        ? Math.floor((Date.now() - outOfCityStartTime) / 1000)
+        : 0;
+      setOutOfCityTimeFee(Math.floor((accSec + currentSec) / 60) * 25);
     };
-    calc();
-    const interval = setInterval(calc, 15000);
+    calcFee();
+    const interval = setInterval(calcFee, 15000);
     return () => clearInterval(interval);
   }, [isOutOfCity, outOfCityStartTime, activeOrder?.status]);
 

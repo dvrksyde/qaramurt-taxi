@@ -80,6 +80,8 @@ interface DriverState {
   isOutOfCity: boolean;
   outOfCityRatePerKm: number;
   outOfCityStartTime: number | null;
+  outOfCityAccumulatedSeconds: number;     // total out-of-city seconds across ALL zone crossings
+  outOfCityAccumulatedKm: number;          // total km driven outside city across ALL zone crossings
   tripPriceAtZoneChange: number;
   tripDistanceAtZoneChange: number;
   // Client-side zone detection
@@ -130,6 +132,8 @@ export const useDriverStore = create<DriverState>((set) => ({
   isOutOfCity: false,
   outOfCityRatePerKm: 0,
   outOfCityStartTime: null,
+  outOfCityAccumulatedSeconds: 0,
+  outOfCityAccumulatedKm: 0,
   tripPriceAtZoneChange: 0,
   tripDistanceAtZoneChange: 0,
   cityBoundary: null,
@@ -141,17 +145,28 @@ export const useDriverStore = create<DriverState>((set) => ({
   setTripCityRate: (tripCityRatePerKm) => set({ tripCityRatePerKm }),
   setLastLocation: (lastLocation) => set({ lastLocation }),
   setLastHeading: (lastHeading) => set({ lastHeading }),
-  setZoneChange: ({ isOutOfCity, outOfCityRatePerKm, currentPrice, currentDistance }) => set({
-    isOutOfCity,
-    outOfCityRatePerKm,
-    outOfCityStartTime: isOutOfCity ? Date.now() : null,
-    tripPriceAtZoneChange: currentPrice,
-    tripDistanceAtZoneChange: currentDistance,
-  }),
+  // On zone change: accumulate elapsed out-of-city seconds when returning to city
+  setZoneChange: ({ isOutOfCity, outOfCityRatePerKm, currentPrice, currentDistance }) =>
+    set((state) => {
+      let newAccumulatedSeconds = state.outOfCityAccumulatedSeconds;
+      if (!isOutOfCity && state.isOutOfCity && state.outOfCityStartTime) {
+        // Returning to city — add time spent in out-of-city zone to accumulator
+        newAccumulatedSeconds += Math.floor((Date.now() - state.outOfCityStartTime) / 1000);
+      }
+      return {
+        isOutOfCity,
+        outOfCityRatePerKm,
+        outOfCityStartTime: isOutOfCity ? Date.now() : null,
+        outOfCityAccumulatedSeconds: newAccumulatedSeconds,
+        tripPriceAtZoneChange: currentPrice,
+        tripDistanceAtZoneChange: currentDistance,
+      };
+    }),
   resetTrip: () => set({
     tripDistance: 0, tripPrice: 0, tripBaseFare: 0, tripCityRatePerKm: 80,
     tripStartTime: null, lastLocation: null, lastHeading: null,
     isOutOfCity: false, outOfCityRatePerKm: 0, outOfCityStartTime: null,
+    outOfCityAccumulatedSeconds: 0, outOfCityAccumulatedKm: 0,
     tripPriceAtZoneChange: 0, tripDistanceAtZoneChange: 0,
     configuredOutOfCityRate: 0,
     // cityBoundary NOT reset — same city boundary applies every trip

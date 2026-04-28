@@ -33,6 +33,9 @@ export async function PATCH(
     body.clientDistanceKm ?? body.distanceKm;
   const clientFinalPrice: number | undefined =
     body.clientFinalPrice ?? body.finalPrice;
+  // clientOutOfCityKm: tracked locally by the app (outOfCityAccumulatedKm in store)
+  // Used for accurate breakdown when GPS points are missing
+  const clientOutOfCityKm: number | undefined = body.clientOutOfCityKm;
 
   const validStatuses = ["arrived", "in_progress", "completed", "canceled"];
   if (!validStatuses.includes(status)) {
@@ -134,22 +137,36 @@ export async function PATCH(
       });
 
       if (activeSession) {
-        // Session baseFare includes: class base fare + arrival wait + options (set in trip/start)
-        const sessionBaseFare = Number(activeSession.baseFare) || currentBaseFare;
-        const sessionCityRate = Number(activeSession.tariffPerKm) || Number(order.pricePerKm) || 80;
-        // Mid-trip waiting fee (driver pressed ⏸ during the ride)
-        const midTripWaitFee = Number(order.waitingFee || 0);
+        // Session rates (set at trip/start)
+        const sessionBaseFare  = Number(activeSession.baseFare)    || currentBaseFare;
+        const sessionCityRate  = Number(activeSession.tariffPerKm) || Number(order.pricePerKm) || 80;
+        const midTripWaitFee   = Number(order.waitingFee || 0);
 
-        // Read out-of-city rate from the session (added via raw SQL column)
+        // Read out-of-city rate (added via raw SQL column)
         let sessionOutOfCityRate = 0;
         try {
           const rr = await prisma.$queryRaw<Array<{ r: string }>>`
             SELECT "outOfCityKmRate" AS r FROM order_trip_sessions WHERE id = ${activeSession.id} LIMIT 1
           `;
           sessionOutOfCityRate = Number(rr[0]?.r ?? 0);
-        } catch { /* column not yet created — leave 0 */ }
+        } catch { /* column not yet created */ }
 
-        // Breakdown payload — populated after calculateSessionDistance
+        // ── VARIANT B: Client price is the authoritative source ──────────────
+        // The driver app meter accumulates price locally with correct zone-aware
+        // rates (city vs out-of-city). Server GPS points may be incomplete due
+        // to weak network in rural areas, so we trust the client meter.
+        //
+        // Security: clientFinalPrice must be >= sessionBaseFare (minimum floor).
+        // If client sends a suspiciously low price → fall back to server calc.
+        //
+        // Server GPS calc still runs for:
+        //   • distanceKm  — server-side segment filtering is more accurate
+        //   • breakdown   — city/out-of-city split for the summary modal
+        //   • audit trail — GPS points stored in DB regardless
+        // ────────────────────────────────────────────────────────────────────
+        const clientPriceIsValid = clientFinalPrice !== undefined
+          && clientFinalPrice >= sessionBaseFare;
+
         let tripBreakdown: {
           baseFare: number; cityKm: number; cityRatePerKm: number;
           outOfCityKm: number; outOfCityKmRate: number; outOfCitySeconds: number;
@@ -158,81 +175,87 @@ export async function PATCH(
         try {
           const calc = await calculateSessionDistance(activeSession.id);
 
-          if (calc.distanceKm > 0) {
-            // Add mid-trip waiting fee to server-calculated price
-            const serverPrice = Math.max(calc.finalPrice, sessionBaseFare) + midTripWaitFee;
-            await completeSession(activeSession.id, calc.distanceKm, serverPrice, calc.outOfCityKm, calc.outOfCitySeconds);
-            updateData.distanceKm = calc.distanceKm;
-            updateData.finalPrice = serverPrice;
-            tripBreakdown = {
-              baseFare: sessionBaseFare,
-              cityKm: calc.cityKm,
-              cityRatePerKm: sessionCityRate,
-              outOfCityKm: calc.outOfCityKm,
-              outOfCityKmRate: sessionOutOfCityRate || sessionCityRate,
-              outOfCitySeconds: calc.outOfCitySeconds,
-            };
+          // Distance: prefer server GPS (accurate segment filtering).
+          // Fall back to client distance if no GPS points synced.
+          const finalDistKm = calc.distanceKm > 0
+            ? calc.distanceKm
+            : (clientDistanceKm ?? 0);
+
+          // Price: VARIANT B
+          //   clientFinalPrice (if valid) → always wins
+          //   server calc                → used only when client price is missing/invalid
+          //   Note: clientFinalPrice already includes waitingFee + outOfCityTimeFee
+          //         so we do NOT add midTripWaitFee again when using client price.
+          let finalPrice: number;
+          if (clientPriceIsValid) {
+            finalPrice = clientFinalPrice!;
+            console.log(`[trip/complete] VariantB: using clientFinalPrice=${finalPrice} (server=${calc.finalPrice})`);
           } else {
-            console.warn(`[trip/complete] Session ${activeSession.id} has < 2 points; using client fallback`);
-            const fallbackPrice = Math.max(
-              clientFinalPrice ?? roundTo5(sessionBaseFare),
-              sessionBaseFare
-            );
-            await completeSession(activeSession.id, clientDistanceKm ?? 0, fallbackPrice);
-            if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
-            updateData.finalPrice = fallbackPrice;
-            // Provide a basic breakdown even for fallback
-            tripBreakdown = {
-              baseFare: sessionBaseFare,
-              cityKm: clientDistanceKm ?? 0,
-              cityRatePerKm: sessionCityRate,
-              outOfCityKm: 0,
-              outOfCityKmRate: sessionOutOfCityRate || sessionCityRate,
-              outOfCitySeconds: 0,
-            };
+            // Client price absent or below minimum → use server calc + waiting fee
+            finalPrice = Math.max(calc.finalPrice, sessionBaseFare) + midTripWaitFee;
+            console.log(`[trip/complete] VariantB: client price invalid (${clientFinalPrice}), using serverPrice=${finalPrice}`);
           }
-        } catch (err) {
-          console.error("[trip/complete] Server calc failed:", err);
-          if (clientDistanceKm !== undefined) updateData.distanceKm = clientDistanceKm;
-          const fallbackPrice = clientDistanceKm !== undefined
-            ? roundTo5(sessionBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm)) + midTripWaitFee
-            : sessionBaseFare + midTripWaitFee;
-          updateData.finalPrice = Math.max(
-            clientFinalPrice ?? fallbackPrice,
-            fallbackPrice,
-            sessionBaseFare
-          );
+
+          await completeSession(activeSession.id, finalDistKm, finalPrice, calc.outOfCityKm, calc.outOfCitySeconds);
+          updateData.distanceKm = finalDistKm;
+          updateData.finalPrice  = finalPrice;
+
+          // Breakdown: use server GPS split if available (city vs out-of-city km)
+          // When GPS has 0 points, fall back to client-tracked km split
+          const bCityKm    = calc.distanceKm > 0 ? calc.cityKm    : Math.max(0, (clientDistanceKm ?? 0) - (clientOutOfCityKm ?? 0));
+          const bOutCityKm = calc.distanceKm > 0 ? calc.outOfCityKm : (clientOutOfCityKm ?? 0);
           tripBreakdown = {
-            baseFare: sessionBaseFare,
-            cityKm: clientDistanceKm ?? 0,
-            cityRatePerKm: sessionCityRate,
-            outOfCityKm: 0,
-            outOfCityKmRate: sessionOutOfCityRate || sessionCityRate,
+            baseFare:          sessionBaseFare,
+            cityKm:            bCityKm,
+            cityRatePerKm:     sessionCityRate,
+            outOfCityKm:       bOutCityKm,
+            outOfCityKmRate:   sessionOutOfCityRate || sessionCityRate,
+            outOfCitySeconds:  calc.outOfCitySeconds,
+          };
+        } catch (err) {
+          // Server calc crashed entirely — client price is our only option
+          console.error("[trip/complete] Server calc failed:", err);
+          const finalPrice = clientPriceIsValid
+            ? clientFinalPrice!
+            : (sessionBaseFare + midTripWaitFee);
+          updateData.distanceKm = clientDistanceKm ?? 0;
+          updateData.finalPrice  = finalPrice;
+          tripBreakdown = {
+            baseFare:         sessionBaseFare,
+            cityKm:           clientDistanceKm ?? 0,
+            cityRatePerKm:    sessionCityRate,
+            outOfCityKm:      0,
+            outOfCityKmRate:  sessionOutOfCityRate || sessionCityRate,
             outOfCitySeconds: 0,
           };
         }
 
-        // Store breakdown on the outer scope so it's available for the response
         (updateData as any)._breakdown = tripBreakdown;
       } else {
-        // No GPS session — fall back to client-reported values
-        const noSessionCityRate = Number(order.pricePerKm) || 80;
-        if (clientDistanceKm !== undefined) {
+        // No GPS session at all — trust clientFinalPrice fully
+        const noSessionRate = Number(order.pricePerKm) || 80;
+        if (clientFinalPrice !== undefined && clientFinalPrice >= currentBaseFare) {
+          // Client price is valid and above minimum — use it directly
+          updateData.finalPrice  = clientFinalPrice;
+          updateData.distanceKm = clientDistanceKm ?? 0;
+        } else if (clientDistanceKm !== undefined) {
+          // Client price missing/invalid — compute from distance
+          const computed = roundTo5(currentBaseFare + Number(clientDistanceKm) * noSessionRate);
           updateData.distanceKm = clientDistanceKm;
-          const computed = roundTo5(currentBaseFare + Number(clientDistanceKm) * noSessionCityRate);
-          updateData.finalPrice = Math.max(computed, clientFinalPrice ?? 0, currentBaseFare);
-        } else if (clientFinalPrice !== undefined) {
-          updateData.finalPrice = Math.max(Number(clientFinalPrice), currentBaseFare);
+          updateData.finalPrice  = Math.max(computed, currentBaseFare);
         } else {
           updateData.finalPrice = currentBaseFare;
         }
         // Always provide breakdown so the modal isn't empty
+        // Use client-tracked out-of-city km split for accurate breakdown
+        const noSessCityKm = Math.max(0, (clientDistanceKm ?? 0) - (clientOutOfCityKm ?? 0));
+        const noSessOutKm  = clientOutOfCityKm ?? 0;
         (updateData as any)._breakdown = {
-          baseFare: currentBaseFare,
-          cityKm: clientDistanceKm ?? 0,
-          cityRatePerKm: noSessionCityRate,
-          outOfCityKm: 0,
-          outOfCityKmRate: noSessionCityRate,
+          baseFare:         currentBaseFare,
+          cityKm:           noSessCityKm,
+          cityRatePerKm:    noSessionRate,
+          outOfCityKm:      noSessOutKm,
+          outOfCityKmRate:  noSessionRate,
           outOfCitySeconds: 0,
         };
       }
