@@ -266,6 +266,8 @@ export default function MainScreen() {
   const mapRef = useRef<YandexMapViewHandle>(null);
   // Prevents loadDashboard from overriding status while toggle is in flight
   const togglingOnlineRef = useRef(false);
+  // Prevents race: 30s interval's loadDashboard re-activating a just-completed order
+  const completedOrderIdRef = useRef<number | null>(null);
   const [togglingOnline, setTogglingOnline] = useState(false);
   // Throttle route rebuilds during in_progress trips (max 1 per 30s)
   const routeThrottleRef = useRef<number>(0);
@@ -640,7 +642,13 @@ export default function MainScreen() {
       // Игнорируем ошибки сети при получении заказа, чтобы не сбрасывать стейт
       let nextOrder = useDriverStore.getState().activeOrder;
       if (!orderRes.error) {
-        nextOrder = mapOrderToState(orderRes.data);
+        let nextOrder = mapOrderToState(orderRes.data);
+        // Race guard: if this loadDashboard() was in-flight BEFORE we completed the
+        // order (30s interval timing), the server may still return the old in_progress
+        // order. Don't re-activate it — force null instead.
+        if (completedOrderIdRef.current !== null && nextOrder?.id === completedOrderIdRef.current) {
+          nextOrder = null;
+        }
         setActiveOrder(nextOrder);
       }
 
@@ -755,7 +763,9 @@ export default function MainScreen() {
         // Sync any pending completion FIRST, so loadDashboard sees the correct
         // order state (completed) rather than stale in_progress from server.
         void (async () => {
-          await syncPendingCompletion();
+          const ok = await syncPendingCompletion();
+          // If sync succeeded, server now shows completed — clear the race guard
+          if (ok) completedOrderIdRef.current = null;
           loadDashboard();
         })();
       }
@@ -1105,6 +1115,10 @@ export default function MainScreen() {
           },
         });
 
+        // Race guard: prevent 30s interval from re-activating this order
+        // while the server still shows it as in_progress (pending sync).
+        completedOrderIdRef.current = activeOrder.id;
+
         // Free the driver locally — server will be updated when network returns
         setActiveOrder(null);
         resetTrip();
@@ -1119,6 +1133,7 @@ export default function MainScreen() {
           const ok = await syncPendingCompletion();
           if (ok) {
             clearInterval(retryInterval);
+            completedOrderIdRef.current = null; // Server confirmed — clear the guard
             loadDashboard(); // Server now shows order as completed — safe to refresh
           }
         }, 30000);
@@ -1176,11 +1191,16 @@ export default function MainScreen() {
         Alert.alert("Заказ отменен", "");
       }
 
+      // Mark this order as just-completed so any in-flight loadDashboard() from the
+      // 30s interval cannot re-activate it with a stale in_progress response.
+      completedOrderIdRef.current = activeOrder.id;
       setActiveOrder(null);
       resetTrip();
       await clearTripSync(activeOrder.id);
       setProfile(profile ? { ...profile, status: "free" } : null);
       loadDashboard();
+      // Clear the protection after 10s (any in-flight response will have arrived by then)
+      setTimeout(() => { completedOrderIdRef.current = null; }, 10000);
     } else {
       setActiveOrder({ ...activeOrder, status });
       if (status === "in_progress" && !activeOrder.isFixedPrice) {

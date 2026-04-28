@@ -271,6 +271,15 @@ export async function PATCH(
     });
   }
 
+  // ── Extract _breakdown BEFORE Prisma transaction ────────────────────────────
+  // _breakdown is NOT a column in the Order model — it's only used for the
+  // API response (driver app summary modal). Passing it to Prisma would throw
+  // PrismaClientValidationError and silently fail the entire transaction,
+  // leaving the order status stuck at "in_progress" in the database.
+  const tripBreakdownForResponse = (updateData as any)._breakdown ?? null;
+  delete (updateData as any)._breakdown;
+  // ──────────────────────────────────────────────────────────────────────────
+
   await prisma.$transaction(async (tx) => {
     const updatedOrder = await tx.order.update({
       where: { id: orderId },
@@ -376,7 +385,7 @@ export async function PATCH(
       waitingFee: finalOrder?.waitingFee ?? 0,
       waitingAccumulatedSeconds: finalOrder?.waitingAccumulatedSeconds ?? 0,
       // Trip breakdown for the driver app summary modal (only on completion)
-      breakdown: status === "completed" ? ((updateData as any)._breakdown ?? null) : undefined,
+      breakdown: status === "completed" ? (tripBreakdownForResponse ?? null) : undefined,
     },
   });
 }
