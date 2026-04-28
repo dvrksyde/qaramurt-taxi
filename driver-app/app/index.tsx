@@ -752,10 +752,17 @@ export default function MainScreen() {
           }
         }
 
-        loadDashboard();
-
-        // Retry any pending completion (failed while offline) silently in background
-        void syncPendingCompletion();
+        // Sync any pending completion FIRST, so loadDashboard sees the correct
+        // order state (completed) rather than stale in_progress from server.
+        const wasSynced = await syncPendingCompletion();
+        if (!wasSynced) {
+          // Sync failed — still load dashboard but server still shows in_progress.
+          // The 30s interval in the offline handler will keep retrying.
+          loadDashboard();
+        } else {
+          // Sync succeeded — server now shows order completed, safe to refresh.
+          loadDashboard();
+        }
       }
       // ✅ FIX 2: NEVER auto-go-offline. Driver works full day, app can be in background.
       // The driver manually controls their online/offline status.
@@ -1108,12 +1115,17 @@ export default function MainScreen() {
         resetTrip();
         await clearTripSync(activeOrder.id);
         setProfile(profile ? { ...profile, status: "free" } : null);
-        loadDashboard();
+        // NOTE: do NOT call loadDashboard() here!
+        // The server still shows the order as in_progress (we failed to PATCH it),
+        // so loadDashboard() would immediately re-set activeOrder and undo our null.
 
-        // Retry sync in background every 30s
+        // Retry sync in background every 30s; refresh UI only after server confirms.
         const retryInterval = setInterval(async () => {
           const ok = await syncPendingCompletion();
-          if (ok) clearInterval(retryInterval);
+          if (ok) {
+            clearInterval(retryInterval);
+            loadDashboard(); // Server now shows order as completed — safe to refresh
+          }
         }, 30000);
       } else {
         Alert.alert("Ошибка", res.error);
@@ -2248,6 +2260,7 @@ const styles = StyleSheet.create({
     padding: 24,
     width: "90%",
     maxWidth: 400,
+    alignSelf: "center",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.08)",
     shadowColor: "#000",
