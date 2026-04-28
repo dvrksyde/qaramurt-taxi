@@ -56,7 +56,15 @@ export async function api<T = any>(
 
     clearTimeout(timeout);
 
-    const json = await res.json();
+    // Parse JSON separately — if server returned HTML (502/503 gateway error),
+    // res.json() throws SyntaxError which was previously misread as "no connection".
+    let json: any;
+    try {
+      json = await res.json();
+    } catch {
+      // Server is up (fetch succeeded) but returned non-JSON (HTML error page)
+      return { error: `Ошибка сервера ${res.status}. Попробуйте ещё раз.` };
+    }
 
     if (!res.ok) {
       return { error: json.error || `Ошибка ${res.status}` };

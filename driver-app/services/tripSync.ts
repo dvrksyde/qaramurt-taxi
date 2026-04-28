@@ -219,3 +219,55 @@ export async function clearTripSync(orderId?: number): Promise<void> {
   if (orderId !== undefined && state.orderId !== orderId) return;
   await writeState(null);
 }
+
+// ── Pending Completion (offline / weak-network support) ───────────────────────
+// When the /status PATCH fails at completion time, we save the payload locally
+// and free the driver immediately. The sync is retried when network returns.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PENDING_COMPLETION_KEY = "driver_pending_completion_v1";
+
+export type PendingCompletion = {
+  orderId: number;
+  body: Record<string, unknown>;   // full body for PATCH /api/driver/orders/:id/status
+  savedAt: number;                 // timestamp ms
+};
+
+export async function savePendingCompletion(data: PendingCompletion): Promise<void> {
+  await SecureStore.setItemAsync(PENDING_COMPLETION_KEY, JSON.stringify(data));
+}
+
+export async function getPendingCompletion(): Promise<PendingCompletion | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(PENDING_COMPLETION_KEY);
+    return raw ? (JSON.parse(raw) as PendingCompletion) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearPendingCompletion(): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(PENDING_COMPLETION_KEY);
+  } catch { /* ignore */ }
+}
+
+/** Try to sync the pending completion to the server. Returns true if synced or nothing pending. */
+export async function syncPendingCompletion(): Promise<boolean> {
+  const pending = await getPendingCompletion();
+  if (!pending) return true;
+
+  const res = await api(`/api/driver/orders/${pending.orderId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify(pending.body),
+  });
+
+  if (res.error) {
+    console.warn("[pendingCompletion] Retry failed:", res.error);
+    return false;
+  }
+
+  await clearPendingCompletion();
+  console.log(`[pendingCompletion] Synced order ${pending.orderId} successfully`);
+  return true;
+}

@@ -30,7 +30,7 @@ import { ActiveOrdersPanel } from "../components/ActiveOrdersPanel";
 import { SwipeButton } from "../components/SwipeButton";
 import { YandexMapView, type YandexMapViewHandle } from "../components/YandexMapView";
 import { mapOrderToActiveOrder } from "../lib/orderPricing";
-import { clearTripSync, flushTripPoints, getTripRates, injectSessionId, queueTripPoint, startTripSync } from "../services/tripSync";
+import { clearTripSync, flushTripPoints, getTripRates, injectSessionId, queueTripPoint, savePendingCompletion, startTripSync, syncPendingCompletion } from "../services/tripSync";
 
 const BASE_FARE = 290;
 
@@ -753,6 +753,9 @@ export default function MainScreen() {
         }
 
         loadDashboard();
+
+        // Retry any pending completion (failed while offline) silently in background
+        void syncPendingCompletion();
       }
       // ✅ FIX 2: NEVER auto-go-offline. Driver works full day, app can be in background.
       // The driver manually controls their online/offline status.
@@ -1018,8 +1021,9 @@ export default function MainScreen() {
     if (status === "completed") {
       playAppSound('trip_completed');
       if (!activeOrder.isFixedPrice) {
-        // Сначала сбрасываем очередь точек на сервер, чтобы все точки были там
-        await flushTripPoints(activeOrder.id);
+        // GPS точки отправляем в фоне — не блокируем завершение заказа.
+        // Вариант B: clientFinalPrice — основная цена, GPS нужны только для аудита.
+        void flushTripPoints(activeOrder.id);
 
         // Резервные значения с телефона — сервер использует их только если
         // GPS-сессии нет или точек оказалось меньше 2 (плохой GPS / короткая поездка)
@@ -1070,7 +1074,50 @@ export default function MainScreen() {
     setLoading(false);
 
     if (res.error) {
-      Alert.alert("Ошибка", res.error);
+      if (status === "completed") {
+        // ── Offline completion: network failed but driver must NOT be stuck ──
+        // Save the full request body locally — will retry when network returns.
+        // Show the summary modal from store data immediately so driver sees the price.
+        await savePendingCompletion({ orderId: activeOrder.id, body, savedAt: Date.now() });
+
+        const ss = useDriverStore.getState();
+        const offlineDist = body.clientDistanceKm as number ?? ss.tripDistance;
+        const offlinePrice = body.clientFinalPrice as number ?? ss.tripPrice;
+        const offlineBaseFare = ss.tripBaseFare || resolveBaseFare(activeOrder.class, ss.profile?.vehicle?.classes);
+        const offlineCityRate = ss.tripCityRatePerKm || Number(activeOrder.pricePerKm) || 80;
+        const offlineOutKm = (body.clientOutOfCityKm as number) ?? ss.outOfCityAccumulatedKm;
+        const offlineCityKm = Math.max(0, offlineDist - offlineOutKm);
+
+        setTripSummary({
+          distanceKm: offlineDist,
+          finalPrice: offlinePrice,
+          waitingFee: tripWaitingFee,
+          waitingAccumulatedSeconds: 0,
+          breakdown: {
+            baseFare: offlineBaseFare,
+            cityKm: offlineCityKm,
+            cityRatePerKm: offlineCityRate,
+            outOfCityKm: offlineOutKm,
+            outOfCityKmRate: ss.configuredOutOfCityRate || 120,
+            outOfCitySeconds: ss.outOfCityAccumulatedSeconds,
+          },
+        });
+
+        // Free the driver locally — server will be updated when network returns
+        setActiveOrder(null);
+        resetTrip();
+        await clearTripSync(activeOrder.id);
+        setProfile(profile ? { ...profile, status: "free" } : null);
+        loadDashboard();
+
+        // Retry sync in background every 30s
+        const retryInterval = setInterval(async () => {
+          const ok = await syncPendingCompletion();
+          if (ok) clearInterval(retryInterval);
+        }, 30000);
+      } else {
+        Alert.alert("Ошибка", res.error);
+      }
       return;
     }
 
