@@ -754,15 +754,10 @@ export default function MainScreen() {
 
         // Sync any pending completion FIRST, so loadDashboard sees the correct
         // order state (completed) rather than stale in_progress from server.
-        const wasSynced = await syncPendingCompletion();
-        if (!wasSynced) {
-          // Sync failed — still load dashboard but server still shows in_progress.
-          // The 30s interval in the offline handler will keep retrying.
+        void (async () => {
+          await syncPendingCompletion();
           loadDashboard();
-        } else {
-          // Sync succeeded — server now shows order completed, safe to refresh.
-          loadDashboard();
-        }
+        })();
       }
       // ✅ FIX 2: NEVER auto-go-offline. Driver works full day, app can be in background.
       // The driver manually controls their online/offline status.
