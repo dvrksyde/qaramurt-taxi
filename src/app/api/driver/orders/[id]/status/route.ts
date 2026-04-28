@@ -199,6 +199,7 @@ export async function PATCH(
             : sessionBaseFare + midTripWaitFee;
           updateData.finalPrice = Math.max(
             clientFinalPrice ?? fallbackPrice,
+            fallbackPrice,
             sessionBaseFare
           );
           tripBreakdown = {
@@ -217,11 +218,12 @@ export async function PATCH(
         // No GPS session — fall back to client-reported values
         if (clientDistanceKm !== undefined) {
           updateData.distanceKm = clientDistanceKm;
-          // Enforce minimum: client cannot report a price below base fare
+          // Compute server-side price floor (class base fare + km rate)
           const computed = roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm));
-          updateData.finalPrice = Math.max(computed, currentBaseFare);
+          // IMPORTANT: also consider clientFinalPrice which includes options (Baggage, AC, etc.)
+          // Without this, extras are lost when GPS data is missing (e.g. network error during trip)
+          updateData.finalPrice = Math.max(computed, clientFinalPrice ?? 0, currentBaseFare);
         } else if (clientFinalPrice !== undefined) {
-          // Enforce minimum regardless of what client sends
           updateData.finalPrice = Math.max(Number(clientFinalPrice), currentBaseFare);
         } else {
           // Absolute fallback — never leave finalPrice null on completion

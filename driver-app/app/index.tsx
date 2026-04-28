@@ -298,6 +298,22 @@ export default function MainScreen() {
     };
   }, []);
 
+  // Pre-fetch city boundary at app startup so zone detection works even if
+  // network drops later during an active trip.
+  useEffect(() => {
+    void (async () => {
+      if (useDriverStore.getState().cityBoundary) return; // already cached
+      try {
+        const resp = await fetch(`${API_BASE}/api/geozones`);
+        const geoData: any[] = await resp.json();
+        const zone = geoData.find((z: any) => z.type === "city_boundary" && z.isActive && z.geojson);
+        if (zone?.geojson?.coordinates?.[0]) {
+          useDriverStore.getState().setCityBoundary(zone.geojson.coordinates[0]);
+        }
+      } catch { /* Non-critical — will retry at trip start */ }
+    })();
+  }, []);
+
   // Держим экран включённым пока водитель на линии или везёт клиента
   useEffect(() => {
     const shouldStayOn = isOnline || !!activeOrder;
