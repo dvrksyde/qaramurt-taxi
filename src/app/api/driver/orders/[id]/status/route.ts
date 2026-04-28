@@ -216,19 +216,25 @@ export async function PATCH(
         (updateData as any)._breakdown = tripBreakdown;
       } else {
         // No GPS session — fall back to client-reported values
+        const noSessionCityRate = Number(order.pricePerKm) || 80;
         if (clientDistanceKm !== undefined) {
           updateData.distanceKm = clientDistanceKm;
-          // Compute server-side price floor (class base fare + km rate)
-          const computed = roundTo5(currentBaseFare + Number(clientDistanceKm) * Number(order.pricePerKm));
-          // IMPORTANT: also consider clientFinalPrice which includes options (Baggage, AC, etc.)
-          // Without this, extras are lost when GPS data is missing (e.g. network error during trip)
+          const computed = roundTo5(currentBaseFare + Number(clientDistanceKm) * noSessionCityRate);
           updateData.finalPrice = Math.max(computed, clientFinalPrice ?? 0, currentBaseFare);
         } else if (clientFinalPrice !== undefined) {
           updateData.finalPrice = Math.max(Number(clientFinalPrice), currentBaseFare);
         } else {
-          // Absolute fallback — never leave finalPrice null on completion
           updateData.finalPrice = currentBaseFare;
         }
+        // Always provide breakdown so the modal isn't empty
+        (updateData as any)._breakdown = {
+          baseFare: currentBaseFare,
+          cityKm: clientDistanceKm ?? 0,
+          cityRatePerKm: noSessionCityRate,
+          outOfCityKm: 0,
+          outOfCityKmRate: noSessionCityRate,
+          outOfCitySeconds: 0,
+        };
       }
       // ────────────────────────────────────────────────────────────────────────
     }

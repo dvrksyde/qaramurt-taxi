@@ -1031,7 +1031,10 @@ export default function MainScreen() {
           ? Math.floor((Date.now() - storeState.outOfCityStartTime) / 60000) * 25
           : 0;
         body.clientDistanceKm = fallbackDist;
-        body.clientFinalPrice = roundTo5(baseFare + fallbackDist * cityRate) + tripWaitingFee + outTimeFeeAtCompletion;
+        // Use tripPrice from store — it already has the correct zone-aware price
+        // (out-of-city km charged at higher rate by the GPS task).
+        // Recalculating from baseFare+dist*cityRate would lose the out-of-city premium.
+        body.clientFinalPrice = storeState.tripPrice + tripWaitingFee + outTimeFeeAtCompletion;
       } else {
         // Fixed-price: явно передаём цену
         if (activeOrder.distanceKm > 0) {

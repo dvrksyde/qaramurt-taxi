@@ -10,6 +10,7 @@ interface HistoryOrder {
   dropoffAddress: string | null;
   distanceKm: number | null;
   pricePerKm: number;
+  actualRatePerKm: number | null; // actual rate from trip session (more accurate)
   finalPrice: number | null;
   status: string;
   createdAt: string;
@@ -143,7 +144,9 @@ export function DriverHistoryPanel() {
       <View style={styles.orderMiddle}>
         <Text style={styles.orderAddress} numberOfLines={1}>{item.pickupAddress || "—"}</Text>
         {item.distanceKm ? (
-          <Text style={styles.orderDistance}>{Number(item.distanceKm).toFixed(1)} км · {item.pricePerKm} ₸/км</Text>
+          <Text style={styles.orderDistance}>
+            {Number(item.distanceKm).toFixed(1)} км · {item.actualRatePerKm ?? item.pricePerKm} ₸/км
+          </Text>
         ) : (
           <Text style={styles.orderDistance}>{item.dropoffAddress || "Без маршрута"}</Text>
         )}

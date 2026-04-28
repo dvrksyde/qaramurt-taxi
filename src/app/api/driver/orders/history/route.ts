@@ -1,4 +1,4 @@
-﻿export const dynamic = "force-dynamic";
+export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -55,23 +55,43 @@ export async function GET(req: NextRequest) {
   }
 
   const [data, total, completedSummary, canceledOrders, commissionSummary] = await Promise.all([
-    prisma.order.findMany({
-      where,
-      select: {
-        id: true,
-        pickupAddress: true,
-        dropoffAddress: true,
-        distanceKm: true,
-        pricePerKm: true,
-        finalPrice: true,
-        status: true,
-        createdAt: true,
-        completedAt: true,
-      },
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
+    // Raw query: LEFT JOIN trip sessions to get the actual tariff rate used.
+    // Date filter: pass null when no date filter needed (IS NULL check skips it).
+    prisma.$queryRaw<Array<{
+      id: number;
+      pickupAddress: string | null;
+      dropoffAddress: string | null;
+      distanceKm: number | null;
+      pricePerKm: number;
+      finalPrice: number | null;
+      status: string;
+      createdAt: Date;
+      completedAt: Date | null;
+      actualRatePerKm: number | null;
+    }>>`
+      SELECT
+        o.id,
+        o."pickupAddress",
+        o."dropoffAddress",
+        o."distanceKm",
+        o."pricePerKm",
+        o."finalPrice",
+        o.status,
+        o."createdAt",
+        o."completedAt",
+        s."tariffPerKm" AS "actualRatePerKm"
+      FROM orders o
+      LEFT JOIN order_trip_sessions s
+        ON s."orderId" = o.id
+        AND s."driverId" = ${auth.driverId}
+        AND s.status = 'completed'
+      WHERE o."driverId" = ${auth.driverId}
+        AND o.status IN ('completed', 'canceled')
+        AND (${completedAtFilter?.gte ?? null}::timestamptz IS NULL
+             OR o."completedAt" >= ${completedAtFilter?.gte ?? null}::timestamptz)
+      ORDER BY o."createdAt" DESC
+      LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+    `,
     prisma.order.count({ where }),
     prisma.order.aggregate({
       where: {
