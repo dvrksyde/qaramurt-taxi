@@ -175,11 +175,13 @@ export async function PATCH(
         try {
           const calc = await calculateSessionDistance(activeSession.id);
 
-          // Distance: prefer server GPS (accurate segment filtering).
-          // Fall back to client distance if no GPS points synced.
-          const finalDistKm = calc.distanceKm > 0
-            ? calc.distanceKm
-            : (clientDistanceKm ?? 0);
+          // Distance: take the LARGER of server GPS and client distance.
+          // Server GPS may be incomplete (fire-and-forget upload → partial points).
+          // Client accumulates in real-time from every GPS update → more complete.
+          // Math.max ensures the DB never shows less than what the driver actually drove.
+          const serverDistKm = calc.distanceKm > 0 ? calc.distanceKm : 0;
+          const finalDistKm  = Math.max(serverDistKm, clientDistanceKm ?? 0);
+          console.log(`[trip/complete] dist: server=${serverDistKm} client=${clientDistanceKm} → using ${finalDistKm}`);
 
           // Price: VARIANT B
           //   clientFinalPrice (if valid) → always wins
@@ -200,10 +202,10 @@ export async function PATCH(
           updateData.distanceKm = finalDistKm;
           updateData.finalPrice  = finalPrice;
 
-          // Breakdown: use server GPS split if available (city vs out-of-city km)
-          // When GPS has 0 points, fall back to client-tracked km split
-          const bCityKm    = calc.distanceKm > 0 ? calc.cityKm    : Math.max(0, (clientDistanceKm ?? 0) - (clientOutOfCityKm ?? 0));
+          // Breakdown: derive out-of-city km from server GPS if available, else client.
+          // City km = finalDistKm − out-of-city km (so breakdown always sums to finalDistKm).
           const bOutCityKm = calc.distanceKm > 0 ? calc.outOfCityKm : (clientOutOfCityKm ?? 0);
+          const bCityKm    = Math.max(0, finalDistKm - bOutCityKm);
           tripBreakdown = {
             baseFare:          sessionBaseFare,
             cityKm:            bCityKm,

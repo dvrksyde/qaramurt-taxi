@@ -965,7 +965,29 @@ export default function MainScreen() {
           headingDeg: typeof loc.coords.heading === "number" && Number.isFinite(loc.coords.heading) ? loc.coords.heading : null,
         };
         useDriverStore.getState().setLastLocation({ lat: seedPoint.lat, lng: seedPoint.lng });
+        // ── Immediate zone check at trip start ─────────────────────────────────
+        // Detects out-of-city from the very first second (no border crossing needed).
+        // The background GPS loop only checks zone on subsequent points; this covers
+        // the case where the driver starts the trip already outside the city.
+        const storeNow = useDriverStore.getState();
+        const boundary = storeNow.cityBoundary;
+        if (boundary && boundary.length > 2) {
+          const insideCity = pointInPolygon(seedPoint.lat, seedPoint.lng, boundary);
+          if (!insideCity && !storeNow.isOutOfCity) {
+            const outRate = storeNow.configuredOutOfCityRate > 0
+              ? storeNow.configuredOutOfCityRate
+              : (storeNow.profile?.vehicle?.classes?.some((c: any) => c.class?.name === "Комфорт") ? 140 : 120);
+            storeNow.setZoneChange({
+              isOutOfCity: true,
+              outOfCityRatePerKm: outRate,
+              currentPrice: storeNow.tripPrice,
+              currentDistance: storeNow.tripDistance,
+            });
+          }
+        }
+        // ───────────────────────────────────────────────────────────────────────
         await queueTripPoint(order.id, seedPoint);
+
       } catch { }
     })();
   };
