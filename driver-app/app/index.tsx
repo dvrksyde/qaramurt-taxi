@@ -95,7 +95,7 @@ function pointInPolygon(lat: number, lng: number, polygon: number[][]): boolean 
     const xi = polygon[i][0], yi = polygon[i][1]; // GeoJSON: [lng, lat]
     const xj = polygon[j][0], yj = polygon[j][1];
     if (((yi > lat) !== (yj > lat)) &&
-        (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+      (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
       inside = !inside;
     }
   }
@@ -147,7 +147,7 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
               ? state.outOfCityAccumulatedKm + d
               : state.outOfCityAccumulatedKm;
 
-            const cityKm  = Math.max(0, newDist - updatedOutKm);
+            const cityKm = Math.max(0, newDist - updatedOutKm);
             const outRate = state.outOfCityRatePerKm || cityRate;
             const baseFare = state.tripBaseFare || resolveBaseFare(
               state.activeOrder?.class,
@@ -700,7 +700,7 @@ export default function MainScreen() {
       return;
     }
 
-    const pickup  = parseWktPoint(activeOrder.pickupPoint);
+    const pickup = parseWktPoint(activeOrder.pickupPoint);
     const dropoff = parseWktPoint(activeOrder.dropoffPoint);
 
     if (activeOrder.status === "assigned" && pickup && currentCoords) {
@@ -716,8 +716,8 @@ export default function MainScreen() {
     } else {
       mapRef.current.clearRoute();
     }
-  // Only re-run when the order status changes, not on every coords update
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Only re-run when the order status changes, not on every coords update
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeOrder?.status, activeOrder?.id]);
 
   // ── Map route: periodic rebuild during trip (max 1 per 30 s) ─────────────
@@ -735,8 +735,8 @@ export default function MainScreen() {
     routeThrottleRef.current = Date.now();
     // fitBounds=false to keep the viewport where the driver is
     mapRef.current.buildRoute(currentCoords, dropoff, false);
-  // Runs whenever currentCoords changes, but the throttle gate limits actual rebuilds
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Runs whenever currentCoords changes, but the throttle gate limits actual rebuilds
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentCoords]);
 
   // Ref to track the offline-on-background timeout
@@ -2074,7 +2074,7 @@ const styles = StyleSheet.create({
   meterStripItem: { flexDirection: "row", alignItems: "center", gap: 6 },
   meterStripLabel: { color: "#666", fontSize: 13 },
   meterStripValue: { color: "#ddd", fontSize: 18, fontWeight: "700" },
-  meterStripPrice: { color: "#FFD000", fontSize: 52, fontWeight: "900", letterSpacing: -1 },
+  meterStripPrice: { color: "#FFD000", fontSize: 50, fontWeight: "900", letterSpacing: -1 },
 
   // ─── (Status center replaced by map overlay) ─────────────
   orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 22, left: 16, right: 16 },
