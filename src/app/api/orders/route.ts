@@ -7,7 +7,6 @@ import { getGeozoneOverride } from "@/lib/geo";
 import { checkPermission } from "@/lib/permissions";
 import { redis } from "@/lib/redis";
 import { orderDistributionQueue } from "@/lib/queue";
-import { getDriverLevelMap, LEVEL_PRIORITY } from "@/lib/driverRanking";
 
 
 // GET /api/orders — list with filters
@@ -213,105 +212,48 @@ export async function POST(req: NextRequest) {
     };
 
     if (distributionMethod === "automatic" && order.pickupPoint) {
-      // Find drivers in 5km radius
+      // ── Multi-step radius expansion (handled by queue worker) ──────────────
+      // Step 1: 1.5 km → Step 2: 3.0 km → Step 3: 5.0 km → Step 4: broadcast
+      // Each step sorts by driver level (gold first), skips blocked drivers,
+      // and waits 15 s before advancing if the order is still pending.
       try {
         const parseWkt = (wkt: string) => {
           const m = wkt.match(/POINT\(([-\d.]+)\s+([-\d.]+)\)/i);
           return m ? { lng: Number(m[1]), lat: Number(m[2]) } : null;
         };
-
         const pickup = parseWkt(order.pickupPoint);
-                const CLOSE_RADIUS_KM = 2.5; // Первая волна (ближайшие)
-        const MAX_RADIUS_KM = 5.0; // Вторая волна
-
-        let closeDrivers: {id: number, dist: number}[] = [];
-        let farDrivers: {id: number, dist: number}[] = [];
 
         if (pickup) {
-          const nearbyDriverMembers = await redis.geoSearchWith(
-            "driver_locations", 
-            { longitude: pickup.lng, latitude: pickup.lat },
-            { radius: MAX_RADIUS_KM, unit: "km" },
-            ["WITHDIST"],
-            { SORT: "ASC" }
-          ) as any[];
-
-          const nearbyDriverIds = nearbyDriverMembers.map(d => Number(d.member));
-
-          if (nearbyDriverIds.length > 0) {
-            const validDrivers = await prisma.driver.findMany({
-              where: { 
-                id: { in: nearbyDriverIds },
-                status: "free", 
-                balance: { gte: 30 },
-                ...(order.classId ? {
-                  vehicles: {
-                    some: {
-                      isActive: true,
-                      classes: { some: { classId: order.classId } }
-                    }
-                  }
-                } : {})
-              },
-              select: { id: true }
-            });
-
-            const validDriverIds = new Set(validDrivers.map(d => d.id));
-
-            // Build a distance list for all valid drivers
-            const allWithDist = nearbyDriverMembers
-              .filter(d => validDriverIds.has(Number(d.member)))
-              .map(d => ({ id: Number(d.member), dist: Number(d.distance || 0) }));
-
-            // Fetch levels and filter out blocked drivers
-            const levelMap = await getDriverLevelMap();
-            const withLevel = allWithDist
-              .map(d => ({ ...d, levelPriority: LEVEL_PRIORITY[levelMap.get(d.id)?.level ?? "bronze"] }))
-              .filter(d => d.levelPriority < 99) // exclude blocked
-              .sort((a, b) => a.levelPriority !== b.levelPriority
-                ? a.levelPriority - b.levelPriority  // gold first
-                : a.dist - b.dist                    // then nearest
-              );
-
-            closeDrivers = withLevel.filter((d) => d.dist <= CLOSE_RADIUS_KM);
-            farDrivers   = withLevel.filter((d) => d.dist >  CLOSE_RADIUS_KM);
-          }
-        }
-
-        if (closeDrivers.length > 0) {
-          // Шаг 1: Отправляем только ближайшим (до 2.5 км)
-          closeDrivers.forEach((d) => {
-            io.to(`driver:${d.id}`).emit("new_order_alert", alertData);
-          });
-
-          // Шаг 2: Ждем 15 секунд. Если никто из ближайших не взял, расширяем радиус до 5 км
-          // Jitter ±3s so 60 simultaneous orders don't all fire at t+15s
-          const jitter = Math.floor(Math.random() * 6000) - 3000;
-          await orderDistributionQueue.add("expand-radius", {
-            orderId: order.id,
-            alertData,
-            farDriverIds: farDrivers.map((d) => d.id)
-          }, { delay: 15000 + jitter });
-          
-        } else if (farDrivers.length > 0) {
-          // Если в радиусе 2.5 км никого нет, сразу отправляем тем, кто в пределах 5 км
-          farDrivers.forEach((d) => {
-            io.to(`driver:${d.id}`).emit("new_order_alert", alertData);
-          });
+          // Small startup jitter (0-1 s) so simultaneous orders don't all
+          // hit the worker at the exact same millisecond.
+          const startJitter = Math.floor(Math.random() * 1000);
+          await orderDistributionQueue.add(
+            "dispatch-step",
+            {
+              orderId:     order.id,
+              step:        1,
+              notifiedIds: [],
+              pickupLat:   pickup.lat,
+              pickupLng:   pickup.lng,
+              classId:     order.classId ?? null,
+              alertData,
+            },
+            { delay: startJitter },
+          );
         } else {
-          // Если вообще никого нет в радиусе 5 км, кидаем всем
+          // No parseable pickup point — fall back to broadcast
           io.to("drivers").emit("new_order_alert", alertData);
         }
       } catch (e) {
-        console.error("Auto distribution error", e);
-        // Fallback on error
+        console.error("[dispatch] Failed to queue dispatch-step:", e);
         io.to("drivers").emit("new_order_alert", alertData);
       }
     } else if (distributionMethod !== "map_pick" && distributionMethod !== "list_pick") {
-      // Broadcast to ALL online drivers for 'broadcast', 'sequential', or if automatic without pickup point
+      // broadcast / sequential / automatic without pickup point → notify all
       io.to("drivers").emit("new_order_alert", alertData);
     }
   }
+
 
   return NextResponse.json({ data: order }, { status: 201 });
 }
