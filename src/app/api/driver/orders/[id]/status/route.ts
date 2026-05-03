@@ -300,8 +300,9 @@ export async function PATCH(
         include: { tariffGroup: true }
       });
 
-      const isCurbside = updatedOrder.pickupAddress === "С бордюра" || updatedOrder.comment === "Заказ с бордюра";
-      const commPercent = isCurbside ? 10 : Number(dTG?.tariffGroup?.value || 15);
+      // Commission: always read from driver's tariff group (no hardcoded rates).
+      // Fallback 13 = "Стандарт" rate — only used if driver has no tariff group assigned.
+      const commPercent = Number(dTG?.tariffGroup?.value || 13);
       const commission = Number(updatedOrder.finalPrice) * (commPercent / 100);
 
       if (commission > 0) {
@@ -316,9 +317,7 @@ export async function PATCH(
             orderId,
             amount: commission,
             type: "order_fee",
-            description: isCurbside
-              ? `Комиссия ${commPercent}% (С бордюра) за заказ #${orderId}`
-              : `Комиссия ${commPercent}% за заказ #${orderId}`,
+            description: `Комиссия ${commPercent}% за заказ #${orderId}`,
           },
         });
       }

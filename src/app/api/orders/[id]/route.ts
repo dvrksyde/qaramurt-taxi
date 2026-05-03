@@ -114,13 +114,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     // 1. Commission Deduction
     if (status === "completed" && updated.driverId && updated.finalPrice) {
       const driver = updated.driver;
-      // Default to 15% (Standard) if no tariff is set
-      // Fetch nested tariffGroup manually if not included or use a subquery/separate fetch.
+      // Commission: read from driver's tariff group. Fallback 13 = "Стандарт" — only if driver has no group.
       const dTG = await tx.driver.findUnique({
         where: { id: updated.driverId },
         include: { tariffGroup: true }
       });
-      const commPercent = Number(dTG?.tariffGroup?.value || 15);
+      const commPercent = Number(dTG?.tariffGroup?.value || 13);
       const commission = Number(updated.finalPrice) * (commPercent / 100);
 
       if (commission > 0) {
