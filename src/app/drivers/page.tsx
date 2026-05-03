@@ -149,8 +149,8 @@ export default function DriversPage() {
                 <th rowSpan={2}>ID</th>
                 <th rowSpan={2}>Логин</th>
                 <th rowSpan={2}>Имя</th>
-                <th rowSpan={2} style={{ textAlign: "center", cursor: "pointer" }} className="sortable-th" onClick={() => toggleSort("rating")}>
-                  Рейтинг {sortIcon("rating")}
+                <th rowSpan={2} style={{ textAlign: "center", cursor: "pointer" }} className="sortable-th" onClick={() => toggleSort("level")}>
+                  Уровень {sortIcon("level")}
                 </th>
                 <th rowSpan={2}>Баланс</th>
                 <th rowSpan={2}>Тариф</th>
@@ -186,9 +186,19 @@ export default function DriversPage() {
                     <td className="text-mono text-sm">{driver.login}</td>
                     <td style={{ fontWeight: 500 }}>{driver.lastName} {driver.firstName}</td>
                     <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                      <span style={{ marginRight: 4 }}>🏆</span>
-                      <strong style={{ color: "var(--color-text)" }}>{driver.rating}</strong>
-                      <span style={{ color: "var(--color-text-3)", fontSize: 12, marginLeft: 6 }}>({driver.ordersCount || 0} поездок)</span>
+                      {(() => {
+                        const lvl = (driver as any).level as string;
+                        const emoji = { gold: "🥇", silver: "🥈", bronze: "🥉", blocked: "⛔" }[lvl] ?? "🥉";
+                        const color = { gold: "#FFD700", silver: "#94A3B8", bronze: "#CD7F32", blocked: "#EF4444" }[lvl] ?? "#94A3B8";
+                        const label = { gold: "Золото", silver: "Серебро", bronze: "Бронза", blocked: "Блок" }[lvl] ?? "Бронза";
+                        return (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 10, background: `${color}22`, border: `1px solid ${color}`, color }}>
+                            <span>{emoji}</span>
+                            <strong style={{ fontSize: 12 }}>{label}</strong>
+                            <span style={{ color: "var(--color-text-3)", fontSize: 11 }}>({(driver as any).ordersCount || 0})</span>
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td style={{ verticalAlign: "middle" }}>
                       <button

@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { updateDriverLocation } from "@/lib/geo";
 import { requireAuth, checkPermission } from "@/lib/permissions";
 import { hashPassword } from "@/lib/passwords";
-import { getDriverRank } from "@/lib/driverRanking";
+import { getDriverLevel } from "@/lib/driverRanking";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -13,14 +13,17 @@ async function serializeDriver(driver: any) {
   if (!driver) return null;
 
   const { passwordHash: _passwordHash, ...safeDriver } = driver;
-  const driverRank = await getDriverRank(driver.id);
+  const driverLevel = await getDriverLevel(driver.id);
 
   return {
     ...safeDriver,
     balance: Number(driver.balance),
     maxCredit: Number(driver.maxCredit),
-    rating: driverRank.rank,
-    ordersCount: driverRank.ordersCount,
+    level: driverLevel.level,
+    levelScore: driverLevel.score,
+    ordersCount: driverLevel.ordersCount,
+    completionRate: driverLevel.completionRate,
+    cancellationCount: driverLevel.cancellationCount,
     currentLocation: null,
     tariffGroup: driver.tariffGroup,
     tariffGroupId: driver.tariffGroupId,

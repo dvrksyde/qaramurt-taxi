@@ -79,8 +79,21 @@ export function DriverProfilePanel() {
           <Text style={styles.summaryName}>{profile?.lastName} {profile?.firstName}</Text>
           <Text style={styles.summaryMeta}>Логин: {profile?.login}</Text>
           <Text style={styles.summaryMeta}>Позывной: {profile?.callsign || "—"}</Text>
-          <Text style={styles.summaryMeta}>Рейтинг: #{Number(profile?.rating || 0)}</Text>
-          <Text style={styles.summaryMeta}>Выполнено заказов: {Number((profile as any)?.ordersCount || 0)}</Text>
+          <Text style={styles.summaryMeta}>
+            Уровень:{' '}
+            <Text style={{ color:
+              (profile as any)?.level === 'gold' ? '#FFD700' :
+              (profile as any)?.level === 'silver' ? '#94A3B8' :
+              (profile as any)?.level === 'blocked' ? '#EF4444' : '#CD7F32',
+              fontWeight: 'bold'
+            }}>
+              {{ gold: '🥇 Золото', silver: '🥈 Серебро', bronze: '🥉 Бронза', blocked: '⛔ Блок' }[(profile as any)?.level] ?? '🥉 Бронза'}
+            </Text>
+          </Text>
+          <Text style={styles.summaryMeta}>Завершено поездок: {Number((profile as any)?.ordersCount || 0)}</Text>
+          {(profile as any)?.completionRate != null && (
+            <Text style={styles.summaryMeta}>Надёжность: {(profile as any).completionRate}%</Text>
+          )}
           <Text style={[styles.summaryMeta, Number(profile?.balance || 0) < 30 && { color: '#ef4444' }]}>
             Баланс: {Number(profile?.balance || 0).toLocaleString()} ₸
           </Text>

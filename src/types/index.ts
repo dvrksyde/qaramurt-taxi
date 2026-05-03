@@ -7,6 +7,7 @@ export type CallType = "inbound" | "outbound";
 export type CallStatus = "answered" | "missed" | "busy" | "failed";
 export type TransactionType = "payout" | "deposit" | "penalty" | "bonus";
 export type TariffType = "commission" | "fixed" | "unlimited";
+export type DriverLevel = "gold" | "silver" | "bronze" | "blocked";
 
 // ─── CORE ENTITIES ────────────────────────────────────────────────────────────
 
@@ -20,7 +21,8 @@ export interface Driver {
   login: string;
   status: DriverStatus;
   balance: number;
-  rating: number;
+  level: DriverLevel;
+  levelScore?: number;
   maxCredit: number;
   currentLocation?: { lat: number; lng: number } | null;
   tariffGroupId: number | null;
@@ -28,11 +30,14 @@ export interface Driver {
   createdAt: string;
   deviceId?: string | null;
   ordersCount?: number;
+  completionRate?: number;
+  cancellationCount?: number;
   vehicles?: { id: number; plate: string; make: string; model: string; color: string; classes?: any[] }[];
   osVersion?: string | null;
   thirdPartyApps?: string[] | null;
   lastSeenAt?: string | null;
 }
+
 
 export interface DriverLocation {
   driverId: number;

@@ -10,8 +10,11 @@ interface DriverProfile {
   login?: string;
   tariffGroup?: { name: string; value: number } | null;
   balance: number;
-  rating: number;
+  level: string;
+  levelScore?: number;
   ordersCount?: number;
+  completionRate?: number;
+  cancellationCount?: number;
   status: "free" | "busy" | "offline";
   vehicle: any | null;
   todayOrders: number;

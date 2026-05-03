@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { signDriverToken } from "@/lib/driverAuth";
 import { hashPassword, verifyPassword } from "@/lib/passwords";
 import { prisma } from "@/lib/prisma";
-import { getDriverRank } from "@/lib/driverRanking";
+import { getDriverLevel } from "@/lib/driverRanking";
 
 export async function POST(req: NextRequest) {
   const { login, password } = await req.json();
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
   }
 
   const token = signDriverToken({ driverId: driver.id, login: driver.login });
-  const driverRank = await getDriverRank(driver.id);
+  const driverLevel = await getDriverLevel(driver.id);
 
   return NextResponse.json({
     data: {
@@ -56,8 +56,11 @@ export async function POST(req: NextRequest) {
         callsign: driver.callsign,
         phone: driver.phone,
         balance: Number(driver.balance),
-        rating: driverRank.rank,
-        ordersCount: driverRank.ordersCount,
+        level: driverLevel.level,
+        levelScore: driverLevel.score,
+        ordersCount: driverLevel.ordersCount,
+        completionRate: driverLevel.completionRate,
+        cancellationCount: driverLevel.cancellationCount,
         status: driver.status,
         vehicle: driver.vehicles[0] || null,
       },

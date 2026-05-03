@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyDriverToken } from "@/lib/driverAuth";
 import { hashPassword } from "@/lib/passwords";
-import { getDriverRank } from "@/lib/driverRanking";
+import { getDriverLevel } from "@/lib/driverRanking";
 
 async function buildDriverProfile(driverId: number) {
   const driver = await prisma.driver.findUnique({
@@ -32,7 +32,7 @@ async function buildDriverProfile(driverId: number) {
       where: { driverId: driver.id, status: "completed", completedAt: { gte: todayStart } },
       _sum: { finalPrice: true },
     }),
-    getDriverRank(driver.id),
+    getDriverLevel(driver.id),
   ]);
 
   return {
@@ -44,8 +44,11 @@ async function buildDriverProfile(driverId: number) {
     callsign: driver.callsign,
     phone: driver.phone,
     balance: Number(driver.balance),
-    rating: driverRank.rank,
+    level: driverRank.level,
+    levelScore: driverRank.score,
     ordersCount: driverRank.ordersCount,
+    completionRate: driverRank.completionRate,
+    cancellationCount: driverRank.cancellationCount,
     status: driver.status,
     vehicle: driver.vehicles[0] || null,
     tariffGroup: driver.tariffGroup,

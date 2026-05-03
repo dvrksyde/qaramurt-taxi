@@ -7,6 +7,8 @@ import { getGeozoneOverride } from "@/lib/geo";
 import { checkPermission } from "@/lib/permissions";
 import { redis } from "@/lib/redis";
 import { orderDistributionQueue } from "@/lib/queue";
+import { getDriverLevelMap, LEVEL_PRIORITY } from "@/lib/driverRanking";
+
 
 // GET /api/orders — list with filters
 export async function GET(req: NextRequest) {
@@ -256,12 +258,23 @@ export async function POST(req: NextRequest) {
 
             const validDriverIds = new Set(validDrivers.map(d => d.id));
 
-            const validWithDist = nearbyDriverMembers
+            // Build a distance list for all valid drivers
+            const allWithDist = nearbyDriverMembers
               .filter(d => validDriverIds.has(Number(d.member)))
               .map(d => ({ id: Number(d.member), dist: Number(d.distance || 0) }));
 
-            closeDrivers = validWithDist.filter((d) => d.dist <= CLOSE_RADIUS_KM);
-            farDrivers = validWithDist.filter((d) => d.dist > CLOSE_RADIUS_KM);
+            // Fetch levels and filter out blocked drivers
+            const levelMap = await getDriverLevelMap();
+            const withLevel = allWithDist
+              .map(d => ({ ...d, levelPriority: LEVEL_PRIORITY[levelMap.get(d.id)?.level ?? "bronze"] }))
+              .filter(d => d.levelPriority < 99) // exclude blocked
+              .sort((a, b) => a.levelPriority !== b.levelPriority
+                ? a.levelPriority - b.levelPriority  // gold first
+                : a.dist - b.dist                    // then nearest
+              );
+
+            closeDrivers = withLevel.filter((d) => d.dist <= CLOSE_RADIUS_KM);
+            farDrivers   = withLevel.filter((d) => d.dist >  CLOSE_RADIUS_KM);
           }
         }
 

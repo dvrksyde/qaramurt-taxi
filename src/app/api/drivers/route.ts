@@ -4,16 +4,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth, checkPermission } from "@/lib/permissions";
 import { hashPassword } from "@/lib/passwords";
-import { buildDriverRankMap, getStartOfWeek } from "@/lib/driverRanking";
+import { getDriverLevelMap, LEVEL_PRIORITY } from "@/lib/driverRanking";
 
-function serializeDriver(driver: any, rating: number, ordersCount: number) {
+function serializeDriver(driver: any, levelEntry: { level: string; score: number; ordersCount: number; completionRate: number; cancellationCount: number }) {
   const { passwordHash: _passwordHash, ...safeDriver } = driver;
   return {
     ...safeDriver,
     balance: Number(driver.balance),
     maxCredit: Number(driver.maxCredit),
-    rating,
-    ordersCount,
+    level: levelEntry.level,
+    levelScore: levelEntry.score,
+    ordersCount: levelEntry.ordersCount,
+    completionRate: levelEntry.completionRate,
+    cancellationCount: levelEntry.cancellationCount,
     currentLocation: null,
     tariffGroup: driver.tariffGroup,
     tariffGroupId: driver.tariffGroupId,
@@ -49,25 +52,30 @@ export async function GET(req: NextRequest) {
     include: {
       tariffGroup: { select: { name: true, type: true } },
       vehicles: { select: { id: true, plate: true, make: true, model: true, color: true, classes: true } },
-      _count: { select: { orders: { where: { status: "completed", completedAt: { gte: getStartOfWeek() } } } } },
     },
     orderBy: dbOrderBy,
   });
 
-  const rankMap = buildDriverRankMap(
-    drivers.map((driver) => ({
-      id: driver.id,
-      ordersCount: driver._count?.orders || 0,
-    })),
+  const levelMap = await getDriverLevelMap();
+
+  const defaultLevel = { level: "bronze", score: 0, ordersCount: 0, completionRate: 0, cancellationCount: 0 };
+  const serialized = drivers.map((driver) =>
+    serializeDriver(driver, levelMap.get(driver.id) ?? defaultLevel)
   );
 
-  const serialized = drivers.map((driver) => {
-    const rankEntry = rankMap.get(driver.id) || { rank: 0, ordersCount: 0 };
-    return serializeDriver(driver, rankEntry.rank, rankEntry.ordersCount);
-  });
-
-  if (sortBy === "rating") {
-    serialized.sort((a, b) => (sortDir === "asc" ? a.rating - b.rating : b.rating - a.rating));
+  if (sortBy === "level") {
+    serialized.sort((a, b) => {
+      const pa = LEVEL_PRIORITY[a.level as keyof typeof LEVEL_PRIORITY] ?? 99;
+      const pb = LEVEL_PRIORITY[b.level as keyof typeof LEVEL_PRIORITY] ?? 99;
+      return sortDir === "asc" ? pa - pb : pb - pa;
+    });
+  } else if (sortBy === "rating") {
+    // backward compat: sort by level priority
+    serialized.sort((a, b) => {
+      const pa = LEVEL_PRIORITY[a.level as keyof typeof LEVEL_PRIORITY] ?? 99;
+      const pb = LEVEL_PRIORITY[b.level as keyof typeof LEVEL_PRIORITY] ?? 99;
+      return pb - pa; // gold first
+    });
   } else if (sortBy === "plate") {
     serialized.sort((a, b) => {
       const pa = a.vehicles?.[0]?.plate || "";
@@ -170,12 +178,12 @@ export async function POST(req: NextRequest) {
     include: {
       tariffGroup: { select: { name: true, type: true } },
       vehicles: true,
-      _count: { select: { orders: { where: { status: "completed", completedAt: { gte: getStartOfWeek() } } } } },
     },
   });
 
+  const newDriverLevel = { level: "bronze" as const, score: 0, ordersCount: 0, completionRate: 0, cancellationCount: 0 };
   return NextResponse.json(
-    { data: serializeDriver(driver, 0, driver._count?.orders || 0), generatedPassword },
+    { data: serializeDriver(driver, newDriverLevel), generatedPassword },
     { status: 201 },
   );
 }

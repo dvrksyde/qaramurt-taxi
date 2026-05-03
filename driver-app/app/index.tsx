@@ -1728,9 +1728,23 @@ export default function MainScreen() {
             <Text style={styles.statLabel}>Баланс</Text>
             <Text style={styles.statValue}>{Number(profile.balance).toLocaleString()}₸</Text>
           </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Рейтинг</Text>
-            <Text style={styles.statValue}>#{Number(profile.rating || 0)}</Text>
+          <View style={[styles.statCard, {
+            borderColor:
+              profile.level === 'gold' ? '#FFD700' :
+              profile.level === 'silver' ? '#94A3B8' :
+              profile.level === 'blocked' ? '#EF4444' : '#CD7F32',
+          }]}>
+            <Text style={styles.statLabel}>Уровень</Text>
+            <Text style={[
+              styles.statValue,
+              { color:
+                profile.level === 'gold' ? '#FFD700' :
+                profile.level === 'silver' ? '#94A3B8' :
+                profile.level === 'blocked' ? '#EF4444' : '#CD7F32'
+              }
+            ]}>
+              {{ gold: '🥇', silver: '🥈', bronze: '🥉', blocked: '⛔' }[profile.level] ?? '🥉'}
+            </Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statLabel}>Заказов</Text>
