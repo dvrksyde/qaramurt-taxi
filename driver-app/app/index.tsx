@@ -409,7 +409,14 @@ export default function MainScreen() {
   }, []);
 
   const startLocationTracking = useCallback(async () => {
-    // Если таск уже запущен — не перезапускаем! Иначе сбросится lastLocation
+    // Always grab a fresh GPS fix when going online so currentCoords is
+    // never null — even if the background task is already running from a
+    // previous session. This is the key fix for the "map crosshair +
+    // GPS button required before calculation" problem.
+    await refreshCurrentPosition();
+
+    // If the background task is already registered we only needed the
+    // one-shot position above — don't double-start the task.
     const alreadyRunning = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
     if (alreadyRunning) return;
 
@@ -419,7 +426,6 @@ export default function MainScreen() {
       return;
     }
 
-    await refreshCurrentPosition();
     const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
 
     if (bgStatus !== "granted") {
@@ -703,16 +709,26 @@ export default function MainScreen() {
     const pickup = parseWktPoint(activeOrder.pickupPoint);
     const dropoff = parseWktPoint(activeOrder.dropoffPoint);
 
-    if (activeOrder.status === "assigned" && pickup && currentCoords) {
-      // Driver heading to client → route: my position → pickup
-      mapRef.current.buildRoute(currentCoords, pickup, true);
+    if (activeOrder.status === "assigned" && pickup) {
+      if (currentCoords) {
+        // Driver heading to client → route: my position → pickup
+        mapRef.current.buildRoute(currentCoords, pickup, true);
+      } else {
+        // GPS not ready yet — refresh and the next coords update
+        // will re-trigger this effect via the periodic rebuild effect
+        refreshCurrentPosition();
+      }
     } else if (activeOrder.status === "arrived") {
       // Driver is on-site — no route needed
       mapRef.current.clearRoute();
-    } else if (activeOrder.status === "in_progress" && dropoff && currentCoords) {
-      // Trip started → route: my position → dropoff
-      routeThrottleRef.current = Date.now();
-      mapRef.current.buildRoute(currentCoords, dropoff, true);
+    } else if (activeOrder.status === "in_progress" && dropoff) {
+      if (currentCoords) {
+        // Trip started → route: my position → dropoff
+        routeThrottleRef.current = Date.now();
+        mapRef.current.buildRoute(currentCoords, dropoff, true);
+      } else {
+        refreshCurrentPosition();
+      }
     } else {
       mapRef.current.clearRoute();
     }
@@ -1731,19 +1747,20 @@ export default function MainScreen() {
           <View style={[styles.statCard, {
             borderColor:
               profile.level === 'gold' ? '#FFD700' :
-              profile.level === 'silver' ? '#94A3B8' :
-              profile.level === 'blocked' ? '#EF4444' : '#CD7F32',
+                profile.level === 'silver' ? '#94A3B8' :
+                  profile.level === 'blocked' ? '#EF4444' : '#CD7F32',
           }]}>
             <Text style={styles.statLabel}>Уровень</Text>
             <Text style={[
               styles.statValue,
-              { color:
-                profile.level === 'gold' ? '#FFD700' :
-                profile.level === 'silver' ? '#94A3B8' :
-                profile.level === 'blocked' ? '#EF4444' : '#CD7F32'
+              {
+                color:
+                  profile.level === 'gold' ? '#FFD700' :
+                    profile.level === 'silver' ? '#94A3B8' :
+                      profile.level === 'blocked' ? '#EF4444' : '#CD7F32'
               }
             ]}>
-              {{ gold: '🥇', silver: '🥈', bronze: '🥉', blocked: '⛔' }[profile.level] ?? '🥉'}
+              {{ gold: 'Золото', silver: 'Серебро', bronze: 'Бронза', blocked: 'Заблокирован' }[profile.level] ?? '🥉'}
             </Text>
           </View>
           <View style={styles.statCard}>
@@ -2074,7 +2091,7 @@ const styles = StyleSheet.create({
   // ─── Stats row ────────────────────────────────────────────
   statsRow: { flexDirection: "row", gap: 8, marginBottom: 14 },
   statCard: { flex: 1, backgroundColor: "#161616", borderRadius: 14, padding: 12, alignItems: "center", borderWidth: 1, borderColor: "#222" },
-  statLabel: { color: "#555", fontSize: 11, marginBottom: 4, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.5 },
+  statLabel: { color: "#555", fontSize: 9, marginBottom: 4, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.5 },
   statValue: { color: "#fff", fontSize: 15, fontWeight: "800" },
 
   // ─── (GPS status card replaced by map) ───────────────────
