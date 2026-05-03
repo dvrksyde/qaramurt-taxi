@@ -17,55 +17,55 @@ export interface DriverLevelEntry {
 /**
  * Compute driver level from raw stats (last 30 days).
  *
- * Activity points (0-3):
- *   40+ completed  → 3
- *   20-39           → 2
- *   5-19            → 1
+ * Activity points (0-5)  — dominant factor:
+ *   70+ completed  → 5
+ *   50-69           → 4
+ *   30-49           → 3
+ *   15-29           → 2
+ *   5-14            → 1
  *   0-4             → 0
  *
- * Reliability points (0-3):
- *   95-100% completion → 3
- *   80-94%             → 2
- *   60-79%             → 1
- *   < 60%              → 0
+ * Reliability points (0-2):
+ *   90%+  completion → 2
+ *   70-89%           → 1
+ *   < 70%            → 0
  *
- * Penalty (-3 to 0):
- *   6+ cancellations → -3
- *   3-5              → -2
- *   1-2              → -1
- *   0                → 0
+ * Penalty (-2 to 0):
+ *   6+ cancellations → -2
+ *   3-5              → -1
+ *   0-2              →  0
  *
  * Level thresholds:
- *   score >= 6  → gold
+ *   score >= 6  → gold    (активный + надёжный)
  *   score 3-5   → silver
- *   score 0-2   → bronze   ← includes new drivers (score=0)
- *   score < 0   → blocked  ← only if actively cancelled after accepting
+ *   score 0-2   → bronze  (новый / нерегулярный)
+ *   score < 0   → blocked (отмены без активности)
  */
 export function computeDriverLevel(
   ordersCompleted: number,
   ordersAssigned: number,
   cancellations: number,
 ): DriverLevelEntry {
-  // Activity
+  // Activity (0-5) — количество важнее всего
   let activity = 0;
-  if (ordersCompleted >= 40) activity = 3;
-  else if (ordersCompleted >= 20) activity = 2;
+  if (ordersCompleted >= 70)      activity = 5;
+  else if (ordersCompleted >= 50) activity = 4;
+  else if (ordersCompleted >= 30) activity = 3;
+  else if (ordersCompleted >= 15) activity = 2;
   else if (ordersCompleted >= 5)  activity = 1;
 
-  // Reliability
+  // Reliability (0-2)
   const completionRate = ordersAssigned > 0
     ? (ordersCompleted / ordersAssigned)
     : (ordersCompleted > 0 ? 1 : 0);
   let reliability = 0;
-  if (completionRate >= 0.95) reliability = 3;
-  else if (completionRate >= 0.80) reliability = 2;
-  else if (completionRate >= 0.60) reliability = 1;
+  if (completionRate >= 0.90)      reliability = 2;
+  else if (completionRate >= 0.70) reliability = 1;
 
-  // Penalty
+  // Penalty (0 to -2)
   let penalty = 0;
-  if (cancellations >= 6) penalty = -3;
-  else if (cancellations >= 3) penalty = -2;
-  else if (cancellations >= 1) penalty = -1;
+  if (cancellations >= 6)      penalty = -2;
+  else if (cancellations >= 3) penalty = -1;
 
   const score = activity + reliability + penalty;
 
