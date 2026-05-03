@@ -18,10 +18,10 @@ export interface DriverLevelEntry {
  * Compute driver level from raw stats (last 30 days).
  *
  * Activity points (0-3):
- *   50+ completed  → 3
- *   25-49           → 2
- *   10-24           → 1
- *   0-9             → 0
+ *   40+ completed  → 3
+ *   20-39           → 2
+ *   5-19            → 1
+ *   0-4             → 0
  *
  * Reliability points (0-3):
  *   95-100% completion → 3
@@ -36,10 +36,10 @@ export interface DriverLevelEntry {
  *   0                → 0
  *
  * Level thresholds:
- *   score 6-8 → gold
- *   score 3-5 → silver
- *   score 1-2 → bronze
- *   score ≤ 0 → blocked
+ *   score >= 6  → gold
+ *   score 3-5   → silver
+ *   score 0-2   → bronze   ← includes new drivers (score=0)
+ *   score < 0   → blocked  ← only if actively cancelled after accepting
  */
 export function computeDriverLevel(
   ordersCompleted: number,
@@ -48,9 +48,9 @@ export function computeDriverLevel(
 ): DriverLevelEntry {
   // Activity
   let activity = 0;
-  if (ordersCompleted >= 50) activity = 3;
-  else if (ordersCompleted >= 25) activity = 2;
-  else if (ordersCompleted >= 10) activity = 1;
+  if (ordersCompleted >= 40) activity = 3;
+  else if (ordersCompleted >= 20) activity = 2;
+  else if (ordersCompleted >= 5)  activity = 1;
 
   // Reliability
   const completionRate = ordersAssigned > 0
@@ -70,10 +70,10 @@ export function computeDriverLevel(
   const score = activity + reliability + penalty;
 
   let level: DriverLevel;
-  if (score >= 6) level = "gold";
+  if (score >= 6)      level = "gold";
   else if (score >= 3) level = "silver";
-  else if (score >= 1) level = "bronze";
-  else level = "blocked";
+  else if (score >= 0) level = "bronze";  // 0 = new driver / no data → bronze
+  else                 level = "blocked"; // only negative score → blocked
 
   return {
     level,
