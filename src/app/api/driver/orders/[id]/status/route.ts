@@ -56,10 +56,12 @@ export async function PATCH(
     return NextResponse.json({ error: "Заказ уже завершён" }, { status: 409 });
   }
 
-  // Validate status transition
+  // Validate status transition.
+  // NOTE: arrived → completed is allowed — handles offline trips where the
+  // driver started the trip without network (in_progress PATCH never reached server).
   const allowedTransitions: Record<string, string[]> = {
     assigned:    ["arrived", "canceled"],
-    arrived:     ["in_progress", "canceled"],
+    arrived:     ["in_progress", "completed", "canceled"],
     in_progress: ["completed", "canceled"],
   };
   if (!allowedTransitions[order.status]?.includes(status)) {
@@ -89,7 +91,13 @@ export async function PATCH(
       }
     }
   } else if (status === "completed") {
+    // Driver completed trip while offline (arrived→completed skip):
+    // in_progress PATCH never reached server — auto-stamp startedAt.
+    if (order.status === "arrived") {
+      updateData.startedAt = new Date();
+    }
     updateData.completedAt = new Date();
+
 
     // Save dropoff coordinates immediately (without waiting for geocoding)
     if (typeof lat === "number" && typeof lng === "number") {

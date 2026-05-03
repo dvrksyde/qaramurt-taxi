@@ -271,3 +271,51 @@ export async function syncPendingCompletion(): Promise<boolean> {
   console.log(`[pendingCompletion] Synced order ${pending.orderId} successfully`);
   return true;
 }
+
+// ── Pending Status (offline arrived / in_progress support) ────────────────────
+// When arrived or in_progress PATCH fails offline, we save it and retry silently.
+// The driver gets an optimistic local status update so the UI and GPS task work.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PENDING_STATUS_KEY = "driver_pending_status_v1";
+
+export type PendingStatus = {
+  orderId: number;
+  status: "arrived" | "in_progress";
+  savedAt: number;
+};
+
+export async function savePendingStatus(data: PendingStatus): Promise<void> {
+  await SecureStore.setItemAsync(PENDING_STATUS_KEY, JSON.stringify(data));
+}
+
+export async function getPendingStatus(): Promise<PendingStatus | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(PENDING_STATUS_KEY);
+    return raw ? (JSON.parse(raw) as PendingStatus) : null;
+  } catch { return null; }
+}
+
+export async function clearPendingStatus(): Promise<void> {
+  try { await SecureStore.deleteItemAsync(PENDING_STATUS_KEY); } catch { /* ignore */ }
+}
+
+/** Retry pending arrived/in_progress status sync. Returns true if nothing pending or sync succeeded. */
+export async function syncPendingStatus(): Promise<boolean> {
+  const pending = await getPendingStatus();
+  if (!pending) return true;
+
+  const res = await api(`/api/driver/orders/${pending.orderId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: pending.status }),
+  });
+
+  if (res.error) {
+    console.warn(`[pendingStatus] Retry ${pending.status} failed:`, res.error);
+    return false;
+  }
+
+  await clearPendingStatus();
+  console.log(`[pendingStatus] Synced ${pending.status} for order ${pending.orderId}`);
+  return true;
+}

@@ -30,7 +30,7 @@ import { ActiveOrdersPanel } from "../components/ActiveOrdersPanel";
 import { SwipeButton } from "../components/SwipeButton";
 import { YandexMapView, type YandexMapViewHandle } from "../components/YandexMapView";
 import { mapOrderToActiveOrder } from "../lib/orderPricing";
-import { clearTripSync, flushTripPoints, getTripRates, injectSessionId, queueTripPoint, savePendingCompletion, startTripSync, syncPendingCompletion } from "../services/tripSync";
+import { clearTripSync, flushTripPoints, getTripRates, injectSessionId, queueTripPoint, savePendingCompletion, savePendingStatus, clearPendingStatus, syncPendingStatus, startTripSync, syncPendingCompletion } from "../services/tripSync";
 
 const BASE_FARE = 290;
 
@@ -1020,6 +1020,9 @@ export default function MainScreen() {
     const body: any = { status };
 
     if (status === "in_progress") {
+      // Server confirmed in_progress — clear any pending status saved during offline start
+      void clearPendingStatus();
+
       playAppSound('welcome');
       startTrip();
 
@@ -1159,6 +1162,22 @@ export default function MainScreen() {
             loadDashboard(); // Server now shows order as completed — safe to refresh
           }
         }, 30000);
+      } else if (status === "arrived" || status === "in_progress") {
+        // ── Offline status update ───────────────────────────────────────────────
+        // Network failed but driver must NOT be stuck.
+        // 1. Optimistic local update — UI advances to correct screen.
+        // 2. For in_progress: GPS task checks status === "in_progress"; without
+        //    this update the task would NOT accumulate distance (290₸ bug).
+        // 3. Retry in background every 15s until server confirms.
+        // 4. Server now accepts arrived→completed so even if in_progress never
+        //    syncs, the completion PATCH will succeed.
+        setActiveOrder({ ...activeOrder, status });
+        await savePendingStatus({ orderId: activeOrder.id, status: status as "arrived" | "in_progress", savedAt: Date.now() });
+        const statusRetryInterval = setInterval(async () => {
+          const ok = await syncPendingStatus();
+          if (ok) clearInterval(statusRetryInterval);
+        }, 15000);
+        // Don't show an error — driver continues the trip normally
       } else {
         Alert.alert("Ошибка", res.error);
       }
@@ -1707,7 +1726,7 @@ export default function MainScreen() {
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <Text style={styles.statLabel}>Баланс</Text>
-            <Text style={styles.statValue}>{Number(profile.balance).toLocaleString()} ₸</Text>
+            <Text style={styles.statValue}>{Number(profile.balance).toLocaleString()}₸</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statLabel}>Рейтинг</Text>
@@ -1717,6 +1736,19 @@ export default function MainScreen() {
             <Text style={styles.statLabel}>Заказов</Text>
             <Text style={styles.statValue}>{Number(profile.ordersCount || 0)}</Text>
           </View>
+          {isOnline && profile?.status === "free" && (
+            <TouchableOpacity
+              style={[styles.statCard, styles.curbsideStatCard]}
+              onLongPress={() => { Vibration.vibrate(80); handleCurbsideOrder(); }}
+              delayLongPress={1200}
+              disabled={loading}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="car-sport" size={20} color="#000" />
+              <Text style={styles.curbsideStatLabel}>Бордюр</Text>
+              <Text style={styles.curbsideStatHint}>удерж.</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Карта — занимает всё свободное пространство */}
@@ -1738,18 +1770,6 @@ export default function MainScreen() {
           </View>
         </View>
 
-        {/* Кнопка бордюра — отдельной строкой под картой */}
-        {isOnline && profile?.status === "free" && (
-          <TouchableOpacity
-            style={styles.curbsideButton}
-            onPress={handleCurbsideOrder}
-            disabled={loading}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="car-sport" size={24} color="#000" />
-            <Text style={styles.curbsideButtonText}>Пассажир с бордюра</Text>
-          </TouchableOpacity>
-        )}
 
         <View style={styles.homeSwipeContainer}>
           <SwipeButton
@@ -2041,7 +2061,7 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: "row", gap: 8, marginBottom: 14 },
   statCard: { flex: 1, backgroundColor: "#161616", borderRadius: 14, padding: 12, alignItems: "center", borderWidth: 1, borderColor: "#222" },
   statLabel: { color: "#555", fontSize: 11, marginBottom: 4, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.5 },
-  statValue: { color: "#fff", fontSize: 18, fontWeight: "800" },
+  statValue: { color: "#fff", fontSize: 15, fontWeight: "800" },
 
   // ─── (GPS status card replaced by map) ───────────────────
 
@@ -2078,27 +2098,25 @@ const styles = StyleSheet.create({
 
   // ─── (Status center replaced by map overlay) ─────────────
   orderActions: { position: "absolute", bottom: Platform.OS === "ios" ? 110 : 22, left: 16, right: 16 },
-  curbsideButton: {
+  curbsideStatCard: {
     backgroundColor: "#FFD000",
-    borderRadius: 16,
-    paddingVertical: 16,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 12,
-    marginTop: 10,
-    shadowColor: "#FFD000",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 6,
+    borderColor: "#FFD000",
+    gap: 2,
+    minWidth: 62,
   },
-  curbsideButtonText: {
+  curbsideStatLabel: {
     color: "#000",
-    fontSize: 18,
-    fontWeight: "900",
+    fontSize: 11,
+    fontWeight: "800",
     textTransform: "uppercase",
     letterSpacing: 0.5,
+  },
+  curbsideStatHint: {
+    color: "rgba(0,0,0,0.45)",
+    fontSize: 9,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
   },
   homeSwipeContainer: { position: "absolute", bottom: Platform.OS === "ios" ? 100 : 22, left: 16, right: 16 },
   statusActions: { gap: 12, marginBottom: 16 },
