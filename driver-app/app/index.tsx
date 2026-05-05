@@ -31,6 +31,7 @@ import { SwipeButton } from "../components/SwipeButton";
 import { YandexMapView, type YandexMapViewHandle } from "../components/YandexMapView";
 import { mapOrderToActiveOrder } from "../lib/orderPricing";
 import { clearTripSync, flushTripPoints, getTripRates, injectSessionId, queueTripPoint, savePendingCompletion, savePendingStatus, clearPendingStatus, syncPendingStatus, startTripSync, syncPendingCompletion } from "../services/tripSync";
+import { processGpsPoint, resetOdometer } from "../services/gpsOdometer";
 
 const BASE_FARE = 290;
 
@@ -128,41 +129,39 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
 
       const state = useDriverStore.getState();
 
-      if (state.activeOrder?.status === "in_progress" && state.lastLocation && !state.activeOrder.isFixedPrice) {
-        const d = haversine(state.lastLocation.lat, state.lastLocation.lng, lat, lng);
+      if (state.activeOrder?.status === "in_progress" && !state.activeOrder.isFixedPrice) {
+        // ── Smart GPS Odometer (Kalman filtered) ─────────────────────────────
+        // Replaces raw Haversine — fixes drift, GPS teleports, bad-accuracy
+        // points, and time gaps that caused the 290₸ bug in rural areas.
+        const accuracyM = typeof loc.coords.accuracy === "number" && Number.isFinite(loc.coords.accuracy)
+          ? loc.coords.accuracy : null;
+        const speedMs = typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed)
+          ? loc.coords.speed : null;
 
-        // ✅ threshold = 10m to match backend tripDistance.ts (segKm < 0.010)
-        if (d > 0.010 && d < 0.5) {
-          const speedMs = typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed)
-            ? loc.coords.speed : null;
-          const isStationary = speedMs !== null && speedMs < 1.0 && d < 0.015;
+        const d = processGpsPoint(lat, lng, accuracyM, speedMs, loc.timestamp);
 
-          if (!isStationary) {
-            const newDist = state.tripDistance + d;
-            const cityRate = state.tripCityRatePerKm || Number(state.activeOrder.pricePerKm) || 80;
+        if (d > 0) {
+          const newDist = state.tripDistance + d;
+          const cityRate = state.tripCityRatePerKm || Number(state.activeOrder.pricePerKm) || 80;
 
-            // ── Component-based pricing (matches server tripDistance.ts formula exactly) ───
-            // Accumulate out-of-city km while in out-of-city zone
-            const updatedOutKm = state.isOutOfCity
-              ? state.outOfCityAccumulatedKm + d
-              : state.outOfCityAccumulatedKm;
+          // Accumulate out-of-city km while in out-of-city zone
+          const updatedOutKm = state.isOutOfCity
+            ? state.outOfCityAccumulatedKm + d
+            : state.outOfCityAccumulatedKm;
 
-            const cityKm = Math.max(0, newDist - updatedOutKm);
-            const outRate = state.outOfCityRatePerKm || cityRate;
-            const baseFare = state.tripBaseFare || resolveBaseFare(
-              state.activeOrder?.class,
-              state.profile?.vehicle?.classes
-            );
-            // outOfCityTimeFee (+25₸/мин) is tracked separately by the real-time timer
-            const newPrice = roundTo5(baseFare + cityKm * cityRate + updatedOutKm * outRate);
+          const cityKm = Math.max(0, newDist - updatedOutKm);
+          const outRate = state.outOfCityRatePerKm || cityRate;
+          const baseFare = state.tripBaseFare || resolveBaseFare(
+            state.activeOrder?.class,
+            state.profile?.vehicle?.classes
+          );
+          const newPrice = roundTo5(baseFare + cityKm * cityRate + updatedOutKm * outRate);
 
-            // Atomic update: distance + price + out-of-city km in one setState call
-            useDriverStore.setState({
-              tripDistance: newDist,
-              tripPrice: newPrice,
-              outOfCityAccumulatedKm: updatedOutKm,
-            });
-          }
+          useDriverStore.setState({
+            tripDistance: newDist,
+            tripPrice: newPrice,
+            outOfCityAccumulatedKm: updatedOutKm,
+          });
         }
 
         // ── Client-side zone detection ────────────────────────────────────────
@@ -692,6 +691,10 @@ export default function MainScreen() {
     if (!activeOrder || activeOrder.status !== "in_progress" || activeOrder.isFixedPrice) {
       return;
     }
+
+    // Reset smart odometer at the start of each new trip so Kalman state
+    // from a previous trip doesn't bleed into the new one.
+    resetOdometer();
 
     void startTripSync(activeOrder.id).then(() => flushTripPoints(activeOrder.id));
   }, [activeOrder]);
