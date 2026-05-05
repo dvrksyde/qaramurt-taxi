@@ -33,6 +33,8 @@ export type OSMMapViewHandle = {
   centerOnMe: () => void;
   buildRoute: (from: Point, to: Point, fitBounds?: boolean) => void;
   clearRoute: () => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
   /** Pre-download OSM tiles for a radius around a point. Max zoom 15. */
   preloadArea: (lat: number, lng: number, radiusKm?: number) => void;
 };
@@ -108,11 +110,14 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
     postMsg({ type: "clearRoute" });
   }, [postMsg]);
 
+  const zoomIn = useCallback(() => postMsg({ type: 'zoomIn' }), [postMsg]);
+  const zoomOut = useCallback(() => postMsg({ type: 'zoomOut' }), [postMsg]);
+
   const preloadArea = useCallback((lat: number, lng: number, radiusKm = 20) => {
     postMsg({ type: "preloadArea", lat, lng, radiusKm, maxZoom: 15 });
   }, [postMsg]);
 
-  useImperativeHandle(ref, () => ({ centerOnMe, buildRoute, clearRoute, preloadArea }));
+  useImperativeHandle(ref, () => ({ centerOnMe, buildRoute, clearRoute, zoomIn, zoomOut, preloadArea }));
 
   // ── Driver position updates (no WebView re-render) ────────────────────────
 
@@ -211,6 +216,11 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
   }
 
   async function preloadArea(centerLat, centerLng, radiusKm, maxZoom) {
+    // Guard: Cache API not available in very old WebViews
+    if (!('caches' in window)) {
+      log('Cache API not supported — offline tiles unavailable');
+      return;
+    }
     var latD = radiusKm / 111;
     var lngD = radiusKm / (111 * Math.cos(centerLat * Math.PI / 180));
     var minLat = centerLat - latD, maxLat = centerLat + latD;
@@ -344,6 +354,10 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
       if (data.type === 'centerOnDriver' && driverMarker) {
         map.flyTo({ center: driverMarker.getLngLat(), zoom: 16, duration: 600 });
       }
+
+      // zoom
+      if (data.type === 'zoomIn')  map.zoomIn();
+      if (data.type === 'zoomOut') map.zoomOut();
 
       // buildRoute via OSRM
       if (data.type === 'buildRoute') {

@@ -1779,7 +1779,13 @@ export default function MainScreen() {
         )}
 
         {/* ── Map controls — right side ────────────────────────────── */}
-        <View style={[styles.floatingMapControls, { bottom: insets.bottom + 100 }]}>
+        <View style={[styles.floatingMapControls, { bottom: insets.bottom + 130 }]}>
+          <TouchableOpacity style={styles.floatingMapBtn} onPress={() => mapRef.current?.zoomIn()}>
+            <Ionicons name="add" size={22} color="#333" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.floatingMapBtn} onPress={() => mapRef.current?.zoomOut()}>
+            <Ionicons name="remove" size={22} color="#333" />
+          </TouchableOpacity>
           <TouchableOpacity style={styles.floatingMapBtn} onPress={() => mapRef.current?.centerOnMe()}>
             <Ionicons name="locate" size={20} color="#333" />
           </TouchableOpacity>
@@ -1787,7 +1793,7 @@ export default function MainScreen() {
 
         {/* ── Menu button — bottom left ────────────────────────────── */}
         <TouchableOpacity
-          style={[styles.floatingMenuBtn, { bottom: insets.bottom + 100 }]}
+          style={[styles.floatingMenuBtn, { bottom: insets.bottom + 130 }]}
           onPress={() => setMenuOpen(true)}
           activeOpacity={0.85}
         >
@@ -1813,7 +1819,7 @@ export default function MainScreen() {
           <View style={styles.menuOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setMenuOpen(false)} />
             <View style={[styles.menuPanel, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-              <Text style={styles.menuTitle}>{profile.lastName} {profile.firstName}</Text>
+              <Text style={styles.menuTitle}>{profile.lastName || profile.firstName || 'Водитель'} {profile.lastName ? profile.firstName ?? '' : ''}</Text>
               <Text style={styles.menuSub}>{lvlEmoji} {({ gold: 'Золото', silver: 'Серебро', bronze: 'Бронза', blocked: 'Заблокирован' } as any)[profile.level] ?? 'Бронза'}</Text>
               <View style={styles.menuDivider} />
               {[
