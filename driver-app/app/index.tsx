@@ -853,6 +853,13 @@ export default function MainScreen() {
 
     if (newIsOnline && profile) {
       startSocketAndGPS(profile.id);
+      // Phase 4: Pre-cache OSM tiles for the driver's area silently in background
+      if (currentCoords) {
+        // Small delay so map WebView is ready
+        setTimeout(() => {
+          mapRef.current?.preloadArea(currentCoords.latitude, currentCoords.longitude, 20);
+        }, 3000);
+      }
     } else {
       stopLocationTracking();
       disconnectSocket();

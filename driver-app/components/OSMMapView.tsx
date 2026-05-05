@@ -25,15 +25,18 @@ interface Props {
   autoFollow?: boolean;
   zoom?: number;
   showCenterButton?: boolean;
+  /** Called with {downloaded, total} during preloadArea */
+  onTileProgress?: (downloaded: number, total: number) => void;
 }
 
 export type OSMMapViewHandle = {
   centerOnMe: () => void;
   buildRoute: (from: Point, to: Point, fitBounds?: boolean) => void;
   clearRoute: () => void;
+  /** Pre-download OSM tiles for a radius around a point. Max zoom 15. */
+  preloadArea: (lat: number, lng: number, radiusKm?: number) => void;
 };
 
-// Keep backward-compatible alias so existing imports work without changes
 export type YandexMapViewHandle = OSMMapViewHandle;
 
 // ─── SVG car icon (same as before) ───────────────────────────────────────────
@@ -60,6 +63,7 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
     autoFollow = false,
     zoom = 15,
     showCenterButton = true,
+    onTileProgress,
   },
   ref
 ) => {
@@ -104,7 +108,11 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
     postMsg({ type: "clearRoute" });
   }, [postMsg]);
 
-  useImperativeHandle(ref, () => ({ centerOnMe, buildRoute, clearRoute }));
+  const preloadArea = useCallback((lat: number, lng: number, radiusKm = 20) => {
+    postMsg({ type: "preloadArea", lat, lng, radiusKm, maxZoom: 15 });
+  }, [postMsg]);
+
+  useImperativeHandle(ref, () => ({ centerOnMe, buildRoute, clearRoute, preloadArea }));
 
   // ── Driver position updates (no WebView re-render) ────────────────────────
 
@@ -119,7 +127,7 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
     });
   }, [userLocation, userHeading, autoFollow, postMsg]);
 
-  // ── Static HTML — MapLibre GL + OSM tiles + OSRM routing ─────────────────
+  // ── Static HTML ─────────────────────────────────────────────────────────────
 
   const html = useMemo(() => {
     const initCenter = initialCenterRef.current!;
@@ -163,7 +171,86 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'log', message: msg }));
     }
   }
+  function send(obj) {
+    if (window.ReactNativeWebView) {
+      window.ReactNativeWebView.postMessage(JSON.stringify(obj));
+    }
+  }
   window.onerror = function(msg, src, line) { log('JS Error [' + line + ']: ' + msg); };
+
+  // ── Tile cache via Cache API ────────────────────────────────────────────────
+  var TILE_CACHE = 'qaramurt-osm-v1';
+
+  // Register a custom cached:// protocol that serves tiles cache-first
+  maplibregl.addProtocol('cached', function(params, callback) {
+    var url = params.url.replace('cached://', 'https://');
+    caches.open(TILE_CACHE).then(function(cache) {
+      cache.match(url).then(function(cached) {
+        if (cached) {
+          cached.arrayBuffer().then(function(buf) { callback(null, buf, null, null); });
+        } else {
+          fetch(url)
+            .then(function(resp) {
+              if (!resp.ok) { callback(new Error('HTTP ' + resp.status)); return; }
+              var clone = resp.clone();
+              cache.put(url, clone);
+              resp.arrayBuffer().then(function(buf) { callback(null, buf, null, null); });
+            })
+            .catch(function(e) { callback(new Error('Offline: ' + e)); });
+        }
+      });
+    }).catch(function(e) { callback(new Error('Cache error: ' + e)); });
+    return { cancel: function() {} };
+  });
+
+  // ── Tile pre-download ───────────────────────────────────────────────────────
+  function lngToX(lng, z) { return Math.floor((lng + 180) / 360 * Math.pow(2, z)); }
+  function latToY(lat, z) {
+    var r = lat * Math.PI / 180;
+    return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * Math.pow(2, z));
+  }
+
+  async function preloadArea(centerLat, centerLng, radiusKm, maxZoom) {
+    var latD = radiusKm / 111;
+    var lngD = radiusKm / (111 * Math.cos(centerLat * Math.PI / 180));
+    var minLat = centerLat - latD, maxLat = centerLat + latD;
+    var minLng = centerLng - lngD, maxLng = centerLng + lngD;
+
+    var urls = [];
+    for (var z = 10; z <= maxZoom; z++) {
+      var xMin = lngToX(minLng, z), xMax = lngToX(maxLng, z);
+      var yMin = latToY(maxLat, z),  yMax = latToY(minLat, z);
+      for (var x = xMin; x <= xMax; x++) {
+        for (var y = yMin; y <= yMax; y++) {
+          urls.push('https://tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png');
+        }
+      }
+    }
+
+    var total = urls.length;
+    var done = 0;
+    send({ type: 'tile_progress', downloaded: 0, total: total });
+
+    var cache = await caches.open(TILE_CACHE);
+    var BATCH = 6;
+    for (var i = 0; i < urls.length; i += BATCH) {
+      var batch = urls.slice(i, i + BATCH);
+      await Promise.all(batch.map(async function(url) {
+        try {
+          if (!(await cache.match(url))) {
+            var r = await fetch(url);
+            if (r.ok) await cache.put(url, r);
+          }
+        } catch(e) {}
+        done++;
+        if (done % 30 === 0 || done === total) {
+          send({ type: 'tile_progress', downloaded: done, total: total });
+        }
+      }));
+    }
+    send({ type: 'tile_done', downloaded: done, total: total });
+    log('Preload done: ' + done + '/' + total);
+  }
 
   // ── Bearing helper ──────────────────────────────────────────────────────────
   function bearing(lat1, lng1, lat2, lng2) {
@@ -174,7 +261,7 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
     return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
   }
 
-  // ── Map init ────────────────────────────────────────────────────────────────
+  // ── Map init — uses cached:// protocol ─────────────────────────────────────
   var map = new maplibregl.Map({
     container: 'map',
     style: {
@@ -182,9 +269,9 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
       sources: {
         osm: {
           type: 'raster',
-          tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+          tiles: ['cached://tile.openstreetmap.org/{z}/{x}/{y}.png'],
           tileSize: 256,
-          attribution: 'OpenStreetMap contributors'
+          attribution: 'OpenStreetMap'
         }
       },
       layers: [{ id: 'osm-layer', type: 'raster', source: 'osm', minzoom: 0, maxzoom: 19 }]
@@ -289,6 +376,11 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
           .catch(function(e) { log('OSRM error: ' + e); });
       }
 
+      // preloadArea
+      if (data.type === 'preloadArea') {
+        preloadArea(data.lat, data.lng, data.radiusKm || 20, data.maxZoom || 15);
+      }
+
       // clearRoute
       if (data.type === 'clearRoute') {
         if (map.getSource('route')) {
@@ -326,8 +418,11 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
         onMessage={(event) => {
           try {
             const data = JSON.parse(event.nativeEvent.data);
-            if (data.type === "log") {
-              console.log("[OSMMap]", data.message);
+            if (data.type === 'log') {
+              console.log('[OSMMap]', data.message);
+            } else if (data.type === 'tile_progress' || data.type === 'tile_done') {
+              onTileProgress?.(data.downloaded, data.total);
+              console.log(`[OSMMap tiles] ${data.downloaded}/${data.total}`);
             }
           } catch (_) {}
         }}
