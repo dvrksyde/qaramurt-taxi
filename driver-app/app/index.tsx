@@ -1477,127 +1477,25 @@ export default function MainScreen() {
       const isInProgress = activeOrder.status === "in_progress";
       const isPaused = isInProgress && !!activeOrder.isWaiting;
 
-      // ── Адресный блок (адрес, телефон, опции, навигатор + кнопка паузы) ───
-      const addressBlock = (
-        <View style={[styles.addressStrip, { flexDirection: "row", alignItems: "flex-start" }]}>
-          {/* Левая часть: весь контент */}
-          <View style={{ flex: 1, gap: 10 }}>
-            <View style={styles.addressLine}>
-              <Ionicons name="location" size={16} color="#FFD000" />
-              <Text style={styles.addressLineText} numberOfLines={1}>
-                {activeOrder.pickupAddress || "Адрес не указан"}
-              </Text>
-            </View>
-            {activeOrder.isFixedPrice && activeOrder.dropoffAddress && (
-              <View style={styles.addressLine}>
-                <Ionicons name="flag" size={16} color="#2196F3" />
-                <Text style={styles.addressLineText} numberOfLines={1}>
-                  {activeOrder.dropoffAddress}
-                </Text>
-              </View>
-            )}
-            <TouchableOpacity style={styles.addressLine} onPress={callClient} activeOpacity={0.7}>
-              <Ionicons name="call" size={16} color="#FFD000" />
-              <Text style={[styles.phoneText, { color: "#FFD000", textDecorationLine: "underline" }]}>
-                {activeOrder.phone}
-              </Text>
-            </TouchableOpacity>
+      return (
+        <View style={{ flex: 1 }}>
+          {/* ── 1. Full-screen Map ──────────────────────────────────────── */}
+          <YandexMapView
+            ref={mapRef}
+            userLocation={currentCoords}
+            userHeading={currentHeading}
+            pickupLocation={parseWktPoint(activeOrder.pickupPoint)}
+            dropoffLocation={parseWktPoint(activeOrder.dropoffPoint)}
+            autoFollow={activeOrder.status === "in_progress"}
+            zoom={15}
+            showCenterButton={false}
+          />
 
-            {activeOrder.status === "arrived" && waitingElapsed > 0 && (
-              <View style={styles.addressLine}>
-                <Ionicons name="time-outline" size={15} color={waitingElapsed > 180 ? "#ef4444" : "#888"} />
-                <Text style={{ fontSize: 13, color: waitingElapsed > 180 ? "#ef4444" : "#aaa", fontWeight: "600" }}>
-                  {waitingElapsed > 180
-                    ? `Платное: ${Math.floor((waitingElapsed - 180) / 60) * 20} ₸ (${Math.floor(waitingElapsed / 60)} мин)`
-                    : `Ожидание: ${Math.floor(waitingElapsed / 60)}:${(waitingElapsed % 60).toString().padStart(2, "0")} (Беспл.)`}
-                </Text>
-              </View>
-            )}
-
-            {Array.isArray(activeOrder.options) && activeOrder.options.length > 0 && (
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginLeft: 22 }}>
-                {activeOrder.options.map((opt: any) => {
-                  const key = typeof opt === "string" ? opt : opt.key;
-                  const label = opt.label || (key === "luggage" ? "Багаж" : key === "roof_luggage" ? "Верх. Багаж" : key === "conditioner" ? "Кондиционер" : "Опция");
-                  const price = opt.price || (key === "luggage" ? 100 : key === "roof_luggage" ? 200 : key === "conditioner" ? 100 : 0);
-                  return (
-                    <View key={key} style={{ backgroundColor: "#1e293b", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: "row", alignItems: "center", gap: 4 }}>
-                      <Ionicons name={key === "luggage" ? "briefcase" : key === "roof_luggage" ? "cube" : key === "conditioner" ? "snow" : "apps-outline"} size={12} color={key === "conditioner" ? "#4ade80" : "#fff"} />
-                      <Text style={{ fontSize: 10, color: key === "conditioner" ? "#4ade80" : "#fff", fontWeight: "bold" }}>{label} (+{price})</Text>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-
-            <TouchableOpacity style={styles.navBtn} onPress={openNavigator} activeOpacity={0.85}>
-              <Ionicons name="navigate" size={18} color="#000" />
-              <Text style={styles.navBtnText}>
-                {activeOrder.status === "assigned" ? "Открыть навигатор → К клиенту" : "Открыть навигатор → К назначению"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Правая часть: кнопка паузы (только во время поездки, не на паузе) */}
-          {isInProgress && !isPaused && (
+          {/* ── 2. Top Header (Floating, transparent dark) ──────────────── */}
+          {isPaused ? (
+            // Баннер паузы
             <TouchableOpacity
-              style={styles.pauseBtn}
-              onPress={() => toggleTripWaiting("start")}
-              disabled={loading}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="pause" size={24} color="#FFD000" />
-            </TouchableOpacity>
-          )}
-        </View>
-      );
-
-      // ── Счётчик (км / мин / цена) ──────────────────────────────────────────
-      const meterBlock = isInProgress ? (
-        <View style={styles.meterStrip}>
-          {activeOrder.isFixedPrice ? (
-            <>
-              <Text style={styles.meterStripLabel}>Фикс. цена</Text>
-              <Text style={styles.meterStripPrice}>{displayedTripPrice} ₸</Text>
-            </>
-          ) : (
-            <>
-              <View style={styles.meterStripItem}>
-                <Ionicons name="speedometer-outline" size={14} color="#888" />
-                <Text style={styles.meterStripValue}>{tripDistance.toFixed(1)} км</Text>
-              </View>
-              <View style={styles.meterStripItem}>
-                <Ionicons name="time-outline" size={14} color="#888" />
-                <Text style={styles.meterStripValue}>{tripElapsed} мин</Text>
-              </View>
-              <Text style={styles.meterStripPrice}>{displayedTripPrice}₸</Text>
-            </>
-          )}
-        </View>
-      ) : null;
-
-      // ── Кнопка действия ───────────────────────────────────────────────────
-      const actionButton = (
-        <View style={styles.orderActions}>
-          {activeOrder.status === "assigned" && (
-            <SwipeButton title="Я на месте" onSwipeComplete={() => updateOrderStatus("arrived")} color="#FFD000" iconName="navigate" disabled={loading} />
-          )}
-          {activeOrder.status === "arrived" && (
-            <SwipeButton title="Клиент сел — поехали" onSwipeComplete={() => updateOrderStatus("in_progress")} color="#FFD000" iconName="car" disabled={loading} />
-          )}
-          {isInProgress && (
-            <SwipeButton title="Завершить поездку" onSwipeComplete={() => updateOrderStatus("completed")} color="#FFD000" iconName="checkmark-circle" disabled={loading} />
-          )}
-        </View>
-      );
-
-      // ── ПАУЗА активна: баннер выходит наверх ──────────────────────────────
-      if (isPaused) {
-        return (
-          <View style={styles.pageBlock}>
-            {/* Баннер паузы — вверху экрана */}
-            <TouchableOpacity
-              style={styles.pauseBanner}
+              style={[styles.floatingPauseBanner, { top: insets.top + 10 }]}
               onPress={() => toggleTripWaiting("stop")}
               activeOpacity={0.85}
               disabled={loading}
@@ -1614,78 +1512,49 @@ export default function MainScreen() {
               </View>
               <View style={styles.pauseResumeBtn}>
                 <Ionicons name="play" size={20} color="#000" />
-                <Text style={styles.pauseResumeBtnText}>Продолжить</Text>
+                <Text style={styles.pauseResumeBtnText}>Снять</Text>
               </View>
             </TouchableOpacity>
+          ) : (
+            // Стандартный хедер активного заказа
+            <View style={[styles.floatingOrderHeader, { top: insets.top + 10 }]}>
+              <View style={styles.floatingOrderHeaderLeft}>
+                <Text style={styles.floatingOrderHeaderTitle}>Заказ №{activeOrder.id}</Text>
+                
+                <TouchableOpacity
+                  style={styles.gpsBadgeSmall}
+                  onPress={refreshCurrentPosition}
+                  disabled={refreshingGPS}
+                >
+                  {refreshingGPS
+                    ? <ActivityIndicator size={10} color="#fff" />
+                    : <Ionicons name="locate" size={10} color="#fff" />}
+                  <Text style={styles.gpsBadgeSmallText}>GPS</Text>
+                </TouchableOpacity>
+              </View>
 
-            {/* Адрес, телефон, навигатор */}
-            {addressBlock}
+              <TouchableOpacity
+                style={styles.floatingOrderMenuBtn}
+                onPress={() => Alert.alert("Действия", "", [
+                  {
+                    text: "Отменить заказ",
+                    style: "destructive",
+                    onPress: () => Alert.alert("Отменить заказ?", "Это действие нельзя отменить", [
+                      { text: "Нет", style: "cancel" },
+                      { text: "Да, отменить", style: "destructive", onPress: () => updateOrderStatus("canceled") },
+                    ]),
+                  },
+                  { text: "Закрыть", style: "cancel" },
+                ])}
+              >
+                <Ionicons name="ellipsis-vertical" size={18} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          )}
 
-            {/* Счётчик */}
-            {meterBlock}
-
-            {/* Завершить */}
-            {actionButton}
-          </View>
-        );
-      }
-
-      // ── Обычный режим (assigned / arrived / in_progress без паузы) ────────
-      return (
-        <View style={styles.pageBlock}>
-          {/* Шапка: номер заказа + GPS + меню */}
-          <View style={styles.orderHeader}>
-            <Text style={styles.orderHeaderTitle}>Заказ №{activeOrder.id}</Text>
-
-            <TouchableOpacity
-              style={[styles.gpsBadge, { marginRight: 8 }]}
-              onPress={refreshCurrentPosition}
-              disabled={refreshingGPS}
-            >
-              {refreshingGPS
-                ? <ActivityIndicator size={10} color="#fff" style={{ marginRight: 4 }} />
-                : <Ionicons name="locate" size={12} color="#fff" />}
-              <Text style={[styles.gpsBadgeText, { fontSize: 10 }]}>
-                {refreshingGPS ? "Обновление..." : "GPS"}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.menuBtn}
-              onPress={() => Alert.alert("Действия", "", [
-                {
-                  text: "Отменить заказ",
-                  style: "destructive",
-                  onPress: () => Alert.alert("Отменить заказ?", "Это действие нельзя отменить", [
-                    { text: "Нет", style: "cancel" },
-                    { text: "Да, отменить", style: "destructive", onPress: () => updateOrderStatus("canceled") },
-                  ]),
-                },
-                { text: "Закрыть", style: "cancel" },
-              ])}
-            >
-              <Ionicons name="ellipsis-vertical" size={20} color="#888" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Адрес, телефон, навигатор + кнопка паузы */}
-          {addressBlock}
-
-          {/* Карта — занимает всё свободное пространство */}
-          <View style={styles.mapContainer}>
-            <YandexMapView
-              ref={mapRef}
-              userLocation={currentCoords}
-              userHeading={currentHeading}
-              pickupLocation={parseWktPoint(activeOrder.pickupPoint)}
-              dropoffLocation={parseWktPoint(activeOrder.dropoffPoint)}
-              autoFollow={activeOrder.status === "in_progress"}
-              zoom={15}
-              showCenterButton
-            />
-
-            {/* Статус поверх карты */}
-            <View style={styles.mapStatusOverlay}>
+          {/* ── Status pill ─────────────────────────────────────────────── */}
+          {!isPaused && (
+            <View style={[styles.floatingMapStatusOverlay, { top: insets.top + 60 }]}>
               <Ionicons
                 name={activeOrder.status === "assigned" ? "paper-plane" : activeOrder.status === "arrived" ? "body" : "car-sport"}
                 size={14}
@@ -1693,35 +1562,147 @@ export default function MainScreen() {
               />
               <Text style={styles.mapStatusText}>
                 {activeOrder.status === "assigned"
-                  ? "Подача автомобиля..."
+                  ? "Подача..."
                   : activeOrder.status === "arrived"
-                    ? "Ожидание клиента"
+                    ? "Ожидание"
                     : "В пути..."}
               </Text>
             </View>
+          )}
 
-            {/* Способ оплаты */}
-            <View style={styles.mapPaymentOverlay}>
+          {/* ── Payment pill ────────────────────────────────────────────── */}
+          {!isPaused && (
+            <View style={[styles.floatingMapPaymentOverlay, { top: insets.top + 60 }]} >
               <Ionicons name="cash-outline" size={12} color="#22c55e" />
               <Text style={styles.mapPaymentText}>Наличными</Text>
             </View>
+          )}
 
-            {/* Накопленное ожидание при поездке */}
-            {!activeOrder.isWaiting && tripWaitingElapsed > 0 && (
-              <View style={styles.mapWaitingOverlay}>
+          {/* ── Накопленное ожидание (если есть) ────────────────────────── */}
+          {!isPaused && !activeOrder.isWaiting && tripWaitingElapsed > 0 && (
+             <View style={[styles.floatingMapWaitingOverlay, { top: insets.top + 94 }]} >
                 <Ionicons name="time-outline" size={12} color="#e0c84a" />
-                <Text style={styles.mapWaitingText}>
-                  +{tripWaitingFee} ₸
-                </Text>
-              </View>
-            )}
+                <Text style={styles.mapWaitingText}>+{tripWaitingFee} ₸</Text>
+             </View>
+          )}
+
+          {/* ── Map controls — right side ───────────────────────────────── */}
+          <View style={[styles.floatingMapControls, { bottom: Math.max(insets.bottom, 10) + 240 }]}>
+            <TouchableOpacity style={styles.floatingMapBtn} onPress={() => mapRef.current?.zoomIn()}>
+              <Ionicons name="add" size={22} color="#333" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.floatingMapBtn} onPress={() => mapRef.current?.zoomOut()}>
+              <Ionicons name="remove" size={22} color="#333" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.floatingMapBtn} onPress={() => mapRef.current?.centerOnMe()}>
+              <Ionicons name="locate" size={20} color="#333" />
+            </TouchableOpacity>
           </View>
 
-          {/* Счётчик */}
-          {meterBlock}
+          {/* ── Bottom Sheet Card ───────────────────────────────────────── */}
+          <View style={[styles.bottomSheetCard, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+            <View style={styles.bottomSheetHeader}>
+              <View style={styles.bottomSheetAddressBlock}>
+                {/* Откуда */}
+                <View style={styles.bottomSheetAddressLine}>
+                  <View style={[styles.dotLine, { backgroundColor: '#22c55e' }]} />
+                  <Text style={styles.bottomSheetAddressText} numberOfLines={1}>
+                    {activeOrder.pickupAddress || "Адрес не указан"}
+                  </Text>
+                </View>
+                
+                {/* Куда */}
+                {activeOrder.isFixedPrice && activeOrder.dropoffAddress && (
+                  <View style={styles.bottomSheetAddressLine}>
+                    <View style={[styles.dotLine, { backgroundColor: '#3b82f6' }]} />
+                    <Text style={styles.bottomSheetAddressText} numberOfLines={1}>
+                      {activeOrder.dropoffAddress}
+                    </Text>
+                  </View>
+                )}
 
-          {/* Кнопка действия */}
-          {actionButton}
+                {/* Ожидание (клиент думает) */}
+                {activeOrder.status === "arrived" && waitingElapsed > 0 && (
+                  <Text style={{ fontSize: 13, color: waitingElapsed > 180 ? "#ef4444" : "#888", marginTop: 4, marginLeft: 20 }}>
+                    {waitingElapsed > 180
+                      ? `Платное: ${Math.floor((waitingElapsed - 180) / 60) * 20} ₸ (${Math.floor(waitingElapsed / 60)} мин)`
+                      : `Ожидание: ${Math.floor(waitingElapsed / 60)}:${(waitingElapsed % 60).toString().padStart(2, "0")} (Беспл.)`}
+                  </Text>
+                )}
+              </View>
+
+              {/* Кнопки Навигатор и Телефон */}
+              <View style={styles.bottomSheetActionsRow}>
+                <TouchableOpacity style={[styles.bottomSheetCircleBtn, { backgroundColor: '#f1f5f9' }]} onPress={callClient}>
+                  <Ionicons name="call" size={20} color="#333" />
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.bottomSheetCircleBtn, { backgroundColor: '#333' }]} onPress={openNavigator}>
+                  <Ionicons name="navigate" size={20} color="#FFD000" />
+                </TouchableOpacity>
+                
+                {/* Кнопка Паузы (только во время поездки) */}
+                {isInProgress && !isPaused && (
+                  <TouchableOpacity style={[styles.bottomSheetCircleBtn, { backgroundColor: '#FFD000' }]} onPress={() => toggleTripWaiting("start")}>
+                    <Ionicons name="pause" size={20} color="#000" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            {/* Опции */}
+            {Array.isArray(activeOrder.options) && activeOrder.options.length > 0 && (
+              <View style={styles.bottomSheetOptions}>
+                {activeOrder.options.map((opt: any) => {
+                  const key = typeof opt === "string" ? opt : opt.key;
+                  const label = opt.label || (key === "luggage" ? "Багаж" : key === "roof_luggage" ? "Верх. Багаж" : key === "conditioner" ? "Кондиционер" : "Опция");
+                  const price = opt.price || (key === "luggage" ? 100 : key === "roof_luggage" ? 200 : key === "conditioner" ? 100 : 0);
+                  return (
+                    <View key={key} style={styles.optionTag}>
+                      <Ionicons name={key === "luggage" ? "briefcase" : key === "roof_luggage" ? "cube" : key === "conditioner" ? "snow" : "apps-outline"} size={10} color="#fff" />
+                      <Text style={styles.optionTagText}>{label} (+{price})</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* Метрика / Цена */}
+            {isInProgress && (
+              <View style={styles.bottomSheetMeter}>
+                {activeOrder.isFixedPrice ? (
+                  <>
+                    <Text style={styles.meterStripLabel}>Фиксированная цена</Text>
+                    <Text style={styles.meterStripPrice}>{displayedTripPrice} ₸</Text>
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.meterStripItem}>
+                      <Ionicons name="speedometer-outline" size={16} color="#888" />
+                      <Text style={styles.meterStripValue}>{tripDistance.toFixed(1)} км</Text>
+                    </View>
+                    <View style={styles.meterStripItem}>
+                      <Ionicons name="time-outline" size={16} color="#888" />
+                      <Text style={styles.meterStripValue}>{tripElapsed} мин</Text>
+                    </View>
+                    <Text style={styles.meterStripPrice}>{displayedTripPrice} ₸</Text>
+                  </>
+                )}
+              </View>
+            )}
+
+            {/* Swipe Action */}
+            <View style={styles.bottomSheetSwipeArea}>
+              {activeOrder.status === "assigned" && (
+                <SwipeButton title="Я на месте" onSwipeComplete={() => updateOrderStatus("arrived")} color="#FFD000" iconName="navigate" disabled={loading} />
+              )}
+              {activeOrder.status === "arrived" && (
+                <SwipeButton title="Клиент сел — поехали" onSwipeComplete={() => updateOrderStatus("in_progress")} color="#FFD000" iconName="car" disabled={loading} />
+              )}
+              {isInProgress && (
+                <SwipeButton title="Завершить поездку" onSwipeComplete={() => updateOrderStatus("completed")} color="#cb1111" textColor="#fff" thumbColor="#fff" iconColor="#cb1111" iconName="checkmark-circle" disabled={loading} />
+              )}
+            </View>
+          </View>
         </View>
       );
     }
@@ -2451,6 +2432,192 @@ const styles = StyleSheet.create({
     color: "#e0c84a",
     fontSize: 11,
     fontWeight: "700",
+  },
+
+  // ─── Map-First Active Order Floating Styles ──────────────────────────
+  floatingOrderHeader: {
+    position: 'absolute',
+    left: 12, right: 12,
+    backgroundColor: 'rgba(26,26,46,0.85)',
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  floatingOrderHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  floatingOrderHeaderTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  gpsBadgeSmall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  gpsBadgeSmallText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  floatingOrderMenuBtn: {
+    padding: 4,
+  },
+  floatingPauseBanner: {
+    position: 'absolute',
+    left: 12, right: 12,
+    backgroundColor: '#cb1111',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    shadowColor: '#cb1111',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  floatingMapStatusOverlay: {
+    position: 'absolute',
+    left: 12,
+    backgroundColor: 'rgba(26,26,46,0.85)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  floatingMapPaymentOverlay: {
+    position: 'absolute',
+    right: 12,
+    backgroundColor: 'rgba(26,26,46,0.85)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  floatingMapWaitingOverlay: {
+    position: 'absolute',
+    right: 12,
+    backgroundColor: 'rgba(255,208,0,0.15)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,208,0,0.3)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  bottomSheetCard: {
+    position: 'absolute',
+    bottom: 0, left: 0, right: 0,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 20,
+    paddingHorizontal: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 15,
+    elevation: 20,
+  },
+  bottomSheetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  bottomSheetAddressBlock: {
+    flex: 1,
+    gap: 8,
+    marginRight: 16,
+  },
+  bottomSheetAddressLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  dotLine: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  bottomSheetAddressText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1e293b',
+    flex: 1,
+  },
+  bottomSheetActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  bottomSheetCircleBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  bottomSheetOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  optionTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1e293b',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    gap: 6,
+  },
+  optionTagText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  bottomSheetMeter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#f8fafc',
+    padding: 14,
+    borderRadius: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  bottomSheetSwipeArea: {
+    // padding for swipe button is mostly handled by paddingBottom of bottomSheetCard
   },
 
   // ─── Trip Summary Modal ────────────────────────────────────────────
