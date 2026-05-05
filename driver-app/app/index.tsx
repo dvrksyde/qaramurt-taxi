@@ -28,7 +28,7 @@ import { DriverChatPanel } from "../components/DriverChatPanel";
 import { DriverProfilePanel } from "../components/DriverProfilePanel";
 import { ActiveOrdersPanel } from "../components/ActiveOrdersPanel";
 import { SwipeButton } from "../components/SwipeButton";
-import { YandexMapView, type YandexMapViewHandle } from "../components/YandexMapView";
+import { YandexMapView, type YandexMapViewHandle } from "../components/OSMMapView";
 import { mapOrderToActiveOrder } from "../lib/orderPricing";
 import { clearTripSync, flushTripPoints, getTripRates, injectSessionId, queueTripPoint, savePendingCompletion, savePendingStatus, clearPendingStatus, syncPendingStatus, startTripSync, syncPendingCompletion } from "../services/tripSync";
 import { processGpsPoint, resetOdometer } from "../services/gpsOdometer";
