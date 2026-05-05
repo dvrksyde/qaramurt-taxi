@@ -268,6 +268,7 @@ export default function MainScreen() {
   // Prevents race: 30s interval's loadDashboard re-activating a just-completed order
   const completedOrderIdRef = useRef<number | null>(null);
   const [togglingOnline, setTogglingOnline] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   // Throttle route rebuilds during in_progress trips (max 1 per 30s)
   const routeThrottleRef = useRef<number>(0);
 
@@ -1718,105 +1719,115 @@ export default function MainScreen() {
       );
     }
 
+    // ── Level helpers ──────────────────────────────────────────────────────
+    const lvlColor = profile.level === 'gold' ? '#FFD700' : profile.level === 'silver' ? '#94A3B8' : profile.level === 'blocked' ? '#EF4444' : '#CD7F32';
+    const lvlEmoji = { gold: '🥇', silver: '🥈', bronze: '🥉', blocked: '🚫' }[profile.level] ?? '🥉';
+
     return (
-      <View style={styles.pageBlock}>
-        <View style={styles.header}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <View style={{ flex: 1 }}>
+
+        {/* ── Full-screen map ─────────────────────────────────────────── */}
+        <YandexMapView
+          ref={mapRef}
+          userLocation={currentCoords}
+          userHeading={currentHeading}
+          zoom={15}
+          showCenterButton={false}
+        />
+
+        {/* ── Floating top bar ──────────────────────────────────────── */}
+        <View style={[styles.floatingTopBar, { paddingTop: insets.top + 10 }]}>
+          {/* Status pill */}
+          <View style={[styles.statusPill, isOnline ? styles.statusPillOnline : styles.statusPillOffline]}>
             <View style={[styles.statusDot, isOnline ? styles.dotOnline : styles.dotOffline]} />
-            <Text style={styles.headerTitle}>{isOnline ? "Вы на линии" : "Вы вне линии"}</Text>
+            <Text style={styles.statusPillText}>{isOnline ? 'На линии' : 'Вне линии'}</Text>
           </View>
+
+          <View style={{ flex: 1 }} />
+
+          {/* Balance + orders card */}
+          <View style={styles.floatingBalanceCard}>
+            <Text style={styles.floatingBalanceVal}>{Number(profile.balance).toLocaleString()} ₸</Text>
+            <Text style={styles.floatingBalanceSub}>{Number(profile.ordersCount || 0)} заказов</Text>
+          </View>
+
+          {/* Level badge */}
+          <View style={[styles.floatingLevelBadge, { borderColor: lvlColor }]}>
+            <Text style={{ fontSize: 20 }}>{lvlEmoji}</Text>
+          </View>
+        </View>
+
+        {/* ── Бордюр (curbside) button — top left ────────────────────── */}
+        {isOnline && profile?.status === 'free' && (
           <TouchableOpacity
-            style={styles.gpsBadge}
-            onPress={refreshCurrentPosition}
-            disabled={refreshingGPS}
-            activeOpacity={0.7}
+            style={[styles.floatingCurbsideBtn, { top: insets.top + 72 }]}
+            onLongPress={() => { Vibration.vibrate(80); handleCurbsideOrder(); }}
+            delayLongPress={1200}
+            disabled={loading}
+            activeOpacity={0.85}
           >
-            {refreshingGPS ? (
-              <ActivityIndicator size="small" color="#fff" style={{ marginRight: 4 }} />
-            ) : (
-              <Ionicons name={currentCoords ? "locate" : "locate-outline"} size={14} color="#fff" />
-            )}
-            <Text style={styles.gpsBadgeText}>
-              {refreshingGPS ? "Обновление..." : (currentCoords ? "GPS найден" : "Поиск GPS")}
-            </Text>
+            <Ionicons name="car-sport" size={18} color="#000" />
+            <Text style={styles.floatingCurbsideText}>Бордюр</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* ── Map controls — right side ────────────────────────────── */}
+        <View style={[styles.floatingMapControls, { bottom: insets.bottom + 100 }]}>
+          <TouchableOpacity style={styles.floatingMapBtn} onPress={() => mapRef.current?.centerOnMe()}>
+            <Ionicons name="locate" size={20} color="#333" />
           </TouchableOpacity>
         </View>
 
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Баланс</Text>
-            <Text style={styles.statValue}>{Number(profile.balance).toLocaleString()}₸</Text>
-          </View>
-          <View style={[styles.statCard, {
-            borderColor:
-              profile.level === 'gold' ? '#FFD700' :
-                profile.level === 'silver' ? '#94A3B8' :
-                  profile.level === 'blocked' ? '#EF4444' : '#CD7F32',
-          }]}>
-            <Text style={styles.statLabel}>Уровень</Text>
-            <Text style={[
-              styles.statValue,
-              {
-                color:
-                  profile.level === 'gold' ? '#FFD700' :
-                    profile.level === 'silver' ? '#94A3B8' :
-                      profile.level === 'blocked' ? '#EF4444' : '#CD7F32'
-              }
-            ]}>
-              {{ gold: 'Золото', silver: 'Серебро', bronze: 'Бронза', blocked: 'Заблокирован' }[profile.level] ?? '🥉'}
-            </Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Заказов</Text>
-            <Text style={styles.statValue}>{Number(profile.ordersCount || 0)}</Text>
-          </View>
-          {isOnline && profile?.status === "free" && (
-            <TouchableOpacity
-              style={[styles.statCard, styles.curbsideStatCard]}
-              onLongPress={() => { Vibration.vibrate(80); handleCurbsideOrder(); }}
-              delayLongPress={1200}
-              disabled={loading}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="car-sport" size={20} color="#000" />
-              <Text style={styles.curbsideStatLabel}>Бордюр</Text>
-              <Text style={styles.curbsideStatHint}>удерж.</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+        {/* ── Menu button — bottom left ────────────────────────────── */}
+        <TouchableOpacity
+          style={[styles.floatingMenuBtn, { bottom: insets.bottom + 100 }]}
+          onPress={() => setMenuOpen(true)}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="menu" size={24} color="#fff" />
+        </TouchableOpacity>
 
-        {/* Карта — занимает всё свободное пространство */}
-        <View style={styles.mapContainer}>
-          <YandexMapView
-            ref={mapRef}
-            userLocation={currentCoords}
-            userHeading={currentHeading}
-            zoom={15}
-            showCenterButton
-          />
-
-          {/* Статус поверх карты */}
-          <View style={styles.mapStatusOverlay}>
-            <View style={[styles.statusDot, { width: 8, height: 8, borderRadius: 4 }, isOnline ? styles.dotOnline : styles.dotOffline]} />
-            <Text style={styles.mapStatusText}>
-              {isOnline ? "Ожидание заказа..." : "Вы вне линии"}
-            </Text>
-          </View>
-        </View>
-
-
-        <View style={styles.homeSwipeContainer}>
+        {/* ── Swipe button — bottom ────────────────────────────────── */}
+        <View style={[styles.floatingSwipeBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           <SwipeButton
-            title={togglingOnline ? "Подключение..." : isOnline ? "Уйти с линии" : "Выйти на линию"}
+            title={togglingOnline ? 'Подключение...' : isOnline ? 'Уйти с линии' : 'Выйти на линию'}
             onSwipeComplete={toggleOnline}
-            color={isOnline ? "#cb1111ff" : "#FFD000"}
-            textColor={isOnline ? "#fff" : "#000"}
-            thumbColor={isOnline ? "#fff" : "#000"}
-            iconColor={isOnline ? "#cb1111ff" : "#FFD000"}
-            iconName={isOnline ? "power" : "flash"}
+            color={isOnline ? '#cb1111ff' : '#FFD000'}
+            textColor={isOnline ? '#fff' : '#000'}
+            thumbColor={isOnline ? '#fff' : '#000'}
+            iconColor={isOnline ? '#cb1111ff' : '#FFD000'}
+            iconName={isOnline ? 'power' : 'flash'}
             disabled={loading || togglingOnline}
           />
         </View>
+
+        {/* ── Slide-in menu panel ───────────────────────────────────── */}
+        {menuOpen && (
+          <View style={styles.menuOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFill} onPress={() => setMenuOpen(false)} />
+            <View style={[styles.menuPanel, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+              <Text style={styles.menuTitle}>{profile.lastName} {profile.firstName}</Text>
+              <Text style={styles.menuSub}>{lvlEmoji} {({ gold: 'Золото', silver: 'Серебро', bronze: 'Бронза', blocked: 'Заблокирован' } as any)[profile.level] ?? 'Бронза'}</Text>
+              <View style={styles.menuDivider} />
+              {[
+                { icon: 'receipt-outline', label: 'Активные заказы', tab: 'orders' },
+                { icon: 'list', label: 'История', tab: 'history' },
+                { icon: 'chatbubble-ellipses', label: 'Чат', tab: 'chat' },
+                { icon: 'person', label: 'Профиль', tab: 'profile' },
+              ].map((item) => (
+                <TouchableOpacity
+                  key={item.tab}
+                  style={styles.menuItem}
+                  onPress={() => { setMenuOpen(false); setActiveTab(item.tab as DriverTab); }}
+                >
+                  <Ionicons name={item.icon as any} size={22} color="#FFD000" />
+                  <Text style={styles.menuItemText}>{item.label}</Text>
+                  <Ionicons name="chevron-forward" size={16} color="#555" />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
       </View>
     );
   };
@@ -1840,23 +1851,17 @@ export default function MainScreen() {
     <View style={styles.container}>
       <View style={styles.contentArea}>{renderActiveTab()}</View>
 
-      <View style={[styles.navBar, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-        {[
-          { key: "home", icon: "home", label: "Главная" },
-          { key: "orders", icon: "receipt-outline", label: "Заказы" },
-          { key: "history", icon: "list", label: "История" },
-          { key: "chat", icon: "chatbubble-ellipses", label: "Чат" },
-          { key: "profile", icon: "person", label: "Профиль" },
-        ].map((item) => {
-          const isActive = activeTab === item.key;
-          return (
-            <TouchableOpacity key={item.key} style={styles.navItem} onPress={() => setActiveTab(item.key as DriverTab)}>
-              <Ionicons name={item.icon as any} size={22} color={isActive ? "#FFD000" : "#555"} />
-              <Text style={[styles.navLabel, isActive && styles.navLabelActive]}>{item.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      {/* Back-to-map button when a non-home tab is active */}
+      {activeTab !== 'home' && (
+        <TouchableOpacity
+          style={[styles.backToMapBtn, { bottom: Math.max(insets.bottom, 16) + 8 }]}
+          onPress={() => setActiveTab('home')}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="map" size={18} color="#000" />
+          <Text style={styles.backToMapText}>Карта</Text>
+        </TouchableOpacity>
+      )}
 
       {/* ─── Trip Summary Modal ──────────────────────────────────────────── */}
       <Modal visible={!!tripSummary} transparent animationType="fade" onRequestClose={() => setTripSummary(null)}>
@@ -2071,11 +2076,104 @@ export default function MainScreen() {
 
 const styles = StyleSheet.create({
   // ─── Layout ───────────────────────────────────────────────
-  container: { flex: 1, backgroundColor: "#0a0a0a", paddingTop: 44 },
+  container: { flex: 1, backgroundColor: "#0a0a0a" },
   contentArea: { flex: 1 },
   loadingWrap: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0a0a0a" },
   loadingText: { color: "#666", fontSize: 16 },
   pageBlock: { flex: 1, paddingHorizontal: 16, paddingBottom: 90, overflow: "hidden" },
+
+  // ─── Floating home UI (Phase 3 — map-first) ───────────────
+  floatingTopBar: {
+    position: 'absolute', top: 0, left: 0, right: 0,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 12, paddingBottom: 10, gap: 8,
+    backgroundColor: 'rgba(0,0,0,0.0)',
+  },
+  statusPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20,
+    backgroundColor: 'rgba(20,20,20,0.85)',
+    borderWidth: 1, borderColor: '#2a2a2a',
+  },
+  statusPillOnline: { borderColor: '#22c55e33' },
+  statusPillOffline: { borderColor: '#ef444433' },
+  statusPillText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  floatingBalanceCard: {
+    backgroundColor: 'rgba(15,15,15,0.9)',
+    borderRadius: 14, paddingHorizontal: 12, paddingVertical: 7,
+    alignItems: 'flex-end', borderWidth: 1, borderColor: '#222',
+  },
+  floatingBalanceVal: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  floatingBalanceSub: { color: '#555', fontSize: 10, fontWeight: '600' },
+  floatingLevelBadge: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(15,15,15,0.9)',
+    borderWidth: 1.5,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  floatingCurbsideBtn: {
+    position: 'absolute', left: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#FFD000', borderRadius: 22,
+    paddingHorizontal: 14, paddingVertical: 10,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35, shadowRadius: 6, elevation: 6,
+  },
+  floatingCurbsideText: { color: '#000', fontWeight: '800', fontSize: 13 },
+  floatingMapControls: {
+    position: 'absolute', right: 12,
+    gap: 8,
+  },
+  floatingMapBtn: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25, shadowRadius: 4, elevation: 4,
+  },
+  floatingMenuBtn: {
+    position: 'absolute', left: 12,
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: 'rgba(20,20,20,0.92)',
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1, borderColor: '#333',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4, shadowRadius: 6, elevation: 6,
+  },
+  floatingSwipeBar: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    paddingHorizontal: 16, paddingTop: 12,
+    backgroundColor: 'rgba(10,10,10,0.85)',
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    borderTopWidth: 1, borderColor: '#1e1e1e',
+  },
+
+  // ─── Slide-in menu panel ──────────────────────────────────
+  menuOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 200, justifyContent: 'flex-end' },
+  menuPanel: {
+    backgroundColor: '#111', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingTop: 20, paddingHorizontal: 20,
+    borderTopWidth: 1, borderColor: '#2a2a2a',
+  },
+  menuTitle: { color: '#fff', fontSize: 18, fontWeight: '800', marginBottom: 2 },
+  menuSub: { color: '#888', fontSize: 13, marginBottom: 16 },
+  menuDivider: { height: 1, backgroundColor: '#1e1e1e', marginBottom: 12 },
+  menuItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#1a1a1a',
+  },
+  menuItemText: { color: '#e0e0e0', fontSize: 15, fontWeight: '600', flex: 1 },
+
+  // ─── Back to map button ───────────────────────────────────
+  backToMapBtn: {
+    position: 'absolute', right: 16,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#FFD000', borderRadius: 22,
+    paddingHorizontal: 16, paddingVertical: 10,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3, shadowRadius: 5, elevation: 5,
+  },
+  backToMapText: { color: '#000', fontWeight: '800', fontSize: 13 },
 
   // ─── Header (waiting) ─────────────────────────────────────
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14, paddingTop: 4 },
