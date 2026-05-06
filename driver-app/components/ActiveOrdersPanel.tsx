@@ -11,6 +11,7 @@ import {
   AppState,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "../services/api";
 import { useDriverStore } from "../stores/driverStore";
 import { getSocket } from "../services/socket";
@@ -39,6 +40,7 @@ function timeAgo(dateStr: string): string {
 }
 
 export function ActiveOrdersPanel() {
+  const insets = useSafeAreaInsets();
   const [orders, setOrders] = useState<AvailableOrder[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -230,7 +232,7 @@ export function ActiveOrdersPanel() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
       <View style={styles.header}>
         <Ionicons name="receipt-outline" size={20} color="#fff" />
         <Text style={styles.headerTitle}>Доступные заказы</Text>

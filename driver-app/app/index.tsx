@@ -12,6 +12,7 @@ import {
   AppState,
   ActivityIndicator,
   Platform,
+  BackHandler,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -271,6 +272,16 @@ export default function MainScreen() {
   const [menuOpen, setMenuOpen] = useState(false);
   // Throttle route rebuilds during in_progress trips (max 1 per 30s)
   const routeThrottleRef = useRef<number>(0);
+
+  // ── Android hardware back button → go to home tab, not exit ───────────────
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (menuOpen) { setMenuOpen(false); return true; }
+      if (activeTab !== 'home') { setActiveTab('home'); return true; }
+      return false; // let the OS handle it (minimise / exit)
+    });
+    return () => sub.remove();
+  }, [activeTab, menuOpen]);
 
   // Dispatcher-assigned order modal
   const [dispatcherAssignedOrder, setDispatcherAssignedOrder] = useState<any>(null);
@@ -1239,7 +1250,17 @@ export default function MainScreen() {
             storeState.profile?.vehicle?.classes
           );
           const fallbackCityRate = storeState.tripCityRatePerKm || Number(activeOrder.pricePerKm) || 80;
-          const fallbackPrice = roundTo5(fallbackBaseFare + fallbackDist * fallbackCityRate);
+          const fallbackOutKm = storeState.outOfCityAccumulatedKm ?? 0;
+          const fallbackOutSec = storeState.outOfCityAccumulatedSeconds ?? 0;
+          const fallbackCityKm = Math.max(0, fallbackDist - fallbackOutKm);
+          const fallbackOutRate = storeState.configuredOutOfCityRate || 120;
+          const fallbackOutTimeFee = Math.floor(fallbackOutSec / 60) * 25;
+          const fallbackPrice = roundTo5(
+            fallbackBaseFare
+            + fallbackCityKm * fallbackCityRate
+            + fallbackOutKm * fallbackOutRate
+            + fallbackOutTimeFee
+          );
           setTripSummary({
             distanceKm: fallbackDist,
             finalPrice: fallbackPrice,
@@ -1247,11 +1268,11 @@ export default function MainScreen() {
             waitingAccumulatedSeconds: res.data?.waitingAccumulatedSeconds ?? 0,
             breakdown: {
               baseFare: fallbackBaseFare,
-              cityKm: fallbackDist,
+              cityKm: fallbackCityKm,
               cityRatePerKm: fallbackCityRate,
-              outOfCityKm: 0,
-              outOfCityKmRate: storeState.configuredOutOfCityRate || 120,
-              outOfCitySeconds: 0,
+              outOfCityKm: fallbackOutKm,
+              outOfCityKmRate: fallbackOutRate,
+              outOfCitySeconds: fallbackOutSec,
             },
           });
         }
@@ -1553,30 +1574,10 @@ export default function MainScreen() {
           )}
 
           {/* ── Status pill ─────────────────────────────────────────────── */}
-          {!isPaused && (
-            <View style={[styles.floatingMapStatusOverlay, { top: insets.top + 60 }]}>
-              <Ionicons
-                name={activeOrder.status === "assigned" ? "paper-plane" : activeOrder.status === "arrived" ? "body" : "car-sport"}
-                size={14}
-                color="#FFD000"
-              />
-              <Text style={styles.mapStatusText}>
-                {activeOrder.status === "assigned"
-                  ? "Подача..."
-                  : activeOrder.status === "arrived"
-                    ? "Ожидание"
-                    : "В пути..."}
-              </Text>
-            </View>
-          )}
+          {/* Removed: status text now clear from bottom sheet */}
 
           {/* ── Payment pill ────────────────────────────────────────────── */}
-          {!isPaused && (
-            <View style={[styles.floatingMapPaymentOverlay, { top: insets.top + 60 }]} >
-              <Ionicons name="cash-outline" size={12} color="#22c55e" />
-              <Text style={styles.mapPaymentText}>Наличными</Text>
-            </View>
-          )}
+          {/* Removed: payment info now in bottom sheet */}
 
           {/* ── Накопленное ожидание (если есть) ────────────────────────── */}
           {!isPaused && !activeOrder.isWaiting && tripWaitingElapsed > 0 && (
@@ -2033,11 +2034,19 @@ export default function MainScreen() {
                     : "—"}
                 </Text>
               </View>
-              {dispatcherAssignedOrder?.estimatedPrice && (
+              {/* Цена: фиксированная или по счётчику */}
+              {dispatcherAssignedOrder?.isFixedPrice ? (
                 <View style={styles.alertRow}>
-                  <Ionicons name="cash" size={18} color="#0984e3" />
-                  <Text style={[styles.alertText, { fontWeight: "700", fontSize: 16 }]}>
-                    {dispatcherAssignedOrder.estimatedPrice} ₸
+                  <Ionicons name="pricetag" size={18} color="#22c55e" />
+                  <Text style={[styles.alertText, { fontWeight: "700", color: "#22c55e", fontSize: 16 }]}>
+                    Фикс: {dispatcherAssignedOrder.estimatedPrice} ₸
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.alertRow}>
+                  <Ionicons name="speedometer" size={18} color="#FFD000" />
+                  <Text style={[styles.alertText, { fontWeight: "700", color: "#FFD000", fontSize: 16 }]}>
+                    Счётчик: {dispatcherAssignedOrder?.pricePerKm || 80} ₸/км
                   </Text>
                 </View>
               )}
@@ -2058,7 +2067,7 @@ export default function MainScreen() {
                 }}
               >
                 <Ionicons name="checkmark-circle" size={24} color="#fff" />
-                <Text style={styles.alertBtnText}>Понял</Text>
+                <Text style={styles.alertBtnText}>Понял, принял</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2609,12 +2618,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#f8fafc',
+    backgroundColor: '#0f172a',
     padding: 14,
     borderRadius: 16,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   bottomSheetSwipeArea: {
     // padding for swipe button is mostly handled by paddingBottom of bottomSheetCard

@@ -41,16 +41,16 @@ export type OSMMapViewHandle = {
 
 export type YandexMapViewHandle = OSMMapViewHandle;
 
-// ─── SVG car icon (same as before) ───────────────────────────────────────────
+// ─── Navigation arrow icon (Yandex-style) ────────────────────────────────────────
+// A sharp teardrop arrow: wide base, pointed nose facing up (north = 0° bearing)
 const CAR_SVG = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40">
-  <rect x="11" y="6" width="18" height="28" rx="6" fill="#FFD000" stroke="#000" stroke-width="1.5"/>
-  <rect x="13" y="10" width="14" height="10" rx="2" fill="#1a1a2e" opacity="0.7"/>
-  <rect x="9" y="12" width="4" height="7" rx="2" fill="#333"/>
-  <rect x="27" y="12" width="4" height="7" rx="2" fill="#333"/>
-  <rect x="10" y="27" width="4" height="5" rx="1.5" fill="#333"/>
-  <rect x="26" y="27" width="4" height="5" rx="1.5" fill="#333"/>
-  <circle cx="20" cy="20" r="3" fill="#000" opacity="0.25"/>
+  <!-- Shadow -->
+  <ellipse cx="20" cy="36" rx="7" ry="3" fill="rgba(0,0,0,0.25)"/>
+  <!-- Arrow body: Yandex-style teardrop -->
+  <path d="M20 3 L32 34 Q20 28 8 34 Z" fill="#1a73e8" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+  <!-- Center dot -->
+  <circle cx="20" cy="21" r="3" fill="#fff" opacity="0.6"/>
 </svg>
 `)}`;
 
