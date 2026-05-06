@@ -10,6 +10,7 @@ import {
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getSocket } from "../services/socket";
 import { api } from "../services/api";
 import { useDriverStore } from "../stores/driverStore";
@@ -111,9 +112,11 @@ export function DriverChatPanel() {
     </View>
   );
 
+  const insets = useSafeAreaInsets();
+
   return (
     <KeyboardAvoidingView 
-      style={styles.container} 
+      style={[styles.container, { paddingTop: insets.top + 12 }]} 
       behavior={Platform.OS === "ios" ? "padding" : "padding"} 
       keyboardVerticalOffset={Platform.OS === "ios" ? 80 : 70}
     >

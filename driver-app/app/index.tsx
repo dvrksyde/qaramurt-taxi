@@ -445,11 +445,11 @@ export default function MainScreen() {
 
     await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
       accuracy: Location.Accuracy.BestForNavigation,
-      distanceInterval: 5,   // 5m вместо 15m — точнее на поворотах и в пробках
-      timeInterval: 3000,    // max 1 обновление в 3 сек чтобы не спамить
+      distanceInterval: 5,   // 5m — точнее на поворотах
+      timeInterval: 5000,    // также обновляемся каждые 5 сек, даже стоящим
       foregroundService: {
-        notificationTitle: "Таксометр работает",
-        notificationBody: "Дистанция заказа рассчитывается. Не закрывайте приложение.",
+        notificationTitle: "Карамурт — вы на линии",
+        notificationBody: "Приложение отслеживает ваше местоположение.",
         notificationColor: "#FFD000",
       },
       showsBackgroundLocationIndicator: true,
@@ -904,6 +904,12 @@ export default function MainScreen() {
 
   const acceptOrder = async () => {
     if (!orderAlert) return;
+    // Stop the alert sound immediately on accept
+    if (soundRef.current) {
+      try { await soundRef.current.stopAsync(); } catch {}
+      try { await soundRef.current.unloadAsync(); } catch {}
+      soundRef.current = null;
+    }
 
     // ✅ FIX 3: Optimistic dismiss — close modal instantly, don't freeze UI
     const alertSnapshot = orderAlert;
@@ -930,7 +936,13 @@ export default function MainScreen() {
     loadDashboard();
   };
 
-  const rejectOrder = () => {
+  const rejectOrder = async () => {
+    // Stop the alert sound immediately on reject
+    if (soundRef.current) {
+      try { await soundRef.current.stopAsync(); } catch {}
+      try { await soundRef.current.unloadAsync(); } catch {}
+      soundRef.current = null;
+    }
     // Show next queued alert instead of just clearing
     dequeueOrderAlert();
   };
@@ -1775,7 +1787,7 @@ export default function MainScreen() {
 
         {/* ── Menu button — bottom left ────────────────────────────── */}
         <TouchableOpacity
-          style={[styles.floatingMenuBtn, { bottom: insets.bottom + 130 }]}
+          style={[styles.floatingMenuBtn, { top: '50%', marginTop: -20 }]}
           onPress={() => setMenuOpen(true)}
           activeOpacity={0.85}
         >

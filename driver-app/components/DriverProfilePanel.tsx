@@ -11,6 +11,7 @@ import {
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { api, clearToken } from "../services/api";
 import { disconnectSocket } from "../services/socket";
@@ -70,9 +71,11 @@ export function DriverProfilePanel() {
     router.replace("/login");
   };
 
+  const insets = useSafeAreaInsets();
+
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.title}>Профиль</Text>
 
         <View style={styles.summaryCard}>
