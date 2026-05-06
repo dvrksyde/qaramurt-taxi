@@ -183,64 +183,78 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
   }
   window.onerror = function(msg, src, line) { log('JS Error [' + line + ']: ' + msg); };
 
-  // ── Tile cache via Cache API ────────────────────────────────────────────────
+  // ── Tile cache via Cache API (MapLibre GL JS v4 async protocol) ──────────────
   var TILE_CACHE = 'qaramurt-osm-v1';
+  var OSM_HOSTS = ['a','b','c'];
 
-  // Register a custom cached:// protocol that serves tiles cache-first
-  maplibregl.addProtocol('cached', function(params, callback) {
+  // MapLibre v4 addProtocol: MUST return { data: ArrayBuffer } or throw
+  maplibregl.addProtocol('cached', async function(params) {
     var url = params.url.replace('cached://', 'https://');
-    caches.open(TILE_CACHE).then(function(cache) {
-      cache.match(url).then(function(cached) {
-        if (cached) {
-          cached.arrayBuffer().then(function(buf) { callback(null, buf, null, null); });
-        } else {
-          fetch(url)
-            .then(function(resp) {
-              if (!resp.ok) { callback(new Error('HTTP ' + resp.status)); return; }
-              var clone = resp.clone();
-              cache.put(url, clone);
-              resp.arrayBuffer().then(function(buf) { callback(null, buf, null, null); });
-            })
-            .catch(function(e) { callback(new Error('Offline: ' + e)); });
+    try {
+      // 1. Try cache first
+      if ('caches' in window) {
+        var cache = await caches.open(TILE_CACHE);
+        var hit = await cache.match(url);
+        if (hit) {
+          var buf = await hit.arrayBuffer();
+          return { data: buf };
         }
-      });
-    }).catch(function(e) { callback(new Error('Cache error: ' + e)); });
-    return { cancel: function() {} };
+      }
+      // 2. Fetch from network
+      var resp = await fetch(url);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.arrayBuffer();
+      // 3. Store in cache for offline use
+      if ('caches' in window) {
+        var cache2 = await caches.open(TILE_CACHE);
+        cache2.put(url, new Response(new Uint8Array(data), {
+          headers: { 'Content-Type': 'image/png', 'Cache-Control': 'max-age=604800' }
+        }));
+      }
+      return { data: data };
+    } catch (e) {
+      throw new Error('Tile failed: ' + e);
+    }
   });
 
-  // ── Tile pre-download ───────────────────────────────────────────────────────
+  // ── Tile pre-download (supports multiple center points) ────────────────────
   function lngToX(lng, z) { return Math.floor((lng + 180) / 360 * Math.pow(2, z)); }
   function latToY(lat, z) {
     var r = lat * Math.PI / 180;
     return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * Math.pow(2, z));
   }
 
-  async function preloadArea(centerLat, centerLng, radiusKm, maxZoom) {
-    // Guard: Cache API not available in very old WebViews
-    if (!('caches' in window)) {
-      log('Cache API not supported — offline tiles unavailable');
-      return;
-    }
-    var latD = radiusKm / 111;
-    var lngD = radiusKm / (111 * Math.cos(centerLat * Math.PI / 180));
-    var minLat = centerLat - latD, maxLat = centerLat + latD;
-    var minLng = centerLng - lngD, maxLng = centerLng + lngD;
-
+  function buildUrlsForBox(minLat, maxLat, minLng, maxLng, maxZoom) {
     var urls = [];
     for (var z = 10; z <= maxZoom; z++) {
       var xMin = lngToX(minLng, z), xMax = lngToX(maxLng, z);
       var yMin = latToY(maxLat, z),  yMax = latToY(minLat, z);
+      var host = OSM_HOSTS[z % 3]; // cycle between a/b/c
       for (var x = xMin; x <= xMax; x++) {
         for (var y = yMin; y <= yMax; y++) {
-          urls.push('https://tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png');
+          urls.push('https://' + host + '.tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png');
         }
       }
     }
+    return urls;
+  }
+
+  async function preloadArea(centerLat, centerLng, radiusKm, maxZoom) {
+    if (!('caches' in window)) {
+      log('Cache API not supported');
+      return;
+    }
+    var latD = radiusKm / 111;
+    var lngD = radiusKm / (111 * Math.cos(centerLat * Math.PI / 180));
+    var urls = buildUrlsForBox(
+      centerLat - latD, centerLat + latD,
+      centerLng - lngD, centerLng + lngD,
+      maxZoom
+    );
 
     var total = urls.length;
     var done = 0;
     send({ type: 'tile_progress', downloaded: 0, total: total });
-
     var cache = await caches.open(TILE_CACHE);
     var BATCH = 6;
     for (var i = 0; i < urls.length; i += BATCH) {
@@ -253,13 +267,46 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
           }
         } catch(e) {}
         done++;
-        if (done % 30 === 0 || done === total) {
+        if (done % 50 === 0 || done === total) {
           send({ type: 'tile_progress', downloaded: done, total: total });
         }
       }));
     }
     send({ type: 'tile_done', downloaded: done, total: total });
     log('Preload done: ' + done + '/' + total);
+  }
+
+  // Pre-download ALL operating region tiles on map load ──────────────────────
+  // Covers: Qaramurt, Aksukent, Akkala, Sarkyrama, Madenei, Khanaryk, Koksaiek, Shymkent
+  // One big bounding box: lat [41.95, 42.85] lng [69.15, 70.30] zoom 10-14
+  async function preloadOperatingRegion() {
+    if (!('caches' in window)) return;
+    log('Preloading operating region tiles...');
+    var urls = buildUrlsForBox(41.95, 42.85, 69.15, 70.30, 14);
+    // Remove duplicates
+    var unique = [...new Set(urls)];
+    var total = unique.length;
+    var done = 0;
+    send({ type: 'tile_progress', downloaded: 0, total: total });
+    var cache = await caches.open(TILE_CACHE);
+    var BATCH = 8;
+    for (var i = 0; i < unique.length; i += BATCH) {
+      var batch = unique.slice(i, i + BATCH);
+      await Promise.all(batch.map(async function(url) {
+        try {
+          if (!(await cache.match(url))) {
+            var r = await fetch(url);
+            if (r.ok) await cache.put(url, r);
+          }
+        } catch(e) {}
+        done++;
+        if (done % 100 === 0 || done === total) {
+          send({ type: 'tile_progress', downloaded: done, total: total });
+        }
+      }));
+    }
+    send({ type: 'tile_done', downloaded: done, total: total });
+    log('Region preload done: ' + done + '/' + total);
   }
 
   // ── Bearing helper ──────────────────────────────────────────────────────────
@@ -271,7 +318,7 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
     return ((Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
   }
 
-  // ── Map init — uses cached:// protocol ─────────────────────────────────────
+  // ── Map init — multi-subdomain OSM (a/b/c.tile.openstreetmap.org) ───────────
   var map = new maplibregl.Map({
     container: 'map',
     style: {
@@ -279,7 +326,11 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
       sources: {
         osm: {
           type: 'raster',
-          tiles: ['cached://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+          tiles: [
+            'cached://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            'cached://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            'cached://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          ],
           tileSize: 256,
           attribution: 'OpenStreetMap'
         }
@@ -299,7 +350,7 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
   var currentHeading = 0;
 
   map.on('load', function() {
-    log('MapLibre GL ready — OSM tiles');
+    log('MapLibre GL ready — OSM tiles (v4 protocol)');
 
     // Route line source + layer (added once, data updated on each buildRoute)
     map.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
@@ -315,6 +366,9 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
     ${pickupMarkerCode}
     ${dropoffMarkerCode}
 
+    // Start background tile pre-download for entire operating region after 10s delay
+    // Covers: Qaramurt, Aksukent, Akkala, Sarkyrama, Madenei, Khanaryk, Koksaiek, Shymkent
+    setTimeout(function() { preloadOperatingRegion(); }, 10000);
     log('Map layers ready');
   });
 
