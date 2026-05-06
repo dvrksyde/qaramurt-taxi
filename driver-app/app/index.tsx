@@ -351,7 +351,7 @@ export default function MainScreen() {
       }
 
       const sources = {
-        new_order: require('../assets/sounds/new_order.mp4'),
+        new_order: require('../assets/sounds/new_order.mp3'),
         welcome: require('../assets/sounds/welcome.mp4'),
         trip_completed: require('../assets/sounds/trip_completed.mp4'),
       };
@@ -1587,8 +1587,8 @@ export default function MainScreen() {
              </View>
           )}
 
-          {/* ── Map controls — right side ───────────────────────────────── */}
-          <View style={[styles.floatingMapControls, { bottom: Math.max(insets.bottom, 10) + 240 }]}>
+          {/* ── Map controls — right side (Centered) ───────────────────────────────── */}
+          <View style={[styles.floatingMapControls, { top: '50%', marginTop: -60 }]}>
             <TouchableOpacity style={styles.floatingMapBtn} onPress={() => mapRef.current?.zoomIn()}>
               <Ionicons name="add" size={22} color="#333" />
             </TouchableOpacity>
@@ -1760,8 +1760,8 @@ export default function MainScreen() {
           </TouchableOpacity>
         )}
 
-        {/* ── Map controls — right side ────────────────────────────── */}
-        <View style={[styles.floatingMapControls, { bottom: insets.bottom + 130 }]}>
+        {/* ── Map controls — right side (Centered) ────────────────────────────── */}
+        <View style={[styles.floatingMapControls, { top: '50%', marginTop: -60 }]}>
           <TouchableOpacity style={styles.floatingMapBtn} onPress={() => mapRef.current?.zoomIn()}>
             <Ionicons name="add" size={22} color="#333" />
           </TouchableOpacity>

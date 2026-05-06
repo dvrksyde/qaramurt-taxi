@@ -252,6 +252,14 @@ export async function POST(req: NextRequest) {
       // broadcast / sequential / automatic without pickup point → notify all
       io.to("drivers").emit("new_order_alert", alertData);
     }
+    
+    // Notify the specific driver if assigned by dispatcher during creation
+    if (assignedDriverId) {
+      io.to(`driver:${assignedDriverId}`).emit("order_assigned_by_dispatcher", {
+        orderId: order.id,
+        order,
+      });
+    }
   }
 
 
