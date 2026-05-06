@@ -387,11 +387,18 @@ export const OSMMapView = forwardRef<OSMMapViewHandle, Props>((
         lastDriverLngLat = lngLat;
 
         if (!driverMarker) {
+          // IMPORTANT: MapLibre positions custom markers by setting CSS transform
+          // (translate) on the element we pass. If we also set transform for rotation
+          // on the SAME element, it overwrites MapLibre's translate → marker flies to (0,0).
+          // Fix: outer wrapperEl owned by MapLibre (position), inner driverEl owned by us (rotation).
+          var wrapperEl = document.createElement('div');
+          wrapperEl.style.cssText = 'width:40px;height:40px;';
           driverEl = document.createElement('img');
           driverEl.src = '${CAR_SVG}';
-          driverEl.style.cssText = 'width:40px;height:40px;transform-origin:center;transition:transform 0.3s ease;';
+          driverEl.style.cssText = 'width:40px;height:40px;transform-origin:center;transition:transform 0.25s linear;display:block;';
           driverEl.style.transform = 'rotate(' + currentHeading + 'deg)';
-          driverMarker = new maplibregl.Marker({ element: driverEl, rotationAlignment: 'map', anchor: 'center' })
+          wrapperEl.appendChild(driverEl);
+          driverMarker = new maplibregl.Marker({ element: wrapperEl, anchor: 'center' })
             .setLngLat(lngLat)
             .addTo(map);
         } else {
