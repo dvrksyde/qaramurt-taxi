@@ -219,7 +219,13 @@ export async function PATCH(
           const bOutCitySec = calc.outOfCitySeconds > 0
             ? calc.outOfCitySeconds
             : (clientOutOfCitySeconds ?? 0);
-          const bCityKm = Math.max(0, finalDistKm - bOutCityKm);
+          // Breakdown base distance must match the price source.
+          // If we used clientFinalPrice, the price was computed from clientDistanceKm
+          // (Kalman-filtered). Using server dist here would show cityKm × rate ≠ price.
+          const bBaseDist = clientPriceIsValid && clientDistanceKm != null
+            ? clientDistanceKm
+            : finalDistKm;
+          const bCityKm = Math.max(0, bBaseDist - bOutCityKm);
           tripBreakdown = {
             baseFare:          sessionBaseFare,
             cityKm:            bCityKm,
