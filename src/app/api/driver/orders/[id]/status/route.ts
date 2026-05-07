@@ -192,20 +192,15 @@ export async function PATCH(
           const finalDistKm  = Math.max(serverDistKm, clientDistanceKm ?? 0);
           console.log(`[trip/complete] dist: server=${serverDistKm} client=${clientDistanceKm} → using ${finalDistKm}`);
 
-          // Price: VARIANT B
-          //   clientFinalPrice (if valid) → always wins
-          //   server calc                → used only when client price is missing/invalid
-          //   Note: clientFinalPrice already includes waitingFee + outOfCityTimeFee
-          //         so we do NOT add midTripWaitFee again when using client price.
-          let finalPrice: number;
-          if (clientPriceIsValid) {
-            finalPrice = clientFinalPrice!;
-            console.log(`[trip/complete] VariantB: using clientFinalPrice=${finalPrice} (server=${calc.finalPrice})`);
-          } else {
-            // Client price absent or below minimum → use server calc + waiting fee
-            finalPrice = Math.max(calc.finalPrice, sessionBaseFare) + midTripWaitFee;
-            console.log(`[trip/complete] VariantB: client price invalid (${clientFinalPrice}), using serverPrice=${finalPrice}`);
-          }
+          // Price: take the MAXIMUM of client and server prices.
+          // Client includes waitingFee + outOfCityTimeFee tracked in real-time.
+          // Server may have measured more distance (Kalman can under-count on straights).
+          // Neither is always right — highest value wins so the driver is never underpaid.
+          const serverPrice = Math.max(calc.finalPrice, sessionBaseFare) + midTripWaitFee;
+          const finalPrice = clientPriceIsValid
+            ? Math.max(clientFinalPrice!, serverPrice)
+            : serverPrice;
+          console.log(`[trip/complete] price: client=${clientFinalPrice} server=${serverPrice} → using ${finalPrice}`);
 
           await completeSession(activeSession.id, finalDistKm, finalPrice, calc.outOfCityKm, calc.outOfCitySeconds);
           updateData.distanceKm = finalDistKm;
@@ -219,13 +214,7 @@ export async function PATCH(
           const bOutCitySec = calc.outOfCitySeconds > 0
             ? calc.outOfCitySeconds
             : (clientOutOfCitySeconds ?? 0);
-          // Breakdown base distance must match the price source.
-          // If we used clientFinalPrice, the price was computed from clientDistanceKm
-          // (Kalman-filtered). Using server dist here would show cityKm × rate ≠ price.
-          const bBaseDist = clientPriceIsValid && clientDistanceKm != null
-            ? clientDistanceKm
-            : finalDistKm;
-          const bCityKm = Math.max(0, bBaseDist - bOutCityKm);
+          const bCityKm = Math.max(0, finalDistKm - bOutCityKm);
           tripBreakdown = {
             baseFare:          sessionBaseFare,
             cityKm:            bCityKm,
