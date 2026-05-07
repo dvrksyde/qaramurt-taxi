@@ -9,7 +9,6 @@ import { useDriverStore } from "../stores/driverStore";
 import { Ionicons } from "@expo/vector-icons";
 import * as Device from "expo-device";
 
-// Known competing taxi apps — detect by URI scheme
 const TAXI_APPS = [
   { id: "yandex_pro", name: "Яндекс Про", scheme: "yandexpro://" },
   { id: "indrive", name: "inDrive", scheme: "indrive://" },

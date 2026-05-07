@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { mapMatchTotalKm, FACTOR_MIN, FACTOR_MAX } from "./osrm";
 
 const BASE_FARE = 290;
 const OUT_OF_CITY_MIN_RATE = 25; // ₸/мин вне города
@@ -122,7 +123,7 @@ export async function calculateSessionDistance(sessionId: number): Promise<TripC
       const curr = pts[i];
 
       const accuracy = Number(curr.accuracy_m ?? 0);
-      if (accuracy > 100 && accuracy > 0) continue;
+      if (accuracy > 50 && accuracy > 0) continue;
 
       const segKm = haversineKm(
         Number(prev.lat), Number(prev.lng),
@@ -148,18 +149,7 @@ export async function calculateSessionDistance(sessionId: number): Promise<TripC
       if (gapSec > 0 && segKm > 2 && gapSec < 20) continue;
 
       const segIsOutOfCity = prev.is_out_of_city ?? false;
-      let effectiveKm = segKm;
-
-      if (gapSec > 20) {
-        const speedKmh = prev.speed_kmh !== null ? Number(prev.speed_kmh) : null;
-        if (speedKmh !== null && speedKmh > 5) {
-          const interpolated = speedKmh * (gapSec / 3600);
-          if (interpolated > segKm) effectiveKm = interpolated;
-        } else if (speedKmh === null && segKm > 0.1) {
-          // No speed from Android but distance is physically plausible
-          effectiveKm = segKm;
-        }
-      }
+      const effectiveKm = segKm;
 
       if (segIsOutOfCity) {
         outOfCityKm += effectiveKm;
@@ -170,8 +160,34 @@ export async function calculateSessionDistance(sessionId: number): Promise<TripC
     }
   }
 
-  cityKm      = Math.ceil(cityKm      * 10) / 10;
-  outOfCityKm = Math.ceil(outOfCityKm * 10) / 10;
+  // ── Map matching correction ────────────────────────────────────────────────
+  // OSRM gives the actual road-network distance. We use it as a correction
+  // factor on the haversine totals so that city/out-of-city split is preserved.
+  const haversineTotal = cityKm + outOfCityKm;
+  if (haversineTotal > 0) {
+    const goodPts = pts.filter(p => {
+      const acc = Number(p.accuracy_m ?? 0);
+      return !(acc > 50 && acc > 0);
+    });
+    const matchedTotal = await mapMatchTotalKm(
+      goodPts.map(p => ({
+        lat: p.lat,
+        lng: p.lng,
+        capturedAt: p.captured_at,
+        accuracyM: p.accuracy_m,
+      }))
+    );
+    if (matchedTotal !== null) {
+      const factor = matchedTotal / haversineTotal;
+      if (factor >= FACTOR_MIN && factor <= FACTOR_MAX) {
+        cityKm      *= factor;
+        outOfCityKm *= factor;
+      }
+    }
+  }
+
+  cityKm      = Math.round(cityKm      * 10) / 10;
+  outOfCityKm = Math.round(outOfCityKm * 10) / 10;
   const distanceKm = cityKm + outOfCityKm;
 
   const tariffPerKm   = Number(session.tariff_per_km     ?? 80);
