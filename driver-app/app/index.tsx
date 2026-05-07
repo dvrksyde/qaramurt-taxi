@@ -1142,6 +1142,7 @@ export default function MainScreen() {
 
         body.clientDistanceKm = fallbackDist;
         body.clientOutOfCityKm = Math.round(clientOutOfCityKm * 10) / 10;
+        body.clientOutOfCitySeconds = accSec + currentOutSec;
         body.clientFinalPrice = storeState.tripPrice + tripWaitingFee + outTimeFeeAtCompletion;
 
       } else {

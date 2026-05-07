@@ -159,7 +159,13 @@ export const useDriverStore = create<DriverState>((set) => ({
       return {
         isOutOfCity,
         outOfCityRatePerKm,
-        outOfCityStartTime: isOutOfCity ? Date.now() : null,
+        // Only stamp the clock on the FIRST entry into out-of-city zone.
+        // If we're already outside and zone_change fires again (socket re-emit
+        // after batch flush), preserve the original startTime so accumulated
+        // seconds aren't lost.
+        outOfCityStartTime: isOutOfCity
+          ? (state.isOutOfCity ? state.outOfCityStartTime : Date.now())
+          : null,
         outOfCityAccumulatedSeconds: newAccumulatedSeconds,
         tripPriceAtZoneChange: currentPrice,
         tripDistanceAtZoneChange: currentDistance,

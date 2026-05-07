@@ -33,9 +33,10 @@ export async function PATCH(
     body.clientDistanceKm ?? body.distanceKm;
   const clientFinalPrice: number | undefined =
     body.clientFinalPrice ?? body.finalPrice;
-  // clientOutOfCityKm: tracked locally by the app (outOfCityAccumulatedKm in store)
-  // Used for accurate breakdown when GPS points are missing
+  // clientOutOfCityKm / clientOutOfCitySeconds: tracked locally by the app.
+  // Used as fallback for breakdown when server-side zone detection lagged or failed.
   const clientOutOfCityKm: number | undefined = body.clientOutOfCityKm;
+  const clientOutOfCitySeconds: number | undefined = body.clientOutOfCitySeconds;
 
   const validStatuses = ["arrived", "in_progress", "completed", "canceled"];
   if (!validStatuses.includes(status)) {
@@ -210,17 +211,22 @@ export async function PATCH(
           updateData.distanceKm = finalDistKm;
           updateData.finalPrice  = finalPrice;
 
-          // Breakdown: derive out-of-city km from server GPS if available, else client.
-          // City km = finalDistKm − out-of-city km (so breakdown always sums to finalDistKm).
-          const bOutCityKm = calc.distanceKm > 0 ? calc.outOfCityKm : (clientOutOfCityKm ?? 0);
-          const bCityKm    = Math.max(0, finalDistKm - bOutCityKm);
+          // Breakdown: prefer server GPS zone data; fall back to client-tracked
+          // values when server zone detection lagged (batch not flushed yet) or failed.
+          const bOutCityKm = calc.outOfCityKm > 0
+            ? calc.outOfCityKm
+            : (clientOutOfCityKm ?? 0);
+          const bOutCitySec = calc.outOfCitySeconds > 0
+            ? calc.outOfCitySeconds
+            : (clientOutOfCitySeconds ?? 0);
+          const bCityKm = Math.max(0, finalDistKm - bOutCityKm);
           tripBreakdown = {
             baseFare:          sessionBaseFare,
             cityKm:            bCityKm,
             cityRatePerKm:     sessionCityRate,
             outOfCityKm:       bOutCityKm,
             outOfCityKmRate:   sessionOutOfCityRate || sessionCityRate,
-            outOfCitySeconds:  calc.outOfCitySeconds,
+            outOfCitySeconds:  bOutCitySec,
           };
         } catch (err) {
           // Server calc crashed entirely — client price is our only option
