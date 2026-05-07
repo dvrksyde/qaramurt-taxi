@@ -272,6 +272,8 @@ export default function MainScreen() {
   const [menuOpen, setMenuOpen] = useState(false);
   // Throttle route rebuilds during in_progress trips (max 1 per 30s)
   const routeThrottleRef = useRef<number>(0);
+  const completionRetryRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const statusRetryRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Android hardware back button → go to home tab, not exit ───────────────
   useEffect(() => {
@@ -500,8 +502,11 @@ export default function MainScreen() {
     sock.off("connect");
 
     // Auto-reconnect: re-register driver room after reconnect (e.g. after bg kill)
+    // Also flush any pending offline ops — network is back.
     sock.on("connect", () => {
       sock.emit("driver_connect", driverId);
+      void syncPendingCompletion();
+      void syncPendingStatus();
     });
 
     sock.on("new_order_alert", (data: any) => {
@@ -820,9 +825,9 @@ export default function MainScreen() {
     return () => {
       subscription.remove();
       clearInterval(interval);
-      if (bgOfflineTimerRef.current) {
-        clearTimeout(bgOfflineTimerRef.current);
-      }
+      if (bgOfflineTimerRef.current) clearTimeout(bgOfflineTimerRef.current);
+      if (completionRetryRef.current) clearInterval(completionRetryRef.current);
+      if (statusRetryRef.current) clearInterval(statusRetryRef.current);
     };
   }, [loadDashboard, startSocketAndGPS]);
 
@@ -1194,22 +1199,25 @@ export default function MainScreen() {
         // while the server still shows it as in_progress (pending sync).
         completedOrderIdRef.current = activeOrder.id;
 
-        // Free the driver locally — server will be updated when network returns
+        // Free the driver locally — server will be updated when network returns.
+        // NOTE: do NOT call clearTripSync here — pending GPS points must survive so
+        // syncPendingCompletion can flush them to the server before the PATCH.
         setActiveOrder(null);
         resetTrip();
-        await clearTripSync(activeOrder.id);
         setProfile(profile ? { ...profile, status: "free" } : null);
         // NOTE: do NOT call loadDashboard() here!
         // The server still shows the order as in_progress (we failed to PATCH it),
         // so loadDashboard() would immediately re-set activeOrder and undo our null.
 
         // Retry sync in background every 30s; refresh UI only after server confirms.
-        const retryInterval = setInterval(async () => {
+        if (completionRetryRef.current) clearInterval(completionRetryRef.current);
+        completionRetryRef.current = setInterval(async () => {
           const ok = await syncPendingCompletion();
           if (ok) {
-            clearInterval(retryInterval);
-            completedOrderIdRef.current = null; // Server confirmed — clear the guard
-            loadDashboard(); // Server now shows order as completed — safe to refresh
+            if (completionRetryRef.current) clearInterval(completionRetryRef.current);
+            completionRetryRef.current = null;
+            completedOrderIdRef.current = null;
+            loadDashboard();
           }
         }, 30000);
       } else if (status === "arrived" || status === "in_progress") {
@@ -1223,9 +1231,13 @@ export default function MainScreen() {
         //    syncs, the completion PATCH will succeed.
         setActiveOrder({ ...activeOrder, status });
         await savePendingStatus({ orderId: activeOrder.id, status: status as "arrived" | "in_progress", savedAt: Date.now() });
-        const statusRetryInterval = setInterval(async () => {
+        if (statusRetryRef.current) clearInterval(statusRetryRef.current);
+        statusRetryRef.current = setInterval(async () => {
           const ok = await syncPendingStatus();
-          if (ok) clearInterval(statusRetryInterval);
+          if (ok) {
+            if (statusRetryRef.current) clearInterval(statusRetryRef.current);
+            statusRetryRef.current = null;
+          }
         }, 15000);
         // Don't show an error — driver continues the trip normally
       } else {

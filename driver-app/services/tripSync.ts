@@ -252,24 +252,41 @@ export async function clearPendingCompletion(): Promise<void> {
   } catch { /* ignore */ }
 }
 
+// Guard against concurrent sync calls (e.g. socket reconnect + 30s interval firing together)
+let isSyncingCompletion = false;
+
 /** Try to sync the pending completion to the server. Returns true if synced or nothing pending. */
 export async function syncPendingCompletion(): Promise<boolean> {
-  const pending = await getPendingCompletion();
-  if (!pending) return true;
+  if (isSyncingCompletion) return false;
+  isSyncingCompletion = true;
+  try {
+    const pending = await getPendingCompletion();
+    if (!pending) return true;
 
-  const res = await api(`/api/driver/orders/${pending.orderId}/status`, {
-    method: "PATCH",
-    body: JSON.stringify(pending.body),
-  });
+    // Flush any GPS points that were queued offline but not yet sent.
+    // Must happen before the completion PATCH so the server has all points
+    // when it recalculates the final distance.
+    await flushTripPoints(pending.orderId).catch(() => {});
 
-  if (res.error) {
-    console.warn("[pendingCompletion] Retry failed:", res.error);
-    return false;
+    const res = await api(`/api/driver/orders/${pending.orderId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify(pending.body),
+    });
+
+    if (res.error) {
+      console.warn("[pendingCompletion] Retry failed:", res.error);
+      return false;
+    }
+
+    // Clean up all offline state now that the server confirmed completion.
+    await clearPendingCompletion();
+    await clearPendingStatus();    // stale arrived/in_progress no longer needed
+    await clearTripSync(pending.orderId); // GPS points were flushed above — safe to clear
+    console.log(`[pendingCompletion] Synced order ${pending.orderId} successfully`);
+    return true;
+  } finally {
+    isSyncingCompletion = false;
   }
-
-  await clearPendingCompletion();
-  console.log(`[pendingCompletion] Synced order ${pending.orderId} successfully`);
-  return true;
 }
 
 // ── Pending Status (offline arrived / in_progress support) ────────────────────
