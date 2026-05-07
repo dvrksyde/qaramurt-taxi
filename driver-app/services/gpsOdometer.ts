@@ -1,23 +1,18 @@
 /**
- * Smart GPS Odometer — Фаза 1 реновации
+ * Smart GPS Odometer — Фаза 2 (anti-teleport hardening)
  *
- * Решает проблему 290₸ и неправильного расчёта дистанции:
+ * ИСПРАВЛЕНЫ критические баги из-за которых накапливались фантомные км:
  *
- * Проблемы сырого GPS:
- *   - Дрейф при стоянке (10-50м накапливается → лишние км)
- *   - Плохая точность в ауле (accuracy > 50м → прыжки)
- *   - Глюки GPS (200м прыжок за 3 сек = 240 км/ч — физически невозможно)
- *   - Пропуск точек при слабом сигнале → статус in_progress но 0 км
- *
- * Что делает этот модуль:
- *   1. Kalman filter — сглаживает GPS дрейф
- *   2. Accuracy filter — игнорирует точки с плохим сигналом
- *   3. Speed validator — отбрасывает физически невозможные прыжки
- *   4. Stationary detector — не накапливает расстояние при стоянке
- *   5. Time gap guard — не накапливает если долго нет точек (GPS упал)
+ *   Bug 1: Kalman-фильтр обновлял своё состояние даже при плохой точности GPS
+ *          → постепенно "сползал" к неправильным координатам (вышка сотовой связи)
+ *          → каждый следующий шаг измерялся от неправильной позиции → +46 км
+ *   Bug 2: Нет проверки конфликта скорость-расстояние
+ *          → GPS говорит "стоим" (0 км/ч) но координата прыгнула на 200м → считается
+ *   Bug 3: MAX_DISTANCE_KM = 300м слишком мягко, урезаем до 150м
+ *   Bug 4: MAX_GAP_MS = 45сек слишком долго, GPS может выдать прыжок после 30сек паузы
  */
 
-// ─── Haversine (та же что в background task) ──────────────────────────────────
+// ─── Haversine ─────────────────────────────────────────────────────────────────
 function haversine(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -30,39 +25,23 @@ function haversine(lat1: number, lng1: number, lat2: number, lng2: number): numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// ─── Kalman filter state ───────────────────────────────────────────────────────
+// ─── Kalman filter ─────────────────────────────────────────────────────────────
 interface KalmanState {
   lat: number;
   lng: number;
-  /** Estimated error (variance). Starts high = low confidence. */
   variance: number;
 }
 
-/**
- * 1D Kalman filter applied independently to lat and lng.
- * Returns smoothed coordinates and updated variance.
- *
- * minAccuracy — GPS reported accuracy in meters (used as measurement noise).
- * The higher the accuracy number, the less we trust this reading.
- */
 function kalmanUpdate(
   state: KalmanState,
   measuredLat: number,
   measuredLng: number,
   accuracyM: number,
 ): KalmanState {
-  // Process noise — how much we expect position to drift between measurements
-  const PROCESS_NOISE = 0.0001; // ~11m max drift per step
-
-  // Grow variance (prediction step)
+  const PROCESS_NOISE = 0.0001;
   const predictedVariance = state.variance + PROCESS_NOISE;
-
-  // Measurement noise from GPS accuracy (convert metres → degrees approx)
   const measurementNoise = Math.max(accuracyM / 111_000, 0.00001) ** 2;
-
-  // Kalman gain — how much to trust the new measurement
   const K = predictedVariance / (predictedVariance + measurementNoise);
-
   return {
     lat: state.lat + K * (measuredLat - state.lat),
     lng: state.lng + K * (measuredLng - state.lng),
@@ -70,42 +49,30 @@ function kalmanUpdate(
   };
 }
 
-// ─── Odometer state ───────────────────────────────────────────────────────────
+// ─── Odometer state ────────────────────────────────────────────────────────────
 interface OdometerState {
   kalman: KalmanState | null;
-  lastTimestamp: number | null; // ms
+  lastTimestamp: number | null;
 }
 
-// Module-level state (lives for the session, reset on trip start)
-let state: OdometerState = {
-  kalman: null,
-  lastTimestamp: null,
-};
+let state: OdometerState = { kalman: null, lastTimestamp: null };
 
 export function resetOdometer(): void {
   state = { kalman: null, lastTimestamp: null };
 }
 
-// ─── Thresholds ───────────────────────────────────────────────────────────────
-const MAX_ACCURACY_M      = 60;   // Ignore GPS fix worse than 60m
-const MAX_SPEED_KMH       = 160;  // Physically impossible for a taxi → GPS glitch
+// ─── Thresholds ────────────────────────────────────────────────────────────────
+const MAX_ACCURACY_M      = 50;    // Ignore GPS fix worse than 50m
+const MAX_SPEED_KMH       = 140;   // Physically impossible → GPS glitch
 const MIN_DISTANCE_KM     = 0.010; // 10m — don't count micro-movements
-const MAX_DISTANCE_KM     = 0.3;  // 300m in one step — large jump filter
-const STATIONARY_SPEED    = 1.5;  // m/s (~5.4 km/h) — below this = probably parked
-const STATIONARY_DIST_KM  = 0.015; // 15m — drift while parked, don't count
-const MAX_GAP_MS          = 45_000; // 45 sec gap → GPS was off, don't accumulate
+const MAX_DISTANCE_KM     = 0.150; // 150m max per step (was 300m — too loose)
+const STATIONARY_SPEED    = 2.0;   // m/s (~7.2 km/h) — below this = stopped
+const STATIONARY_DIST_KM  = 0.020; // 20m — drift while parked, don't count
+const MAX_GAP_MS          = 30_000; // 30 sec gap → re-anchor (was 45s)
 
 /**
- * Process a new GPS reading from the background task.
- *
- * Returns the FILTERED distance increment in km (0 if the point should be skipped).
- * Add this to your tripDistance accumulator.
- *
- * @param lat         Raw GPS latitude
- * @param lng         Raw GPS longitude
- * @param accuracyM   GPS reported accuracy in metres (lower = better)
- * @param speedMs     GPS reported speed in m/s (null if unavailable)
- * @param timestamp   Unix timestamp in ms
+ * Process a GPS reading from the background task.
+ * Returns filtered distance increment in km (0 = skip this point).
  */
 export function processGpsPoint(
   lat: number,
@@ -114,21 +81,20 @@ export function processGpsPoint(
   speedMs: number | null,
   timestamp: number,
 ): number {
-  const accuracy = accuracyM ?? 30; // Assume 30m if not reported
+  const accuracy = accuracyM ?? 30;
 
   // ── 1. Accuracy filter ─────────────────────────────────────────────────────
+  // CRITICAL FIX: Do NOT update Kalman state for bad accuracy.
+  // Old code was updating Kalman with low-quality readings, causing it to
+  // gradually drift toward wrong positions (cell-tower lock → fake 46 km).
   if (accuracy > MAX_ACCURACY_M) {
-    // Bad GPS fix — update Kalman state with low confidence but don't accumulate
-    if (state.kalman) {
-      state.kalman = kalmanUpdate(state.kalman, lat, lng, accuracy);
-    }
-    state.lastTimestamp = timestamp;
+    state.lastTimestamp = timestamp; // update timestamp to prevent gap ghost
     return 0;
   }
 
-  // ── 2. First point — init Kalman, no distance ──────────────────────────────
+  // ── 2. First point — init Kalman ───────────────────────────────────────────
   if (!state.kalman) {
-    state.kalman = { lat, lng, variance: 1 }; // High initial variance = low confidence
+    state.kalman = { lat, lng, variance: 1 };
     state.lastTimestamp = timestamp;
     return 0;
   }
@@ -136,8 +102,7 @@ export function processGpsPoint(
   // ── 3. Time gap guard ──────────────────────────────────────────────────────
   const gapMs = timestamp - (state.lastTimestamp ?? timestamp);
   if (gapMs > MAX_GAP_MS) {
-    // GPS was off/unavailable — don't count ghost distance
-    // Just re-anchor to new position
+    // GPS was off — don't count ghost distance, re-anchor to current position
     state.kalman = { lat, lng, variance: 1 };
     state.lastTimestamp = timestamp;
     return 0;
@@ -146,14 +111,14 @@ export function processGpsPoint(
   // ── 4. Kalman smooth ───────────────────────────────────────────────────────
   const smoothed = kalmanUpdate(state.kalman, lat, lng, accuracy);
 
-  // ── 5. Distance from smoothed prev → smoothed current ────────────────────
+  // ── 5. Distance from smoothed prev → smoothed current ─────────────────────
   const d = haversine(state.kalman.lat, state.kalman.lng, smoothed.lat, smoothed.lng);
 
   // ── 6. Speed validator (physics check) ────────────────────────────────────
   if (gapMs > 0) {
-    const impliedSpeedKmh = (d / (gapMs / 3600_000));
+    const impliedSpeedKmh = d / (gapMs / 3_600_000);
     if (impliedSpeedKmh > MAX_SPEED_KMH) {
-      // GPS teleport — ignore point entirely, keep old Kalman state
+      // GPS teleport — ignore, keep old Kalman state
       state.lastTimestamp = timestamp;
       return 0;
     }
@@ -167,10 +132,21 @@ export function processGpsPoint(
   }
 
   // ── 8. Stationary detector ─────────────────────────────────────────────────
-  // If GPS says we're moving slowly AND distance is small → driver is parked
+  const reportedSpeedKmh = speedMs !== null ? speedMs * 3.6 : null;
+
+  // Standard: GPS says slow AND distance is small → parked
   const isStationary =
     speedMs !== null && speedMs < STATIONARY_SPEED && d < STATIONARY_DIST_KM;
-  if (isStationary) {
+
+  // CRITICAL FIX: Speed-distance conflict.
+  // GPS says < 10 km/h but position jumped > 30m → cell tower lock / multipath error.
+  // This is the main cause of phantom km while driver is waiting.
+  const isSpeedDistanceConflict =
+    reportedSpeedKmh !== null &&
+    reportedSpeedKmh < 10 &&
+    d > 0.030;
+
+  if (isStationary || isSpeedDistanceConflict) {
     state.kalman = smoothed;
     state.lastTimestamp = timestamp;
     return 0;

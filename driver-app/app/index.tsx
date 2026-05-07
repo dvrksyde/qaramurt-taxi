@@ -130,7 +130,7 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
 
       const state = useDriverStore.getState();
 
-      if (state.activeOrder?.status === "in_progress" && !state.activeOrder.isFixedPrice) {
+      if (state.activeOrder?.status === "in_progress" && !state.activeOrder.isFixedPrice && !state.activeOrder.isWaiting) {
         // ── Smart GPS Odometer (Kalman filtered) ─────────────────────────────
         // Replaces raw Haversine — fixes drift, GPS teleports, bad-accuracy
         // points, and time gaps that caused the 290₸ bug in rural areas.
