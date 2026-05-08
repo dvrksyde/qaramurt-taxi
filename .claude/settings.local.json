@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(npx prisma *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(mkdir -p \"c:\\\\Users\\\\Aziz\\\\Desktop\\\\QaramurtTaxi\\\\src\\\\app\\\\api\\\\app\\\\version\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\Aziz\\Desktop\\QaramurtTaxi\\src\\app\\api\\app"
     ]
   }
 }
