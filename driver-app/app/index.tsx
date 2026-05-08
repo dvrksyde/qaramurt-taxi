@@ -130,16 +130,21 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
 
       const state = useDriverStore.getState();
 
+      // Smoothed coords are set inside the odometer block and used later for queueTripPoint
+      let smoothedLat: number | null = null;
+      let smoothedLng: number | null = null;
+
       if (state.activeOrder?.status === "in_progress" && !state.activeOrder.isFixedPrice && !state.activeOrder.isWaiting) {
         // ── Smart GPS Odometer (Kalman filtered) ─────────────────────────────
-        // Replaces raw Haversine — fixes drift, GPS teleports, bad-accuracy
-        // points, and time gaps that caused the 290₸ bug in rural areas.
         const accuracyM = typeof loc.coords.accuracy === "number" && Number.isFinite(loc.coords.accuracy)
           ? loc.coords.accuracy : null;
         const speedMs = typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed)
           ? loc.coords.speed : null;
 
-        const d = processGpsPoint(lat, lng, accuracyM, speedMs, loc.timestamp);
+        const gpsResult = processGpsPoint(lat, lng, accuracyM, speedMs, loc.timestamp);
+        const d = gpsResult.d;
+        smoothedLat = gpsResult.smoothedLat;
+        smoothedLng = gpsResult.smoothedLng;
 
         if (d > 0) {
           const newDist = state.tripDistance + d;
@@ -199,22 +204,25 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
         useDriverStore.getState().setLastHeading(loc.coords.heading);
       }
 
-      // Отправляем последнюю точку на сервер
+      // Отправляем сглаженную (Kalman) точку на сервер — не сырую GPS.
+      // smoothedLat/Lng = null если точность плохая (accuracy > 50м) → не отправляем.
       if (state.activeOrder?.status === "in_progress" && !state.activeOrder.isFixedPrice) {
-        void queueTripPoint(state.activeOrder.id, {
-          lat,
-          lng,
-          capturedAt: new Date(loc.timestamp).toISOString(),
-          accuracyM: typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : null,
-          speedKmh:
-            typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed)
-              ? loc.coords.speed * 3.6
-              : null,
-          headingDeg:
-            typeof loc.coords.heading === "number" && Number.isFinite(loc.coords.heading)
-              ? loc.coords.heading
-              : null,
-        });
+        if (smoothedLat !== null && smoothedLng !== null) {
+          void queueTripPoint(state.activeOrder.id, {
+            lat: smoothedLat,
+            lng: smoothedLng,
+            capturedAt: new Date(loc.timestamp).toISOString(),
+            accuracyM: typeof loc.coords.accuracy === "number" ? loc.coords.accuracy : null,
+            speedKmh:
+              typeof loc.coords.speed === "number" && Number.isFinite(loc.coords.speed)
+                ? loc.coords.speed * 3.6
+                : null,
+            headingDeg:
+              typeof loc.coords.heading === "number" && Number.isFinite(loc.coords.heading)
+                ? loc.coords.heading
+                : null,
+          });
+        }
       }
 
       // Отправляем только последнюю точку из батча — сервер сам rate-limit-ит (3 сек)

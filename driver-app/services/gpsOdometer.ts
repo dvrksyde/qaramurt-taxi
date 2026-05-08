@@ -70,9 +70,16 @@ const STATIONARY_SPEED    = 2.0;   // m/s (~7.2 km/h) — below this = stopped
 const STATIONARY_DIST_KM  = 0.020; // 20m — drift while parked, don't count
 const MAX_GAP_MS          = 30_000; // 30 sec gap → re-anchor (was 45s)
 
+export type GpsProcessResult = {
+  d: number;                    // distance increment km (0 = not counted)
+  smoothedLat: number | null;   // Kalman-smoothed lat (null = bad accuracy, skip queuing)
+  smoothedLng: number | null;
+};
+
 /**
  * Process a GPS reading from the background task.
- * Returns filtered distance increment in km (0 = skip this point).
+ * Returns distance increment + Kalman-smoothed coordinates.
+ * smoothedLat/Lng = null when accuracy is too poor to trust the position.
  */
 export function processGpsPoint(
   lat: number,
@@ -80,32 +87,28 @@ export function processGpsPoint(
   accuracyM: number | null,
   speedMs: number | null,
   timestamp: number,
-): number {
+): GpsProcessResult {
   const accuracy = accuracyM ?? 30;
 
   // ── 1. Accuracy filter ─────────────────────────────────────────────────────
-  // CRITICAL FIX: Do NOT update Kalman state for bad accuracy.
-  // Old code was updating Kalman with low-quality readings, causing it to
-  // gradually drift toward wrong positions (cell-tower lock → fake 46 km).
   if (accuracy > MAX_ACCURACY_M) {
-    state.lastTimestamp = timestamp; // update timestamp to prevent gap ghost
-    return 0;
+    state.lastTimestamp = timestamp;
+    return { d: 0, smoothedLat: null, smoothedLng: null };
   }
 
   // ── 2. First point — init Kalman ───────────────────────────────────────────
   if (!state.kalman) {
     state.kalman = { lat, lng, variance: 1 };
     state.lastTimestamp = timestamp;
-    return 0;
+    return { d: 0, smoothedLat: lat, smoothedLng: lng };
   }
 
   // ── 3. Time gap guard ──────────────────────────────────────────────────────
   const gapMs = timestamp - (state.lastTimestamp ?? timestamp);
   if (gapMs > MAX_GAP_MS) {
-    // GPS was off — don't count ghost distance, re-anchor to current position
     state.kalman = { lat, lng, variance: 1 };
     state.lastTimestamp = timestamp;
-    return 0;
+    return { d: 0, smoothedLat: lat, smoothedLng: lng };
   }
 
   // ── 4. Kalman smooth ───────────────────────────────────────────────────────
@@ -118,9 +121,8 @@ export function processGpsPoint(
   if (gapMs > 0) {
     const impliedSpeedKmh = d / (gapMs / 3_600_000);
     if (impliedSpeedKmh > MAX_SPEED_KMH) {
-      // GPS teleport — ignore, keep old Kalman state
       state.lastTimestamp = timestamp;
-      return 0;
+      return { d: 0, smoothedLat: null, smoothedLng: null };
     }
   }
 
@@ -128,19 +130,14 @@ export function processGpsPoint(
   if (d < MIN_DISTANCE_KM || d > MAX_DISTANCE_KM) {
     state.kalman = smoothed;
     state.lastTimestamp = timestamp;
-    return 0;
+    // Still return smoothed coords — valid position, just not counted for distance
+    return { d: 0, smoothedLat: smoothed.lat, smoothedLng: smoothed.lng };
   }
 
   // ── 8. Stationary detector ─────────────────────────────────────────────────
   const reportedSpeedKmh = speedMs !== null ? speedMs * 3.6 : null;
-
-  // Standard: GPS says slow AND distance is small → parked
   const isStationary =
     speedMs !== null && speedMs < STATIONARY_SPEED && d < STATIONARY_DIST_KM;
-
-  // CRITICAL FIX: Speed-distance conflict.
-  // GPS says < 10 km/h but position jumped > 30m → cell tower lock / multipath error.
-  // This is the main cause of phantom km while driver is waiting.
   const isSpeedDistanceConflict =
     reportedSpeedKmh !== null &&
     reportedSpeedKmh < 10 &&
@@ -149,11 +146,11 @@ export function processGpsPoint(
   if (isStationary || isSpeedDistanceConflict) {
     state.kalman = smoothed;
     state.lastTimestamp = timestamp;
-    return 0;
+    return { d: 0, smoothedLat: smoothed.lat, smoothedLng: smoothed.lng };
   }
 
   // ── All checks passed — accumulate distance ────────────────────────────────
   state.kalman = smoothed;
   state.lastTimestamp = timestamp;
-  return d; // km
+  return { d, smoothedLat: smoothed.lat, smoothedLng: smoothed.lng };
 }
