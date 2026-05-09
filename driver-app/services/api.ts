@@ -8,6 +8,8 @@ import Constants from "expo-constants";
 // БОЕВОЙ СЕРВЕР RENDER -> HETZNER
 export const API_BASE = "https://taxi.azizpro.online";
 
+const APP_VERSION: string = Constants.expoConfig?.version ?? "0.0.0";
+
 let token: string | null = null;
 
 export async function loadToken() {
@@ -35,6 +37,7 @@ export async function api<T = any>(
 ): Promise<{ data?: T; error?: string }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "X-App-Version": APP_VERSION,
     ...(options.headers as Record<string, string>),
   };
 

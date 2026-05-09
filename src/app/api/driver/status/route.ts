@@ -6,6 +6,16 @@ import { verifyDriverToken } from "@/lib/driverAuth";
 
 import { redis } from "@/lib/redis";
 
+function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
 // PATCH /api/driver/status — toggle online/offline
 export async function PATCH(req: NextRequest) {
   const auth = verifyDriverToken(req);
@@ -15,6 +25,18 @@ export async function PATCH(req: NextRequest) {
 
   if (!["free", "offline"].includes(status)) {
     return NextResponse.json({ error: "Статус должен быть 'free' или 'offline'" }, { status: 400 });
+  }
+
+  // Version check — only when going online
+  if (status === "free") {
+    const minVersion = process.env.MIN_APP_VERSION ?? "1.0.0";
+    const appVersion = req.headers.get("x-app-version") ?? "0.0.0";
+    if (compareVersions(appVersion, minVersion) < 0) {
+      return NextResponse.json(
+        { error: `Версия приложения устарела (${appVersion}). Установите версию ${minVersion} или выше.`, forceUpdate: true },
+        { status: 426 }
+      );
+    }
   }
 
   const driver = await prisma.driver.update({
