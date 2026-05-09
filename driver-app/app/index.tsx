@@ -111,7 +111,8 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
     console.error("BG Task Error:", error);
     return;
   }
-  if (data) {
+  if (!data) return;
+  try {
     const { locations } = data as { locations: Location.LocationObject[] };
     if (!locations || locations.length === 0) return;
 
@@ -234,6 +235,8 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
         }).catch(() => { });
       }
     }
+  } catch (taskErr) {
+    console.error("[GPS Task] Unhandled error:", taskErr);
   }
 });
 
@@ -311,6 +314,7 @@ export default function MainScreen() {
     } | null;
   };
   const [tripSummary, setTripSummary] = useState<TripSummary | null>(null);
+  const [forceUpdateModal, setForceUpdateModal] = useState<{ message: string; downloadUrl: string | null } | null>(null);
 
   useEffect(() => {
     Audio.setAudioModeAsync({
@@ -641,6 +645,10 @@ export default function MainScreen() {
       refreshProfileRank();
     });
 
+    sock.on("force_update", (data: { message: string; downloadUrl: string | null }) => {
+      setForceUpdateModal({ message: data.message, downloadUrl: data.downloadUrl });
+    });
+
     startLocationTracking();
 
     if (realtimeDriverRef.current !== driverId) {
@@ -717,12 +725,13 @@ export default function MainScreen() {
       return;
     }
 
-    // Reset smart odometer at the start of each new trip so Kalman state
-    // from a previous trip doesn't bleed into the new one.
+    // Reset only when a NEW trip starts (order ID changes) — NOT on every
+    // loadDashboard that refreshes the activeOrder object reference.
+    // Previously [activeOrder] caused resetOdometer() every 30s → 0 km bug.
     resetOdometer();
 
     void startTripSync(activeOrder.id).then(() => flushTripPoints(activeOrder.id));
-  }, [activeOrder]);
+  }, [activeOrder?.id, activeOrder?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Map route: build or clear depending on order status ──────────────────
   useEffect(() => {
@@ -795,12 +804,18 @@ export default function MainScreen() {
           bgOfflineTimerRef.current = null;
         }
 
-        // Reconnect socket if it dropped while in background
+        // Reconnect socket + restart GPS task if dropped while in background
         const storeState = useDriverStore.getState();
         if (storeState.isOnline && storeState.profile) {
           const sock = getSocket();
           if (!sock || !sock.connected) {
             startSocketAndGPS(storeState.profile.id);
+          } else {
+            // Socket is fine — but GPS task may have been killed by Android.
+            // Restart it silently if not running.
+            Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
+              .then((running) => { if (!running) startLocationTracking(); })
+              .catch(() => {});
           }
         }
 
@@ -904,14 +919,22 @@ export default function MainScreen() {
       setOnline(!newIsOnline);
       setProfile(profile ? { ...profile, status: isOnline ? "free" : "offline" } : null);
       if (!newIsOnline && profile) {
-        // Was going offline but failed — restore socket/GPS
         startSocketAndGPS(profile.id);
       } else {
         stopLocationTracking();
         disconnectSocket();
         realtimeDriverRef.current = null;
       }
-      Alert.alert("Ошибка", "Не удалось изменить статус. Проверьте соединение.");
+
+      // 426 = version too old → show force update modal instead of generic error
+      if ((res as any).forceUpdate) {
+        setForceUpdateModal({
+          message: res.error,
+          downloadUrl: (res as any).downloadUrl ?? null,
+        });
+      } else {
+        Alert.alert("Ошибка", "Не удалось изменить статус. Проверьте соединение.");
+      }
     }
   };
 
@@ -1628,7 +1651,7 @@ export default function MainScreen() {
             <TouchableOpacity style={styles.floatingMapBtn} onPress={() => mapRef.current?.zoomOut()}>
               <Ionicons name="remove" size={22} color="#333" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.floatingMapBtn} onPress={() => mapRef.current?.centerOnMe()}>
+            <TouchableOpacity style={styles.floatingMapBtn} onPress={async () => { await refreshCurrentPosition(); mapRef.current?.centerOnMe(); }}>
               <Ionicons name="locate" size={20} color="#333" />
             </TouchableOpacity>
           </View>
@@ -1862,22 +1885,28 @@ export default function MainScreen() {
 
   const renderActiveTab = () => {
     switch (activeTab) {
-      case "orders":
-        return <ActiveOrdersPanel />;
-      case "history":
-        return <DriverHistoryPanel />;
-      case "chat":
-        return <DriverChatPanel />;
-      case "profile":
-        return <DriverProfilePanel />;
-      default:
-        return renderHome();
+      case "orders":  return <ActiveOrdersPanel />;
+      case "history": return <DriverHistoryPanel />;
+      case "chat":    return <DriverChatPanel />;
+      case "profile": return <DriverProfilePanel />;
+      default:        return null;
     }
   };
 
   return (
     <View style={styles.container}>
-      <View style={styles.contentArea}>{renderActiveTab()}</View>
+      {/* Home screen (map) always mounted — display:none hides without unmounting.
+          This preserves WebView state so map position is never lost on tab switch. */}
+      <View style={activeTab === 'home' ? styles.contentArea : styles.tabHidden}>
+        {renderHome()}
+      </View>
+
+      {/* Other tabs rendered as overlay when active */}
+      {activeTab !== 'home' && (
+        <View style={styles.contentArea}>
+          {renderActiveTab()}
+        </View>
+      )}
 
       {/* Back-to-map button when a non-home tab is active */}
       {activeTab !== 'home' && (
@@ -1986,6 +2015,39 @@ export default function MainScreen() {
               activeOpacity={0.8}
             >
               <Text style={styles.summaryCloseBtnText}>Закрыть</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ─── Force Update Modal ──────────────────────────────────────────── */}
+      <Modal visible={!!forceUpdateModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.summaryCard, { alignItems: "center", gap: 12 }]}>
+            <Text style={{ fontSize: 40 }}>🚀</Text>
+            <Text style={[styles.summaryTotalLabel, { color: "#FFD000", fontSize: 18 }]}>
+              Доступно обновление
+            </Text>
+            <Text style={{ color: "#aaa", textAlign: "center", lineHeight: 20 }}>
+              {forceUpdateModal?.message}
+            </Text>
+            {forceUpdateModal?.downloadUrl && (
+              <TouchableOpacity
+                style={[styles.summaryCloseBtn, { backgroundColor: "#FFD000", marginTop: 8 }]}
+                onPress={() => Linking.openURL(forceUpdateModal!.downloadUrl!)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.summaryCloseBtnText, { color: "#111" }]}>
+                  Скачать обновление
+                </Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={[styles.summaryCloseBtn, { backgroundColor: "#333", marginTop: 4 }]}
+              onPress={() => setForceUpdateModal(null)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.summaryCloseBtnText}>Позже</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -2114,6 +2176,7 @@ const styles = StyleSheet.create({
   // ─── Layout ───────────────────────────────────────────────
   container: { flex: 1, backgroundColor: "#0a0a0a" },
   contentArea: { flex: 1 },
+  tabHidden: { flex: 1, display: 'none' },
   loadingWrap: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0a0a0a" },
   loadingText: { color: "#666", fontSize: 16 },
   pageBlock: { flex: 1, paddingHorizontal: 16, paddingBottom: 90, overflow: "hidden" },

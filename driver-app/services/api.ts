@@ -70,7 +70,7 @@ export async function api<T = any>(
     }
 
     if (!res.ok) {
-      return { error: json.error || `Ошибка ${res.status}` };
+      return { error: json.error || `Ошибка ${res.status}`, ...json };
     }
 
     return json;

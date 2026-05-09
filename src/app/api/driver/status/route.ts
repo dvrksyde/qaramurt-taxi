@@ -32,8 +32,14 @@ export async function PATCH(req: NextRequest) {
     const minVersion = process.env.MIN_APP_VERSION ?? "1.0.0";
     const appVersion = req.headers.get("x-app-version") ?? "0.0.0";
     if (compareVersions(appVersion, minVersion) < 0) {
+      const downloadUrl = process.env.APK_DOWNLOAD_URL || null;
       return NextResponse.json(
-        { error: `Версия приложения устарела (${appVersion}). Установите версию ${minVersion} или выше.`, forceUpdate: true },
+        {
+          error: `Версия приложения устарела (${appVersion}). Установите версию ${minVersion} или выше.`,
+          forceUpdate: true,
+          downloadUrl,
+          minVersion,
+        },
         { status: 426 }
       );
     }

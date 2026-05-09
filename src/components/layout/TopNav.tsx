@@ -32,12 +32,32 @@ const NAV_LINKS = [
 export function TopNav({ session }: Props) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [notifying, setNotifying] = useState(false);
   const { totalCash, advanceBalance } = useMonitorStore();
   const { connected: isConnected } = useSocket();
 
   const user = session.user as any;
   const role: string = user?.role || "operator";
   const permissions: string[] = user?.permissions || [];
+
+  const handleNotifyUpdate = async () => {
+    const url = prompt("Ссылка на APK (Google Drive):");
+    if (!url) return;
+    if (!confirm(`Отправить уведомление об обновлении всем онлайн-водителям?\nСсылка: ${url}`)) return;
+    setNotifying(true);
+    try {
+      const res = await fetch("/api/admin/notify-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ downloadUrl: url }),
+      });
+      const data = await res.json();
+      if (data.ok) alert("Уведомление отправлено всем онлайн-водителям!");
+      else alert("Ошибка: " + data.error);
+    } finally {
+      setNotifying(false);
+    }
+  };
   const isAdmin = role === "admin";
 
   /** Check if user can see a nav link */
@@ -100,6 +120,18 @@ export function TopNav({ session }: Props) {
               style={{ fontSize: 16, padding: "0 6px" }}
             >
               {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+          )}
+
+          {isAdmin && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={handleNotifyUpdate}
+              disabled={notifying}
+              title="Отправить уведомление об обновлении всем онлайн-водителям"
+              style={{ color: "#f59e0b" }}
+            >
+              {notifying ? "..." : "📲 Обновление"}
             </button>
           )}
 
