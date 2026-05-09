@@ -31,7 +31,7 @@ import { ActiveOrdersPanel } from "../components/ActiveOrdersPanel";
 import { SwipeButton } from "../components/SwipeButton";
 import { YandexMapView, type YandexMapViewHandle } from "../components/OSMMapView";
 import { mapOrderToActiveOrder } from "../lib/orderPricing";
-import { clearTripSync, flushTripPoints, getTripRates, injectSessionId, queueTripPoint, savePendingCompletion, savePendingStatus, clearPendingStatus, syncPendingStatus, startTripSync, syncPendingCompletion } from "../services/tripSync";
+import { clearTripSync, flushTripPoints, getTripRates, injectSessionId, queueTripPoint, savePendingCompletion, savePendingStatus, clearPendingStatus, syncPendingStatus, startTripSync, syncPendingCompletion, saveTripMetrics, loadTripMetrics, clearTripMetrics } from "../services/tripSync";
 import { processGpsPoint, resetOdometer } from "../services/gpsOdometer";
 
 const BASE_FARE = 290;
@@ -168,6 +168,16 @@ TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
             tripDistance: newDist,
             tripPrice: newPrice,
             outOfCityAccumulatedKm: updatedOutKm,
+          });
+
+          // Persist so counter survives app kill (e.g. when driver opens Yandex Navigator)
+          void saveTripMetrics({
+            orderId: state.activeOrder.id,
+            tripDistance: newDist,
+            tripPrice: newPrice,
+            outOfCityKm: updatedOutKm,
+            outOfCitySeconds: useDriverStore.getState().outOfCityAccumulatedSeconds,
+            savedAt: Date.now(),
           });
         }
 
@@ -688,6 +698,21 @@ export default function MainScreen() {
           nextOrder = null;
         }
         setActiveOrder(nextOrder);
+
+        // Restore counter after app kill (e.g. driver opened Yandex Navigator)
+        if (nextOrder?.status === "in_progress" && !nextOrder.isFixedPrice) {
+          const currentStore = useDriverStore.getState();
+          if (currentStore.tripDistance === 0 && currentStore.tripStartTime) {
+            const saved = await loadTripMetrics(nextOrder.id);
+            if (saved && saved.tripDistance > 0) {
+              currentStore.setTripMeter(saved.tripDistance, saved.tripPrice);
+              useDriverStore.setState({
+                outOfCityAccumulatedKm: saved.outOfCityKm,
+                outOfCityAccumulatedSeconds: saved.outOfCitySeconds,
+              });
+            }
+          }
+        }
       }
 
       // Не перезаписываем online-статус пока водитель активно переключает линию
@@ -1342,37 +1367,53 @@ export default function MainScreen() {
       setActiveOrder(null);
       resetTrip();
       await clearTripSync(activeOrder.id);
+      void clearTripMetrics();
       setProfile(profile ? { ...profile, status: "free" } : null);
       loadDashboard();
       // Clear the protection after 10s (any in-flight response will have arrived by then)
       setTimeout(() => { completedOrderIdRef.current = null; }, 10000);
     } else {
-      setActiveOrder({ ...activeOrder, status });
+      // Clear isWaiting when trip starts — otherwise the GPS odometer block
+      // (!isWaiting condition) stays blocked and distance never accumulates.
+      const patch = status === "in_progress"
+        ? { ...activeOrder, status, isWaiting: false, waitingStartedAt: null }
+        : { ...activeOrder, status };
+      setActiveOrder(patch);
       if (status === "in_progress" && !activeOrder.isFixedPrice) {
         void (async () => {
-          await startTripSync(activeOrder.id);
+          // ── Synchronous path (server returned rates in PATCH response) ──────
+          // Same as curbside: rates are ready from second 1, no async getTripRates needed.
+          const serverSessionId = res.data?._sessionId ?? null;
+          const serverBaseFare  = Number(res.data?._baseFare)      || useDriverStore.getState().tripBaseFare;
+          const serverCityRate  = Number(res.data?._cityRate)       || Number(activeOrder.pricePerKm) || 80;
+          const serverOutRate   = Number(res.data?._outOfCityRate)  || 0;
 
-          // Apply server-resolved rates (correct for "Любой" orders with Comfort driver)
-          const rates = await getTripRates(activeOrder.id);
-          if (rates && rates.effectiveBaseFare) {
+          if (serverSessionId) {
+            // Inject session + rates synchronously — no /trip/start call needed
+            await injectSessionId(activeOrder.id, serverSessionId, serverBaseFare, serverCityRate, serverOutRate);
             const store = useDriverStore.getState();
-            // The server's effectiveBaseFare already includes options (fixed in trip/start).
-            // We use it directly as the new tripBaseFare.
-            const serverBaseFare = rates.effectiveBaseFare;
-            if (serverBaseFare !== store.tripBaseFare) {
-              store.setTripBaseFare(serverBaseFare);
+            store.setTripBaseFare(serverBaseFare);
+            store.setTripCityRate(serverCityRate);
+            if (serverOutRate > 0) store.setConfiguredOutOfCityRate(serverOutRate);
+            const currentDist = store.tripDistance;
+            store.setTripMeter(currentDist, roundTo5(serverBaseFare + currentDist * serverCityRate));
+          } else {
+            // ── Fallback: offline or server didn't return rates ────────────────
+            await startTripSync(activeOrder.id);
+            const rates = await getTripRates(activeOrder.id);
+            if (rates) {
+              const store = useDriverStore.getState();
+              store.setTripBaseFare(rates.effectiveBaseFare);
+              store.setTripCityRate(rates.effectiveCityRatePerKm);
+              if (rates.outOfCityKmRate > 0) store.setConfiguredOutOfCityRate(rates.outOfCityKmRate);
               const currentDist = store.tripDistance;
-              const cityRate = rates.effectiveCityRatePerKm || 80;
-              store.setTripMeter(currentDist, roundTo5(serverBaseFare + currentDist * cityRate));
+              store.setTripMeter(currentDist, roundTo5(rates.effectiveBaseFare + currentDist * rates.effectiveCityRatePerKm));
             }
-            store.setTripCityRate(rates.effectiveCityRatePerKm);
-          } else if (rates) {
-            useDriverStore.getState().setTripCityRate(rates.effectiveCityRatePerKm);
           }
 
           // Store out-of-city rate for client-side zone detection in GPS task
-          if (rates?.outOfCityKmRate && rates.outOfCityKmRate > 0) {
-            useDriverStore.getState().setConfiguredOutOfCityRate(rates.outOfCityKmRate);
+          if (serverOutRate > 0) {
+            useDriverStore.getState().setConfiguredOutOfCityRate(serverOutRate);
           }
 
           // Fetch city boundary GeoJSON once (cached in store across trips)

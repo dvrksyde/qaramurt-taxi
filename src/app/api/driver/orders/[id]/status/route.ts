@@ -6,6 +6,7 @@ import { verifyDriverToken } from "@/lib/driverAuth";
 import { reverseGeocode } from "@/lib/geocoder";
 import { isDeliveryOrder } from "@/lib/orderPricing";
 import { calculateSessionDistance, completeSession } from "@/lib/tripDistance";
+import { getOrCreateTripSession } from "@/lib/tripSession";
 
 const BASE_FARE = 290;
 
@@ -90,6 +91,20 @@ export async function PATCH(
           updateData.estimatedPrice = Number(order.estimatedPrice || 0) + waitFee;
         }
       }
+    }
+
+    // Create/get trip session immediately and embed rates in response —
+    // same as curbside does, so the app counter starts with correct rates from second 1.
+    if (!fixedPriceOrder) {
+      try {
+        const session = await getOrCreateTripSession(orderId, auth.driverId);
+        if (session) {
+          (updateData as any)._sessionId       = session.sessionId;
+          (updateData as any)._baseFare         = session.effectiveBaseFare;
+          (updateData as any)._cityRate         = session.effectiveCityRatePerKm;
+          (updateData as any)._outOfCityRate    = session.outOfCityKmRate;
+        }
+      } catch { /* non-critical — app falls back to async getTripRates */ }
     }
   } else if (status === "completed") {
     // Driver completed trip while offline (arrived→completed skip):
@@ -394,8 +409,12 @@ export async function PATCH(
       finalPrice: finalOrder?.finalPrice ?? null,
       waitingFee: finalOrder?.waitingFee ?? 0,
       waitingAccumulatedSeconds: finalOrder?.waitingAccumulatedSeconds ?? 0,
-      // Trip breakdown for the driver app summary modal (only on completion)
       breakdown: status === "completed" ? (tripBreakdownForResponse ?? null) : undefined,
+      // Session + rates for in_progress — app sets them synchronously (no async getTripRates needed)
+      _sessionId:    (updateData as any)._sessionId    ?? undefined,
+      _baseFare:     (updateData as any)._baseFare     ?? undefined,
+      _cityRate:     (updateData as any)._cityRate     ?? undefined,
+      _outOfCityRate:(updateData as any)._outOfCityRate?? undefined,
     },
   });
 }

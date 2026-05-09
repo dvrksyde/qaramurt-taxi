@@ -2,6 +2,7 @@ import * as SecureStore from "expo-secure-store";
 import { api } from "./api";
 
 const TRIP_SYNC_KEY = "driver_trip_sync_v1";
+const TRIP_METRICS_KEY = "driver_trip_metrics_v1";
 const POINT_BATCH_SIZE = 25;
 
 type PendingTripPoint = {
@@ -211,6 +212,37 @@ export async function getTripRates(orderId: number): Promise<{
     effectiveCityRatePerKm: state.effectiveCityRatePerKm ?? 80,
     outOfCityKmRate: state.outOfCityKmRate ?? 0,
   };
+}
+
+// ── Trip metrics persistence (survives app kill) ──────────────────────────────
+// Saved by the GPS background task every update, restored on app restart.
+
+export type TripMetrics = {
+  orderId: number;
+  tripDistance: number;
+  tripPrice: number;
+  outOfCityKm: number;
+  outOfCitySeconds: number;
+  savedAt: number;
+};
+
+export async function saveTripMetrics(metrics: TripMetrics): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(TRIP_METRICS_KEY, JSON.stringify(metrics));
+  } catch { /* ignore */ }
+}
+
+export async function loadTripMetrics(orderId: number): Promise<TripMetrics | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(TRIP_METRICS_KEY);
+    if (!raw) return null;
+    const m = JSON.parse(raw) as TripMetrics;
+    return m.orderId === orderId ? m : null;
+  } catch { return null; }
+}
+
+export async function clearTripMetrics(): Promise<void> {
+  try { await SecureStore.deleteItemAsync(TRIP_METRICS_KEY); } catch { /* ignore */ }
 }
 
 export async function clearTripSync(orderId?: number): Promise<void> {
