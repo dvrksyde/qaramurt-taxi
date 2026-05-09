@@ -13,7 +13,7 @@ services:
       --max-matching-size 99
       /data/kazakhstan-latest.osrm
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://localhost:5000/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O- 'http://localhost:5000/nearest/v1/driving/69.59,42.31' | grep -q Ok || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
