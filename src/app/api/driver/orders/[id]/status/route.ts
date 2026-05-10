@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyDriverToken } from "@/lib/driverAuth";
 import { reverseGeocode } from "@/lib/geocoder";
 import { isDeliveryOrder } from "@/lib/orderPricing";
-import { calculateSessionDistance, completeSession } from "@/lib/tripDistance";
+import { completeSession } from "@/lib/tripDistance";
 import { getOrCreateTripSession } from "@/lib/tripSession";
 
 const BASE_FARE = 290;
@@ -149,8 +149,8 @@ export async function PATCH(
         updateData.finalPrice = fixedPrice;
       }
     } else {
-      // ── SERVER-SIDE DISTANCE CALCULATION ────────────────────────────────────
-      // Find the active trip session for this order to compute real distance
+      // ── CLIENT-AUTHORITATIVE COMPLETION ─────────────────────────────────────
+      // Find the active trip session to persist client-calculated values
       const activeSession = await prisma.orderTripSession.findFirst({
         where: {
           orderId,
@@ -162,11 +162,10 @@ export async function PATCH(
 
       if (activeSession) {
         // Session rates (set at trip/start)
-        const sessionBaseFare  = Number(activeSession.baseFare)    || currentBaseFare;
-        const sessionCityRate  = Number(activeSession.tariffPerKm) || Number(order.pricePerKm) || 80;
-        const midTripWaitFee   = Number(order.waitingFee || 0);
+        const sessionBaseFare = Number(activeSession.baseFare)    || currentBaseFare;
+        const sessionCityRate = Number(activeSession.tariffPerKm) || Number(order.pricePerKm) || 80;
+        const midTripWaitFee  = Number(order.waitingFee || 0);
 
-        // Read out-of-city rate (added via raw SQL column)
         let sessionOutOfCityRate = 0;
         try {
           const rr = await prisma.$queryRaw<Array<{ r: string }>>`
@@ -175,88 +174,37 @@ export async function PATCH(
           sessionOutOfCityRate = Number(rr[0]?.r ?? 0);
         } catch { /* column not yet created */ }
 
-        // ── VARIANT B: Client price is the authoritative source ──────────────
-        // The driver app meter accumulates price locally with correct zone-aware
-        // rates (city vs out-of-city). Server GPS points may be incomplete due
-        // to weak network in rural areas, so we trust the client meter.
-        //
-        // Security: clientFinalPrice must be >= sessionBaseFare (minimum floor).
-        // If client sends a suspiciously low price → fall back to server calc.
-        //
-        // Server GPS calc still runs for:
-        //   • distanceKm  — server-side segment filtering is more accurate
-        //   • breakdown   — city/out-of-city split for the summary modal
-        //   • audit trail — GPS points stored in DB regardless
-        // ────────────────────────────────────────────────────────────────────
+        // ── CLIENT-AUTHORITATIVE PRICE & DISTANCE ────────────────────────────
+        // The Kalman odometer on the device accumulates distance in real-time.
+        // GPS points sent to server are for audit logs only — may be incomplete
+        // due to weak network in rural areas. Server validates the minimum floor
+        // (clientFinalPrice >= sessionBaseFare) and saves the client values.
         const clientPriceIsValid = clientFinalPrice !== undefined
           && clientFinalPrice >= sessionBaseFare;
 
-        let tripBreakdown: {
-          baseFare: number; cityKm: number; cityRatePerKm: number;
-          outOfCityKm: number; outOfCityKmRate: number; outOfCitySeconds: number;
-        } | null = null;
+        const finalPrice  = clientPriceIsValid
+          ? clientFinalPrice!
+          : (sessionBaseFare + midTripWaitFee);
+        const finalDistKm = clientDistanceKm ?? 0;
 
-        try {
-          const calc = await calculateSessionDistance(activeSession.id);
+        const bOutCityKm  = clientOutOfCityKm  ?? 0;
+        const bOutCitySec = clientOutOfCitySeconds ?? 0;
+        const bCityKm     = Math.max(0, finalDistKm - bOutCityKm);
 
-          // Distance: take the LARGER of server GPS and client distance.
-          // Server GPS may be incomplete (fire-and-forget upload → partial points).
-          // Client accumulates in real-time from every GPS update → more complete.
-          // Math.max ensures the DB never shows less than what the driver actually drove.
-          const serverDistKm = calc.distanceKm > 0 ? calc.distanceKm : 0;
-          const finalDistKm  = Math.max(serverDistKm, clientDistanceKm ?? 0);
-          console.log(`[trip/complete] dist: server=${serverDistKm} client=${clientDistanceKm} → using ${finalDistKm}`);
+        console.log(`[trip/complete] client: dist=${finalDistKm} price=${finalPrice} outKm=${bOutCityKm}`);
 
-          // Price: take the MAXIMUM of client and server prices.
-          // Client includes waitingFee + outOfCityTimeFee tracked in real-time.
-          // Server may have measured more distance (Kalman can under-count on straights).
-          // Neither is always right — highest value wins so the driver is never underpaid.
-          const serverPrice = Math.max(calc.finalPrice, sessionBaseFare) + midTripWaitFee;
-          const finalPrice = clientPriceIsValid
-            ? Math.max(clientFinalPrice!, serverPrice)
-            : serverPrice;
-          console.log(`[trip/complete] price: client=${clientFinalPrice} server=${serverPrice} → using ${finalPrice}`);
+        await completeSession(activeSession.id, finalDistKm, finalPrice, bOutCityKm, bOutCitySec);
+        updateData.distanceKm = finalDistKm;
+        updateData.finalPrice  = finalPrice;
 
-          await completeSession(activeSession.id, finalDistKm, finalPrice, calc.outOfCityKm, calc.outOfCitySeconds);
-          updateData.distanceKm = finalDistKm;
-          updateData.finalPrice  = finalPrice;
-
-          // Breakdown: prefer server GPS zone data; fall back to client-tracked
-          // values when server zone detection lagged (batch not flushed yet) or failed.
-          const bOutCityKm = calc.outOfCityKm > 0
-            ? calc.outOfCityKm
-            : (clientOutOfCityKm ?? 0);
-          const bOutCitySec = calc.outOfCitySeconds > 0
-            ? calc.outOfCitySeconds
-            : (clientOutOfCitySeconds ?? 0);
-          const bCityKm = Math.max(0, finalDistKm - bOutCityKm);
-          tripBreakdown = {
-            baseFare:          sessionBaseFare,
-            cityKm:            bCityKm,
-            cityRatePerKm:     sessionCityRate,
-            outOfCityKm:       bOutCityKm,
-            outOfCityKmRate:   sessionOutOfCityRate || sessionCityRate,
-            outOfCitySeconds:  bOutCitySec,
-          };
-        } catch (err) {
-          // Server calc crashed entirely — client price is our only option
-          console.error("[trip/complete] Server calc failed:", err);
-          const finalPrice = clientPriceIsValid
-            ? clientFinalPrice!
-            : (sessionBaseFare + midTripWaitFee);
-          updateData.distanceKm = clientDistanceKm ?? 0;
-          updateData.finalPrice  = finalPrice;
-          tripBreakdown = {
-            baseFare:         sessionBaseFare,
-            cityKm:           clientDistanceKm ?? 0,
-            cityRatePerKm:    sessionCityRate,
-            outOfCityKm:      0,
-            outOfCityKmRate:  sessionOutOfCityRate || sessionCityRate,
-            outOfCitySeconds: 0,
-          };
-        }
-
-        (updateData as any)._breakdown = tripBreakdown;
+        (updateData as any)._breakdown = {
+          baseFare:         sessionBaseFare,
+          cityKm:           bCityKm,
+          cityRatePerKm:    sessionCityRate,
+          outOfCityKm:      bOutCityKm,
+          outOfCityKmRate:  sessionOutOfCityRate || sessionCityRate,
+          outOfCitySeconds: bOutCitySec,
+        };
       } else {
         // No GPS session at all — trust clientFinalPrice fully
         const noSessionRate = Number(order.pricePerKm) || 80;

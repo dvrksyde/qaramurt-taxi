@@ -62,7 +62,7 @@ export function resetOdometer(): void {
 }
 
 // ─── Thresholds ────────────────────────────────────────────────────────────────
-const MAX_ACCURACY_M      = 50;    // Ignore GPS fix worse than 50m
+const MAX_ACCURACY_M      = 40;    // Ignore GPS fix worse than 40m
 const MAX_SPEED_KMH       = 140;   // Physically impossible → GPS glitch
 const MIN_DISTANCE_KM     = 0.010; // 10m — don't count micro-movements
 const MAX_DISTANCE_KM     = 0.150; // 150m max per step (was 300m — too loose)

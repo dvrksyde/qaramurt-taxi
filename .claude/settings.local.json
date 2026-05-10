@@ -3,7 +3,10 @@
     "allow": [
       "Bash(npx prisma *)",
       "Bash(npx tsc *)",
-      "Bash(mkdir -p \"c:\\\\Users\\\\Aziz\\\\Desktop\\\\QaramurtTaxi\\\\src\\\\app\\\\api\\\\app\\\\version\")"
+      "Bash(mkdir -p \"c:\\\\Users\\\\Aziz\\\\Desktop\\\\QaramurtTaxi\\\\src\\\\app\\\\api\\\\app\\\\version\")",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Aziz\\\\Desktop\\\\QaramurtTaxi\" -Filter \"*.dart\" -Recurse)",
+      "Bash(Select-Object FullName)",
+      "Bash(npx expo *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Aziz\\Desktop\\QaramurtTaxi\\src\\app\\api\\app"

@@ -1,9 +1,18 @@
 import * as SecureStore from "expo-secure-store";
 import { api } from "./api";
+import {
+  dbInsertPoint,
+  dbGetBatch,
+  dbCountPending,
+  dbMarkSynced,
+  dbDeleteAll,
+  dbGetAllPoints,
+  type PointRow,
+} from "./tripDb";
 
-const TRIP_SYNC_KEY = "driver_trip_sync_v1";
+const TRIP_SYNC_KEY    = "driver_trip_sync_v2"; // v2 — pendingPoints moved to SQLite
 const TRIP_METRICS_KEY = "driver_trip_metrics_v1";
-const POINT_BATCH_SIZE = 25;
+const POINT_BATCH_SIZE = 50; // increased from 25 — fewer round-trips on weak network
 
 type PendingTripPoint = {
   sequenceNumber: number;
@@ -15,12 +24,11 @@ type PendingTripPoint = {
   headingDeg?: number | null;
 };
 
+// Metadata only — GPS points live in SQLite, not here
 type StoredTripSyncState = {
   orderId: number;
   sessionId: number | null;
   nextSequenceNumber: number;
-  pendingPoints: PendingTripPoint[];
-  // Server-resolved rates (correct for "Любой" orders with Comfort driver)
   effectiveBaseFare?: number;
   effectiveCityRatePerKm?: number;
   outOfCityKmRate?: number;
@@ -34,12 +42,49 @@ async function readState(): Promise<StoredTripSyncState | null> {
 
   try {
     const raw = await SecureStore.getItemAsync(TRIP_SYNC_KEY);
-    cachedState = raw ? (JSON.parse(raw) as StoredTripSyncState) : null;
+    if (!raw) {
+      // Check for legacy v1 key — migrate points to SQLite on first run
+      await migrateLegacyState();
+      return cachedState ?? null;
+    }
+    cachedState = JSON.parse(raw) as StoredTripSyncState;
   } catch {
     cachedState = null;
   }
 
   return cachedState;
+}
+
+// One-time migration: move pendingPoints from old SecureStore key to SQLite
+async function migrateLegacyState(): Promise<void> {
+  try {
+    const raw = await SecureStore.getItemAsync("driver_trip_sync_v1");
+    if (!raw) { cachedState = null; return; }
+
+    const legacy = JSON.parse(raw) as StoredTripSyncState & { pendingPoints?: PendingTripPoint[] };
+
+    if (legacy.pendingPoints && legacy.pendingPoints.length > 0) {
+      for (const p of legacy.pendingPoints) {
+        dbInsertPoint(legacy.orderId, {
+          sequenceNumber: p.sequenceNumber,
+          lat: p.lat,
+          lng: p.lng,
+          capturedAt: p.capturedAt,
+          accuracyM: p.accuracyM ?? null,
+          speedKmh: p.speedKmh ?? null,
+          headingDeg: p.headingDeg ?? null,
+        });
+      }
+      console.log(`[tripSync] Migrated ${legacy.pendingPoints.length} legacy points to SQLite`);
+    }
+
+    const { pendingPoints: _dropped, ...cleanState } = legacy as any;
+    cachedState = cleanState as StoredTripSyncState;
+    await SecureStore.setItemAsync(TRIP_SYNC_KEY, JSON.stringify(cachedState));
+    await SecureStore.deleteItemAsync("driver_trip_sync_v1");
+  } catch {
+    cachedState = null;
+  }
 }
 
 async function writeState(state: StoredTripSyncState | null): Promise<void> {
@@ -81,45 +126,36 @@ async function ensureSession(orderId: number): Promise<StoredTripSyncState | nul
 export async function startTripSync(orderId: number): Promise<void> {
   const state = await readState();
   if (!state || state.orderId !== orderId) {
-    await writeState({
-      orderId,
-      sessionId: null,
-      nextSequenceNumber: 1,
-      pendingPoints: [],
-    });
+    await writeState({ orderId, sessionId: null, nextSequenceNumber: 1 });
   }
-
   await ensureSession(orderId);
 }
 
 export async function queueTripPoint(
   orderId: number,
-  point: Omit<PendingTripPoint, "sequenceNumber">
+  point: Omit<PendingTripPoint, "sequenceNumber">,
 ): Promise<void> {
   let state = await readState();
 
   if (!state || state.orderId !== orderId) {
-    state = {
-      orderId,
-      sessionId: null,
-      nextSequenceNumber: 1,
-      pendingPoints: [],
-    };
+    state = { orderId, sessionId: null, nextSequenceNumber: 1 };
   }
 
-  const nextState: StoredTripSyncState = {
-    ...state,
-    nextSequenceNumber: state.nextSequenceNumber + 1,
-    pendingPoints: [
-      ...state.pendingPoints,
-      {
-        ...point,
-        sequenceNumber: state.nextSequenceNumber,
-      },
-    ],
-  };
+  const seq = state.nextSequenceNumber;
 
-  await writeState(nextState);
+  // Write to SQLite first — survives app kill immediately
+  dbInsertPoint(orderId, {
+    sequenceNumber: seq,
+    lat: point.lat,
+    lng: point.lng,
+    capturedAt: point.capturedAt,
+    accuracyM: point.accuracyM ?? null,
+    speedKmh: point.speedKmh ?? null,
+    headingDeg: point.headingDeg ?? null,
+  });
+
+  // Only update the lightweight metadata in SecureStore
+  await writeState({ ...state, nextSequenceNumber: seq + 1 });
   void flushTripPoints(orderId);
 }
 
@@ -131,38 +167,26 @@ export async function flushTripPoints(orderId: number): Promise<boolean> {
   activeFlushPromise = (async () => {
     try {
       while (true) {
-        let state = await readState();
-        if (!state || state.orderId !== orderId) return true;
-        if (state.pendingPoints.length === 0) return true;
+        if (dbCountPending(orderId) === 0) return true;
 
-        state = await ensureSession(orderId);
+        const state = await ensureSession(orderId);
         if (!state || state.orderId !== orderId || !state.sessionId) {
           return false;
         }
 
-        const batch = state.pendingPoints.slice(0, POINT_BATCH_SIZE);
+        const batch = dbGetBatch(orderId, POINT_BATCH_SIZE);
+        if (batch.length === 0) return true;
+
         const res = await api(`/api/driver/orders/${orderId}/trip/points`, {
           method: "POST",
-          body: JSON.stringify({
-            sessionId: state.sessionId,
-            points: batch,
-          }),
+          body: JSON.stringify({ sessionId: state.sessionId, points: batch }),
         });
 
-        if (res.error) {
-          return false;
-        }
+        if (res.error) return false;
 
-        const latestState = await readState();
-        if (!latestState || latestState.orderId !== orderId) {
-          return true;
-        }
-
-        await writeState({
-          ...latestState,
-          sessionId: state.sessionId,
-          pendingPoints: latestState.pendingPoints.slice(batch.length),
-        });
+        // Mark sent rows as synced — don't delete yet, needed for map matching at trip end
+        const maxSeq = batch[batch.length - 1].sequenceNumber;
+        dbMarkSynced(orderId, maxSeq);
       }
     } finally {
       activeFlushPromise = null;
@@ -175,7 +199,6 @@ export async function flushTripPoints(orderId: number): Promise<boolean> {
 /**
  * Inject a pre-created session ID (e.g. from curbside route) so app doesn't
  * make a redundant /trip/start request.
- * Also stores server-resolved rates so getTripRates() works correctly.
  */
 export async function injectSessionId(
   orderId: number,
@@ -186,7 +209,7 @@ export async function injectSessionId(
 ): Promise<void> {
   let state = await readState();
   if (!state || state.orderId !== orderId) {
-    state = { orderId, sessionId: null, nextSequenceNumber: 1, pendingPoints: [] };
+    state = { orderId, sessionId: null, nextSequenceNumber: 1 };
   }
   if (!state.sessionId) {
     await writeState({
@@ -199,7 +222,6 @@ export async function injectSessionId(
   }
 }
 
-/** Returns server-resolved rates for the active trip session (or null if not started yet). */
 export async function getTripRates(orderId: number): Promise<{
   effectiveBaseFare: number;
   effectiveCityRatePerKm: number;
@@ -208,14 +230,26 @@ export async function getTripRates(orderId: number): Promise<{
   const state = await readState();
   if (!state || state.orderId !== orderId || !state.sessionId) return null;
   return {
-    effectiveBaseFare: state.effectiveBaseFare ?? 290,
+    effectiveBaseFare:    state.effectiveBaseFare    ?? 290,
     effectiveCityRatePerKm: state.effectiveCityRatePerKm ?? 80,
-    outOfCityKmRate: state.outOfCityKmRate ?? 0,
+    outOfCityKmRate:      state.outOfCityKmRate      ?? 0,
   };
 }
 
-// ── Trip metrics persistence (survives app kill) ──────────────────────────────
-// Saved by the GPS background task every update, restored on app restart.
+/** Returns all GPS points for a trip — used by GraphHopper map matching at trip end */
+export function getTripPointsForMatching(orderId: number): Array<{ lat: number; lng: number }> {
+  return dbGetAllPoints(orderId).map(p => ({ lat: p.lat, lng: p.lng }));
+}
+
+export async function clearTripSync(orderId?: number): Promise<void> {
+  const state = await readState();
+  if (!state) return;
+  if (orderId !== undefined && state.orderId !== orderId) return;
+  dbDeleteAll(state.orderId); // clear SQLite rows for this trip
+  await writeState(null);
+}
+
+// ── Trip metrics (survives app kill) ─────────────────────────────────────────
 
 export type TripMetrics = {
   orderId: number;
@@ -245,24 +279,14 @@ export async function clearTripMetrics(): Promise<void> {
   try { await SecureStore.deleteItemAsync(TRIP_METRICS_KEY); } catch { /* ignore */ }
 }
 
-export async function clearTripSync(orderId?: number): Promise<void> {
-  const state = await readState();
-  if (!state) return;
-  if (orderId !== undefined && state.orderId !== orderId) return;
-  await writeState(null);
-}
-
-// ── Pending Completion (offline / weak-network support) ───────────────────────
-// When the /status PATCH fails at completion time, we save the payload locally
-// and free the driver immediately. The sync is retried when network returns.
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Pending Completion ────────────────────────────────────────────────────────
 
 const PENDING_COMPLETION_KEY = "driver_pending_completion_v1";
 
 export type PendingCompletion = {
   orderId: number;
-  body: Record<string, unknown>;   // full body for PATCH /api/driver/orders/:id/status
-  savedAt: number;                 // timestamp ms
+  body: Record<string, unknown>;
+  savedAt: number;
 };
 
 export async function savePendingCompletion(data: PendingCompletion): Promise<void> {
@@ -273,21 +297,15 @@ export async function getPendingCompletion(): Promise<PendingCompletion | null> 
   try {
     const raw = await SecureStore.getItemAsync(PENDING_COMPLETION_KEY);
     return raw ? (JSON.parse(raw) as PendingCompletion) : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 export async function clearPendingCompletion(): Promise<void> {
-  try {
-    await SecureStore.deleteItemAsync(PENDING_COMPLETION_KEY);
-  } catch { /* ignore */ }
+  try { await SecureStore.deleteItemAsync(PENDING_COMPLETION_KEY); } catch { /* ignore */ }
 }
 
-// Guard against concurrent sync calls (e.g. socket reconnect + 30s interval firing together)
 let isSyncingCompletion = false;
 
-/** Try to sync the pending completion to the server. Returns true if synced or nothing pending. */
 export async function syncPendingCompletion(): Promise<boolean> {
   if (isSyncingCompletion) return false;
   isSyncingCompletion = true;
@@ -295,9 +313,6 @@ export async function syncPendingCompletion(): Promise<boolean> {
     const pending = await getPendingCompletion();
     if (!pending) return true;
 
-    // Flush any GPS points that were queued offline but not yet sent.
-    // Must happen before the completion PATCH so the server has all points
-    // when it recalculates the final distance.
     await flushTripPoints(pending.orderId).catch(() => {});
 
     const res = await api(`/api/driver/orders/${pending.orderId}/status`, {
@@ -310,10 +325,9 @@ export async function syncPendingCompletion(): Promise<boolean> {
       return false;
     }
 
-    // Clean up all offline state now that the server confirmed completion.
     await clearPendingCompletion();
-    await clearPendingStatus();    // stale arrived/in_progress no longer needed
-    await clearTripSync(pending.orderId); // GPS points were flushed above — safe to clear
+    await clearPendingStatus();
+    await clearTripSync(pending.orderId);
     console.log(`[pendingCompletion] Synced order ${pending.orderId} successfully`);
     return true;
   } finally {
@@ -321,10 +335,7 @@ export async function syncPendingCompletion(): Promise<boolean> {
   }
 }
 
-// ── Pending Status (offline arrived / in_progress support) ────────────────────
-// When arrived or in_progress PATCH fails offline, we save it and retry silently.
-// The driver gets an optimistic local status update so the UI and GPS task work.
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Pending Status ────────────────────────────────────────────────────────────
 
 const PENDING_STATUS_KEY = "driver_pending_status_v1";
 
@@ -349,7 +360,6 @@ export async function clearPendingStatus(): Promise<void> {
   try { await SecureStore.deleteItemAsync(PENDING_STATUS_KEY); } catch { /* ignore */ }
 }
 
-/** Retry pending arrived/in_progress status sync. Returns true if nothing pending or sync succeeded. */
 export async function syncPendingStatus(): Promise<boolean> {
   const pending = await getPendingStatus();
   if (!pending) return true;

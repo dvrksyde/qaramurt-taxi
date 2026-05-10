@@ -31,7 +31,8 @@ import { ActiveOrdersPanel } from "../components/ActiveOrdersPanel";
 import { SwipeButton } from "../components/SwipeButton";
 import { YandexMapView, type YandexMapViewHandle } from "../components/OSMMapView";
 import { mapOrderToActiveOrder } from "../lib/orderPricing";
-import { clearTripSync, flushTripPoints, getTripRates, injectSessionId, queueTripPoint, savePendingCompletion, savePendingStatus, clearPendingStatus, syncPendingStatus, startTripSync, syncPendingCompletion, saveTripMetrics, loadTripMetrics, clearTripMetrics } from "../services/tripSync";
+import { clearTripSync, flushTripPoints, getTripRates, getTripPointsForMatching, injectSessionId, queueTripPoint, savePendingCompletion, savePendingStatus, clearPendingStatus, syncPendingStatus, startTripSync, syncPendingCompletion, saveTripMetrics, loadTripMetrics, clearTripMetrics } from "../services/tripSync";
+import { initGraphHopper, matchTripPoints } from "../services/graphHopper";
 import { processGpsPoint, resetOdometer } from "../services/gpsOdometer";
 
 const BASE_FARE = 290;
@@ -295,6 +296,7 @@ export default function MainScreen() {
   const routeThrottleRef = useRef<number>(0);
   const completionRetryRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const statusRetryRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pointsRetryRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Android hardware back button → go to home tab, not exit ───────────────
   useEffect(() => {
@@ -469,8 +471,8 @@ export default function MainScreen() {
 
     await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
       accuracy: Location.Accuracy.BestForNavigation,
-      distanceInterval: 5,   // 5m — точнее на поворотах
-      timeInterval: 5000,    // также обновляемся каждые 5 сек, даже стоящим
+      distanceInterval: 3,   // 3m — точнее на поворотах
+      timeInterval: 1000,    // каждую секунду даже стоя — минимальный drift
       foregroundService: {
         notificationTitle: "Карамурт — вы на линии",
         notificationBody: "Приложение отслеживает ваше местоположение.",
@@ -743,6 +745,8 @@ export default function MainScreen() {
 
   useEffect(() => {
     loadDashboard();
+    // Init GraphHopper in background — doesn't block UI
+    void initGraphHopper();
   }, [loadDashboard]);
 
   useEffect(() => {
@@ -756,6 +760,21 @@ export default function MainScreen() {
     resetOdometer();
 
     void startTripSync(activeOrder.id).then(() => flushTripPoints(activeOrder.id));
+
+    // Independent GPS flush retry — fires every 30s even when GPS accuracy is
+    // poor (accuracy > 40m) and no new points are being queued. Without this,
+    // already-queued points can get stuck when GPS quality degrades mid-trip.
+    if (pointsRetryRef.current) clearInterval(pointsRetryRef.current);
+    pointsRetryRef.current = setInterval(() => {
+      void flushTripPoints(activeOrder.id);
+    }, 30_000);
+
+    return () => {
+      if (pointsRetryRef.current) {
+        clearInterval(pointsRetryRef.current);
+        pointsRetryRef.current = null;
+      }
+    };
   }, [activeOrder?.id, activeOrder?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Map route: build or clear depending on order status ──────────────────
@@ -876,6 +895,7 @@ export default function MainScreen() {
       if (bgOfflineTimerRef.current) clearTimeout(bgOfflineTimerRef.current);
       if (completionRetryRef.current) clearInterval(completionRetryRef.current);
       if (statusRetryRef.current) clearInterval(statusRetryRef.current);
+      if (pointsRetryRef.current) clearInterval(pointsRetryRef.current);
     };
   }, [loadDashboard, startSocketAndGPS]);
 
@@ -1169,37 +1189,58 @@ export default function MainScreen() {
     if (status === "completed") {
       playAppSound('trip_completed');
       if (!activeOrder.isFixedPrice) {
-        // GPS точки отправляем в фоне — не блокируем завершение заказа.
-        // Вариант B: clientFinalPrice — основная цена, GPS нужны только для аудита.
+        // Flush remaining GPS points to server (for audit logs)
         void flushTripPoints(activeOrder.id);
 
-        // Резервные значения с телефона — сервер использует их только если
-        // GPS-сессии нет или точек оказалось меньше 2 (плохой GPS / короткая поездка)
         const storeState = useDriverStore.getState();
-        const fallbackDist =
-          Math.round(Math.max(storeState.tripDistance, tripDistanceRef.current) * 10) / 10;
+        const kalmanDist = Math.round(Math.max(storeState.tripDistance, tripDistanceRef.current) * 10) / 10;
         const baseFare = storeState.tripBaseFare || resolveBaseFare(
           activeOrder.class,
           storeState.profile?.vehicle?.classes
         );
         const cityRate = storeState.tripCityRatePerKm || Number(activeOrder.pricePerKm) || 80;
-        // Out-of-city time fee: accumulated seconds from all past out-of-city periods
-        // + current period (if driver is still out of city at completion time).
-        // This correctly handles round trips: out → city → out → complete.
         const accSec = storeState.outOfCityAccumulatedSeconds;
         const currentOutSec = storeState.isOutOfCity && storeState.outOfCityStartTime
           ? Math.floor((Date.now() - storeState.outOfCityStartTime) / 1000)
           : 0;
         const outTimeFeeAtCompletion = Math.floor((accSec + currentOutSec) / 60) * 25;
+        const clientOutOfCityKm = storeState.outOfCityAccumulatedKm;
 
-        // Out-of-city km: accumulated across all out-of-city periods (same as time tracking)
-        const clientOutOfCityKm = storeState.outOfCityAccumulatedKm +
-          (storeState.isOutOfCity ? 0 : 0); // outOfCityAccumulatedKm already includes current period
+        // ── GraphHopper map matching ─────────────────────────────────────────
+        // Try to improve distance accuracy using offline road-network matching.
+        // Falls back to Kalman odometer if GraphHopper is unavailable.
+        let finalDistKm = kalmanDist;
+        try {
+          const allPoints = getTripPointsForMatching(activeOrder.id);
+          if (allPoints.length >= 10) {
+            const matchedKm = await matchTripPoints(allPoints);
+            if (matchedKm !== null && matchedKm > 0) {
+              // Sanity check: matched distance must be within 20% of Kalman
+              // (protects against bad map matching on unmapped rural roads)
+              const ratio = matchedKm / kalmanDist;
+              if (ratio >= 0.8 && ratio <= 1.3) {
+                finalDistKm = Math.round(matchedKm * 10) / 10;
+                console.log(`[MapMatch] Kalman=${kalmanDist} → Matched=${finalDistKm} km`);
+              } else {
+                console.log(`[MapMatch] Ratio ${ratio.toFixed(2)} out of range, using Kalman`);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[MapMatch] Failed, using Kalman:", e);
+        }
+        // ────────────────────────────────────────────────────────────────────
 
-        body.clientDistanceKm = fallbackDist;
+        const outRate = storeState.outOfCityRatePerKm || cityRate;
+        const cityKm = Math.max(0, finalDistKm - clientOutOfCityKm);
+        const matchedPrice = Math.round(
+          (baseFare + cityKm * cityRate + clientOutOfCityKm * outRate + outTimeFeeAtCompletion) / 5
+        ) * 5;
+
+        body.clientDistanceKm = finalDistKm;
         body.clientOutOfCityKm = Math.round(clientOutOfCityKm * 10) / 10;
         body.clientOutOfCitySeconds = accSec + currentOutSec;
-        body.clientFinalPrice = storeState.tripPrice + tripWaitingFee + outTimeFeeAtCompletion;
+        body.clientFinalPrice = matchedPrice + tripWaitingFee;
 
       } else {
         // Fixed-price: явно передаём цену
