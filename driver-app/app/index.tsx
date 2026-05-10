@@ -361,9 +361,9 @@ export default function MainScreen() {
   // Держим экран включённым пока водитель на линии или везёт клиента
   useEffect(() => {
     const shouldStayOn = isOnline || !!activeOrder;
-    if (shouldStayOn) {
+    if (shouldStayOn && AppState.currentState === "active") {
       activateKeepAwakeAsync().catch(() => { });
-    } else {
+    } else if (!shouldStayOn) {
       deactivateKeepAwake();
     }
   }, [isOnline, activeOrder]);
@@ -468,6 +468,10 @@ export default function MainScreen() {
     if (bgStatus !== "granted") {
       Alert.alert("Фоновый GPS", "Разрешите доступ 'Всегда' в настройках для точного подсчёта пути.");
     }
+
+    // Android 12+: foreground service can only start when app is in foreground.
+    // Socket reconnects can fire while app is in background — guard against that.
+    if (AppState.currentState !== "active") return;
 
     await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
       accuracy: Location.Accuracy.BestForNavigation,
