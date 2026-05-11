@@ -36,7 +36,12 @@ export type OsrmPoint = {
  * Returns total matched road distance in km, or null on any failure.
  */
 export async function mapMatchTotalKm(points: OsrmPoint[]): Promise<number | null> {
-  if (!OSRM_URL || points.length < 2) return null;
+  if (!OSRM_URL) {
+    console.log("[OSRM] OSRM_URL not configured — skipping map matching, using haversine");
+    return null;
+  }
+  if (points.length < 2) return null;
+  console.log(`[OSRM] Starting map matching: ${points.length} points → ${OSRM_URL}`);
 
   let totalKm = 0;
 
@@ -81,11 +86,17 @@ export async function mapMatchTotalKm(points: OsrmPoint[]): Promise<number | nul
       for (const m of data.matchings) {
         totalKm += m.distance / 1000;
       }
-    } catch {
+    } catch (e) {
+      console.warn(`[OSRM] Request failed (chunk ${i}/${points.length}):`, e);
       return null;
     }
   }
 
+  if (totalKm > 0) {
+    console.log(`[OSRM] Map matching succeeded: ${totalKm.toFixed(2)} km`);
+  } else {
+    console.warn("[OSRM] Map matching returned 0 km");
+  }
   return totalKm > 0 ? totalKm : null;
 }
 

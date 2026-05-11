@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyDriverToken } from "@/lib/driverAuth";
 import { reverseGeocode } from "@/lib/geocoder";
 import { isDeliveryOrder } from "@/lib/orderPricing";
-import { completeSession } from "@/lib/tripDistance";
+import { calculateSessionDistance, completeSession } from "@/lib/tripDistance";
 import { getOrCreateTripSession } from "@/lib/tripSession";
 
 const BASE_FARE = 290;
@@ -174,28 +174,81 @@ export async function PATCH(
           sessionOutOfCityRate = Number(rr[0]?.r ?? 0);
         } catch { /* column not yet created */ }
 
-        // ── CLIENT-AUTHORITATIVE PRICE & DISTANCE ────────────────────────────
-        // The Kalman odometer on the device accumulates distance in real-time.
-        // GPS points sent to server are for audit logs only — may be incomplete
-        // due to weak network in rural areas. Server validates the minimum floor
-        // (clientFinalPrice >= sessionBaseFare) and saves the client values.
+        // ── PARALLEL CLIENT + SERVER CALCULATION ─────────────────────────────
+        // Client: Kalman odometer + GraphHopper map matching (real-time, shown to driver)
+        // Server: GPS points from DB via haversine + OSRM (fraud detection)
+        //
+        // Final price = client price (if valid and server agrees within 20%)
+        // Fraud flag  = if client distance > server distance by more than 20%
         const clientPriceIsValid = clientFinalPrice !== undefined
           && clientFinalPrice >= sessionBaseFare;
 
-        const finalPrice  = clientPriceIsValid
+        let finalDistKm = clientDistanceKm ?? 0;
+        let finalPrice  = clientPriceIsValid
           ? clientFinalPrice!
           : (sessionBaseFare + midTripWaitFee);
-        const finalDistKm = clientDistanceKm ?? 0;
 
-        const bOutCityKm  = clientOutOfCityKm  ?? 0;
-        const bOutCitySec = clientOutOfCitySeconds ?? 0;
-        const bCityKm     = Math.max(0, finalDistKm - bOutCityKm);
+        let bOutCityKm  = clientOutOfCityKm  ?? 0;
+        let bOutCitySec = clientOutOfCitySeconds ?? 0;
+        let isSuspicious = false;
 
-        console.log(`[trip/complete] client: dist=${finalDistKm} price=${finalPrice} outKm=${bOutCityKm}`);
+        try {
+          const serverCalc = await calculateSessionDistance(activeSession.id);
+
+          if (serverCalc.distanceKm > 0) {
+            const serverDistKm = serverCalc.distanceKm;
+            const serverPrice  = Math.max(serverCalc.finalPrice, sessionBaseFare) + midTripWaitFee;
+
+            // Fraud check: client claims significantly more distance than GPS trace shows.
+            // Requires enough server-side points to be meaningful — offline trips may
+            // have partial GPS uploads (weak network), which would cause false positives.
+            // Rule: need at least 1 point per 10 seconds of trip (rough coverage check).
+            const clientDist = clientDistanceKm ?? 0;
+            const tripSec = order.startedAt
+              ? (Date.now() - new Date(order.startedAt).getTime()) / 1000
+              : 0;
+            const minPointsNeeded = Math.max(10, Math.floor(tripSec / 10));
+            const hasEnoughPoints = serverCalc.pointsUsed >= minPointsNeeded;
+
+            if (hasEnoughPoints && clientDist > 0 && serverDistKm > 0) {
+              const ratio = clientDist / serverDistKm;
+              if (ratio > 1.20) {
+                isSuspicious = true;
+                console.warn(`[fraud] order=${orderId} client=${clientDist}km server=${serverDistKm}km ratio=${ratio.toFixed(2)} points=${serverCalc.pointsUsed}/${minPointsNeeded}`);
+              }
+            } else if (!hasEnoughPoints) {
+              console.log(`[trip/complete] Skipping fraud check — insufficient GPS points: ${serverCalc.pointsUsed}/${minPointsNeeded}`);
+            }
+
+            // Distance: take max (client has real-time Kalman, server may have gaps from weak network)
+            finalDistKm = Math.max(finalDistKm, serverDistKm);
+
+            // Price: if client is suspicious, use server price; otherwise use max
+            if (isSuspicious) {
+              finalPrice = serverPrice;
+            } else {
+              finalPrice = clientPriceIsValid
+                ? Math.max(clientFinalPrice!, serverPrice)
+                : serverPrice;
+            }
+
+            // Zone breakdown: prefer server data (PostGIS is authoritative)
+            bOutCityKm  = serverCalc.outOfCityKm  > 0 ? serverCalc.outOfCityKm  : bOutCityKm;
+            bOutCitySec = serverCalc.outOfCitySeconds > 0 ? serverCalc.outOfCitySeconds : bOutCitySec;
+          }
+
+          console.log(`[trip/complete] client=${clientDistanceKm}km/${clientFinalPrice}₸ server=${serverCalc.distanceKm}km/${serverCalc.finalPrice}₸ → final=${finalDistKm}km/${finalPrice}₸ suspicious=${isSuspicious}`);
+        } catch (err) {
+          // Server calc failed (no GPS points or OSRM error) — use client values
+          console.warn("[trip/complete] Server calc failed, using client values:", err);
+        }
+
+        const bCityKm = Math.max(0, finalDistKm - bOutCityKm);
 
         await completeSession(activeSession.id, finalDistKm, finalPrice, bOutCityKm, bOutCitySec);
         updateData.distanceKm = finalDistKm;
         updateData.finalPrice  = finalPrice;
+        if (isSuspicious) (updateData as any).isSuspicious = true;
 
         (updateData as any)._breakdown = {
           baseFare:         sessionBaseFare,

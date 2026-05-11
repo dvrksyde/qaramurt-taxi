@@ -167,7 +167,7 @@ export async function calculateSessionDistance(sessionId: number): Promise<TripC
   if (haversineTotal > 0) {
     const goodPts = pts.filter(p => {
       const acc = Number(p.accuracy_m ?? 0);
-      return !(acc > 50 && acc > 0);
+      return !(acc > 25 && acc > 0); // matches client-side MAX_ACCURACY_M threshold
     });
     const matchedTotal = await mapMatchTotalKm(
       goodPts.map(p => ({
@@ -180,9 +180,14 @@ export async function calculateSessionDistance(sessionId: number): Promise<TripC
     if (matchedTotal !== null) {
       const factor = matchedTotal / haversineTotal;
       if (factor >= FACTOR_MIN && factor <= FACTOR_MAX) {
+        console.log(`[tripDistance] OSRM factor=${factor.toFixed(3)} haversine=${haversineTotal.toFixed(2)}km → matched=${matchedTotal.toFixed(2)}km`);
         cityKm      *= factor;
         outOfCityKm *= factor;
+      } else {
+        console.warn(`[tripDistance] OSRM factor=${factor.toFixed(3)} out of range [${FACTOR_MIN}-${FACTOR_MAX}], using haversine`);
       }
+    } else {
+      console.log(`[tripDistance] OSRM unavailable — using haversine: ${haversineTotal.toFixed(2)}km`);
     }
   }
 

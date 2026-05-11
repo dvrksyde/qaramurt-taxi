@@ -62,10 +62,10 @@ export function resetOdometer(): void {
 }
 
 // ─── Thresholds ────────────────────────────────────────────────────────────────
-const MAX_ACCURACY_M      = 40;    // Ignore GPS fix worse than 40m
-const MAX_SPEED_KMH       = 140;   // Physically impossible → GPS glitch
+const MAX_ACCURACY_M      = 25;    // Ignore GPS fix worse than 25m (teacher rec.)
+const MAX_SPEED_KMH       = 120;   // 120 km/h cap (teacher rec.) → GPS glitch
 const MIN_DISTANCE_KM     = 0.010; // 10m — don't count micro-movements
-const MAX_DISTANCE_KM     = 0.150; // 150m max per step (was 300m — too loose)
+const MAX_DISTANCE_KM     = 0.040; // 40m at 1s GPS (120 km/h × 1s = 33m + buffer)
 const STATIONARY_SPEED    = 2.0;   // m/s (~7.2 km/h) — below this = stopped
 const STATIONARY_DIST_KM  = 0.020; // 20m — drift while parked, don't count
 const MAX_GAP_MS          = 30_000; // 30 sec gap → re-anchor (was 45s)
@@ -127,17 +127,30 @@ export function processGpsPoint(
   }
 
   // ── 7. Distance range filter ───────────────────────────────────────────────
-  if (d < MIN_DISTANCE_KM || d > MAX_DISTANCE_KM) {
+  // GPS chip speed (speedMs) is more reliable than position delta at slow speeds.
+  // If the chip confirms the car IS moving (> 3.6 km/h), count even small steps —
+  // otherwise traffic jams and slow streets are silently dropped.
+  const reportedSpeedKmh = speedMs !== null ? speedMs * 3.6 : null;
+  const chipConfirmsMoving = reportedSpeedKmh !== null && reportedSpeedKmh > 3.6;
+
+  if (d > MAX_DISTANCE_KM) {
+    // Too large — GPS teleport
     state.kalman = smoothed;
     state.lastTimestamp = timestamp;
-    // Still return smoothed coords — valid position, just not counted for distance
+    return { d: 0, smoothedLat: null, smoothedLng: null };
+  }
+
+  if (d < MIN_DISTANCE_KM && !chipConfirmsMoving) {
+    // Tiny movement AND chip says slow/stopped → GPS jitter at rest, skip
+    state.kalman = smoothed;
+    state.lastTimestamp = timestamp;
     return { d: 0, smoothedLat: smoothed.lat, smoothedLng: smoothed.lng };
   }
 
   // ── 8. Stationary detector ─────────────────────────────────────────────────
-  const reportedSpeedKmh = speedMs !== null ? speedMs * 3.6 : null;
+  // Only filter as stationary if chip explicitly reports stopped (< 1 km/h).
   const isStationary =
-    speedMs !== null && speedMs < STATIONARY_SPEED && d < STATIONARY_DIST_KM;
+    speedMs !== null && speedMs < 0.3 && d < STATIONARY_DIST_KM;
   const isSpeedDistanceConflict =
     reportedSpeedKmh !== null &&
     reportedSpeedKmh < 10 &&
