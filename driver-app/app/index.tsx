@@ -531,10 +531,10 @@ export default function MainScreen() {
 
     // Auto-reconnect: re-register driver room after reconnect (e.g. after bg kill)
     // Also flush any pending offline ops — network is back.
-    sock.on("connect", () => {
+    sock.on("connect", async () => {
       sock.emit("driver_connect", driverId);
+      await syncPendingStatus();      // статус сначала — иначе loadDashboard перезапишет
       void syncPendingCompletion();
-      void syncPendingStatus();
     });
 
     sock.on("new_order_alert", (data: any) => {
@@ -867,13 +867,13 @@ export default function MainScreen() {
           }
         }
 
-        // Sync any pending completion FIRST, so loadDashboard sees the correct
-        // order state (completed) rather than stale in_progress from server.
+        // Sync pending statuses FIRST before loadDashboard — otherwise loadDashboard
+        // fetches stale server state (e.g. "arrived") and overwrites local "in_progress".
         void (async () => {
+          await syncPendingStatus();           // arrived / in_progress → server first
           const ok = await syncPendingCompletion();
-          // If sync succeeded, server now shows completed — clear the race guard
           if (ok) completedOrderIdRef.current = null;
-          loadDashboard();
+          loadDashboard();                     // now server state is correct
         })();
       }
       // ✅ FIX 2: NEVER auto-go-offline. Driver works full day, app can be in background.
@@ -1131,6 +1131,12 @@ export default function MainScreen() {
     if (!activeOrder || activeOrder.status !== "in_progress") return;
 
     setLoading(true);
+
+    // Sync pending in_progress status to server first.
+    // If in_progress PATCH failed earlier (offline/timeout), server still shows "arrived"
+    // and the waiting API would reject with "not active trip" error.
+    await syncPendingStatus();
+
     const res = await api(`/api/driver/orders/${activeOrder.id}/waiting`, {
       method: "PATCH",
       body: JSON.stringify({ action }),
@@ -1261,11 +1267,13 @@ export default function MainScreen() {
     }
 
     setLoading(true);
+    console.log(`[status] PATCH ${status} for order ${activeOrder.id}`, JSON.stringify(body).slice(0, 200));
     const res = await api(`/api/driver/orders/${activeOrder.id}/status`, {
       method: "PATCH",
       body: JSON.stringify(body),
     });
     setLoading(false);
+    console.log(`[status] Response for ${status}:`, res.error ? `ERROR: ${res.error}` : "OK");
 
     if (res.error) {
       if (status === "completed") {

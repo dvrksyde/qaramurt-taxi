@@ -298,13 +298,21 @@ export async function PATCH(
     });
   }
 
-  // ── Extract _breakdown BEFORE Prisma transaction ────────────────────────────
-  // _breakdown is NOT a column in the Order model — it's only used for the
-  // API response (driver app summary modal). Passing it to Prisma would throw
-  // PrismaClientValidationError and silently fail the entire transaction,
-  // leaving the order status stuck at "in_progress" in the database.
-  const tripBreakdownForResponse = (updateData as any)._breakdown ?? null;
+  // ── Extract response-only fields BEFORE Prisma transaction ─────────────────
+  // These fields are NOT columns in the Order model — they're returned to the
+  // driver app in the response body only. Passing them to Prisma throws
+  // PrismaClientValidationError and fails the entire transaction silently.
+  const tripBreakdownForResponse = (updateData as any)._breakdown   ?? null;
+  const sessionIdForResponse     = (updateData as any)._sessionId   ?? undefined;
+  const baseFareForResponse      = (updateData as any)._baseFare    ?? undefined;
+  const cityRateForResponse      = (updateData as any)._cityRate    ?? undefined;
+  const outOfCityRateForResponse = (updateData as any)._outOfCityRate ?? undefined;
+
   delete (updateData as any)._breakdown;
+  delete (updateData as any)._sessionId;
+  delete (updateData as any)._baseFare;
+  delete (updateData as any)._cityRate;
+  delete (updateData as any)._outOfCityRate;
   // ──────────────────────────────────────────────────────────────────────────
 
   await prisma.$transaction(async (tx) => {
@@ -412,10 +420,10 @@ export async function PATCH(
       waitingAccumulatedSeconds: finalOrder?.waitingAccumulatedSeconds ?? 0,
       breakdown: status === "completed" ? (tripBreakdownForResponse ?? null) : undefined,
       // Session + rates for in_progress — app sets them synchronously (no async getTripRates needed)
-      _sessionId:    (updateData as any)._sessionId    ?? undefined,
-      _baseFare:     (updateData as any)._baseFare     ?? undefined,
-      _cityRate:     (updateData as any)._cityRate     ?? undefined,
-      _outOfCityRate:(updateData as any)._outOfCityRate?? undefined,
+      _sessionId:    sessionIdForResponse,
+      _baseFare:     baseFareForResponse,
+      _cityRate:     cityRateForResponse,
+      _outOfCityRate: outOfCityRateForResponse,
     },
   });
 }
