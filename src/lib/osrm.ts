@@ -15,9 +15,11 @@ const CHUNK_SIZE = 99;
 const FETCH_TIMEOUT_MS = 5_000;
 
 // Sanity bounds for the correction factor: road distance must be
-// between 80 % and 200 % of the straight-line haversine distance.
+// between 80 % and 250 % of the straight-line haversine distance.
+// Raised upper bound from 200% to 250% — rural roads around Qaramurt/Shymkent
+// are often windy, making road distance legitimately 2x+ the straight-line.
 const FACTOR_MIN = 0.8;
-const FACTOR_MAX = 2.0;
+const FACTOR_MAX = 2.5;
 
 type OsrmMatchResponse = {
   code: string;

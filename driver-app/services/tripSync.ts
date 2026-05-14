@@ -236,9 +236,50 @@ export async function getTripRates(orderId: number): Promise<{
   };
 }
 
-/** Returns all GPS points for a trip — used by GraphHopper map matching at trip end */
+/**
+ * Returns pre-filtered GPS points for GraphHopper map matching at trip end.
+ *
+ * Teacher recommendation: filter BEFORE matching so HMM gets clean data:
+ *   1. accuracy > 25m → skip (cell tower positions, not GPS)
+ *   2. implied speed > 120 km/h between consecutive points → skip (GPS jump)
+ *   3. distance < 10m from previous kept point → skip (stationary GPS noise)
+ *
+ * After these filters, map matching (HMM) handles remaining road-snapping.
+ */
 export function getTripPointsForMatching(orderId: number): Array<{ lat: number; lng: number }> {
-  return dbGetAllPoints(orderId).map(p => ({ lat: p.lat, lng: p.lng }));
+  const all = dbGetAllPoints(orderId);
+  if (all.length < 2) return all.map(p => ({ lat: p.lat, lng: p.lng }));
+
+  const filtered: Array<{ lat: number; lng: number; capturedAt: string }> = [];
+
+  for (const p of all) {
+    // 1. accuracy > 25m → skip
+    if (p.accuracyM !== null && p.accuracyM > 25) continue;
+
+    if (filtered.length > 0) {
+      const prev = filtered[filtered.length - 1];
+      const dLat = (p.lat - prev.lat) * (Math.PI / 180);
+      const dLng = (p.lng - prev.lng) * (Math.PI / 180);
+      const a = Math.sin(dLat / 2) ** 2 +
+        Math.cos(prev.lat * Math.PI / 180) * Math.cos(p.lat * Math.PI / 180) *
+        Math.sin(dLng / 2) ** 2;
+      const distKm = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+      // 3. < 10m → stationary GPS noise
+      if (distKm < 0.010) continue;
+
+      // 2. implied speed > 120 km/h → GPS jump
+      const dtMs = new Date(p.capturedAt).getTime() - new Date(prev.capturedAt).getTime();
+      if (dtMs > 0) {
+        const impliedSpeedKmh = distKm / (dtMs / 3_600_000);
+        if (impliedSpeedKmh > 120) continue;
+      }
+    }
+
+    filtered.push({ lat: p.lat, lng: p.lng, capturedAt: p.capturedAt });
+  }
+
+  return filtered.map(p => ({ lat: p.lat, lng: p.lng }));
 }
 
 export async function clearTripSync(orderId?: number): Promise<void> {

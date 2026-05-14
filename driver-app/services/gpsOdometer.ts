@@ -1,15 +1,18 @@
 /**
- * Smart GPS Odometer — Фаза 2 (anti-teleport hardening)
+ * Smart GPS Odometer — Фаза 3 (adaptive distance cap)
  *
- * ИСПРАВЛЕНЫ критические баги из-за которых накапливались фантомные км:
- *
- *   Bug 1: Kalman-фильтр обновлял своё состояние даже при плохой точности GPS
- *          → постепенно "сползал" к неправильным координатам (вышка сотовой связи)
- *          → каждый следующий шаг измерялся от неправильной позиции → +46 км
+ * Фаза 2 исправления:
+ *   Bug 1: Kalman-фильтр обновлял состояние при плохой точности → drift
  *   Bug 2: Нет проверки конфликта скорость-расстояние
- *          → GPS говорит "стоим" (0 км/ч) но координата прыгнула на 200м → считается
- *   Bug 3: MAX_DISTANCE_KM = 300м слишком мягко, урезаем до 150м
- *   Bug 4: MAX_GAP_MS = 45сек слишком долго, GPS может выдать прыжок после 30сек паузы
+ *
+ * Фаза 3 исправления:
+ *   Bug 3: MAX_DISTANCE_KM = 40м — СЛИШКОМ ЖЁСТКО. При 60 км/ч + 2–3с задержка GPS
+ *          (Android Doze, переключение приложений) шаг = 50–80м → дропался.
+ *          → НЕДОРАСЧЁТ дистанции — реальные км не считались.
+ *          FIX: адаптивный лимит = MAX_SPEED × gapTime × 1.3
+ *   Bug 4: chipConfirmsMoving = false при speedMs === null
+ *          → на устройствах без GPS speed пробки полностью терялись
+ *          FIX: если speed = null, не блокируем шаги > MIN_DISTANCE
  */
 
 // ─── Haversine ─────────────────────────────────────────────────────────────────
@@ -65,10 +68,32 @@ export function resetOdometer(): void {
 const MAX_ACCURACY_M      = 25;    // Ignore GPS fix worse than 25m (teacher rec.)
 const MAX_SPEED_KMH       = 120;   // 120 km/h cap (teacher rec.) → GPS glitch
 const MIN_DISTANCE_KM     = 0.010; // 10m — don't count micro-movements
-const MAX_DISTANCE_KM     = 0.040; // 40m at 1s GPS (120 km/h × 1s = 33m + buffer)
+// Phase 3: MAX_DISTANCE is now DYNAMIC — see computeMaxDistKm() below.
+// Old fixed 40m was too strict for 60+ km/h with 2–3s GPS gaps.
+const MIN_MAX_DIST_KM     = 0.040; // Floor: 40m (1s at 120 km/h = 33m + buffer)
+const ABS_MAX_DIST_KM     = 0.300; // Ceiling: 300m (safety net against teleports)
 const STATIONARY_SPEED    = 2.0;   // m/s (~7.2 km/h) — below this = stopped
 const STATIONARY_DIST_KM  = 0.020; // 20m — drift while parked, don't count
 const MAX_GAP_MS          = 30_000; // 30 sec gap → re-anchor (was 45s)
+
+/**
+ * Compute the maximum plausible distance for this GPS step,
+ * based on the actual time elapsed since the previous reading.
+ *
+ * Formula: MAX_SPEED_KMH × (gapMs / 3_600_000) × 1.3 (30% buffer for curves)
+ * Clamped to [MIN_MAX_DIST_KM, ABS_MAX_DIST_KM].
+ *
+ * Examples:
+ *   1s gap → 120 × 0.000278 × 1.3 = 0.043 km (43m)
+ *   2s gap → 120 × 0.000556 × 1.3 = 0.087 km (87m) — previously dropped!
+ *   3s gap → 120 × 0.000833 × 1.3 = 0.130 km (130m) — previously dropped!
+ *   5s gap → 120 × 0.001389 × 1.3 = 0.217 km (217m)
+ */
+function computeMaxDistKm(gapMs: number): number {
+  if (gapMs <= 0) return MIN_MAX_DIST_KM;
+  const maxPlausible = MAX_SPEED_KMH * (gapMs / 3_600_000) * 1.3;
+  return Math.max(MIN_MAX_DIST_KM, Math.min(maxPlausible, ABS_MAX_DIST_KM));
+}
 
 export type GpsProcessResult = {
   d: number;                    // distance increment km (0 = not counted)
@@ -127,21 +152,27 @@ export function processGpsPoint(
   }
 
   // ── 7. Distance range filter ───────────────────────────────────────────────
+  // Phase 3: dynamic max distance based on actual time gap.
   // GPS chip speed (speedMs) is more reliable than position delta at slow speeds.
-  // If the chip confirms the car IS moving (> 3.6 km/h), count even small steps —
-  // otherwise traffic jams and slow streets are silently dropped.
+  // If the chip confirms the car IS moving (> 3.6 km/h), count even small steps.
+  // If speed is unknown (null), still count steps above MIN_DISTANCE — don't
+  // penalize devices that don't report GPS speed (common on budget Androids).
   const reportedSpeedKmh = speedMs !== null ? speedMs * 3.6 : null;
-  const chipConfirmsMoving = reportedSpeedKmh !== null && reportedSpeedKmh > 3.6;
+  const chipConfirmsMoving = reportedSpeedKmh !== null ? reportedSpeedKmh > 3.6 : null;
+  // null = unknown (device doesn't report speed) — don't block valid steps
 
-  if (d > MAX_DISTANCE_KM) {
-    // Too large — GPS teleport
+  const maxDistKm = computeMaxDistKm(gapMs);
+
+  if (d > maxDistKm) {
+    // Too large for the elapsed time — GPS teleport
     state.kalman = smoothed;
     state.lastTimestamp = timestamp;
     return { d: 0, smoothedLat: null, smoothedLng: null };
   }
 
-  if (d < MIN_DISTANCE_KM && !chipConfirmsMoving) {
-    // Tiny movement AND chip says slow/stopped → GPS jitter at rest, skip
+  if (d < MIN_DISTANCE_KM && chipConfirmsMoving === false) {
+    // Tiny movement AND chip EXPLICITLY says slow/stopped → GPS jitter at rest, skip
+    // Note: chipConfirmsMoving === null (unknown speed) → do NOT skip, count the step
     state.kalman = smoothed;
     state.lastTimestamp = timestamp;
     return { d: 0, smoothedLat: smoothed.lat, smoothedLng: smoothed.lng };

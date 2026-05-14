@@ -165,10 +165,34 @@ export async function calculateSessionDistance(sessionId: number): Promise<TripC
   // factor on the haversine totals so that city/out-of-city split is preserved.
   const haversineTotal = cityKm + outOfCityKm;
   if (haversineTotal > 0) {
-    const goodPts = pts.filter(p => {
+    // Pre-filter points before OSRM (teacher rec.):
+    //   1. accuracy > 25m → skip (cell tower, not GPS)
+    //   2. implied speed > 120 km/h → skip (GPS jump)
+    //   3. distance < 10m from previous → skip (stationary noise)
+    const goodPts: typeof pts = [];
+    for (const p of pts) {
       const acc = Number(p.accuracy_m ?? 0);
-      return !(acc > 25 && acc > 0); // matches client-side MAX_ACCURACY_M threshold
-    });
+      if (acc > 25 && acc > 0) continue; // matches client-side MAX_ACCURACY_M
+
+      if (goodPts.length > 0) {
+        const prev = goodPts[goodPts.length - 1];
+        const segDist = haversineKm(
+          Number(prev.lat), Number(prev.lng),
+          Number(p.lat), Number(p.lng)
+        );
+        // Skip stationary GPS noise (< 10m)
+        if (segDist < 0.010) continue;
+        // Skip GPS jumps (> 120 km/h)
+        const prevTime = prev.captured_at ? new Date(prev.captured_at).getTime() : 0;
+        const currTime = p.captured_at ? new Date(p.captured_at).getTime() : 0;
+        if (prevTime > 0 && currTime > prevTime) {
+          const dtHours = (currTime - prevTime) / 3_600_000;
+          if (dtHours > 0 && segDist / dtHours > 120) continue;
+        }
+      }
+
+      goodPts.push(p);
+    }
     const matchedTotal = await mapMatchTotalKm(
       goodPts.map(p => ({
         lat: p.lat,
@@ -180,7 +204,7 @@ export async function calculateSessionDistance(sessionId: number): Promise<TripC
     if (matchedTotal !== null) {
       const factor = matchedTotal / haversineTotal;
       if (factor >= FACTOR_MIN && factor <= FACTOR_MAX) {
-        console.log(`[tripDistance] OSRM factor=${factor.toFixed(3)} haversine=${haversineTotal.toFixed(2)}km → matched=${matchedTotal.toFixed(2)}km`);
+        console.log(`[tripDistance] OSRM factor=${factor.toFixed(3)} haversine=${haversineTotal.toFixed(2)}km → matched=${matchedTotal.toFixed(2)}km (${goodPts.length}/${pts.length} pts)`);
         cityKm      *= factor;
         outOfCityKm *= factor;
       } else {

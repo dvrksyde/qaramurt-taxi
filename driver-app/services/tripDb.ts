@@ -98,10 +98,22 @@ export function dbGetBatch(orderId: number, limit: number): PointRow[] {
 }
 
 /** All points for the trip — used by GraphHopper map matching at trip end */
-export function dbGetAllPoints(orderId: number): Array<{ lat: number; lng: number; capturedAt: string }> {
+export function dbGetAllPoints(orderId: number): Array<{
+  lat: number;
+  lng: number;
+  capturedAt: string;
+  accuracyM: number | null;
+  speedKmh: number | null;
+}> {
   try {
-    return getDb().getAllSync<{ lat: number; lng: number; capturedAt: string }>(
-      `SELECT lat, lng, capturedAt
+    return getDb().getAllSync<{
+      lat: number;
+      lng: number;
+      capturedAt: string;
+      accuracyM: number | null;
+      speedKmh: number | null;
+    }>(
+      `SELECT lat, lng, capturedAt, accuracyM, speedKmh
        FROM trip_points
        WHERE orderId = ?
        ORDER BY sequenceNumber ASC`,
